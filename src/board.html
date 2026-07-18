@@ -237,29 +237,36 @@
       transform: rotate(225deg); margin-bottom: -2px;
     }
     details.group .group-body {
-      display: flex; flex-direction: column; gap: 8px;
-      padding-bottom: 2px;
+      display: flex; flex-direction: column; gap: 10px;
+      padding-bottom: 4px;
     }
 
-    .side h2 {
-      margin: 0; font-size: 11px; color: var(--muted);
-      font-weight: 600; letter-spacing: 0.06em;
+    .players {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
     }
-    .card {
-      background: var(--card); border: 1px solid var(--card-border);
-      border-radius: var(--radius-sm); padding: 10px 12px;
-      display: flex; flex-direction: column; gap: 5px;
+    .player {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      background: var(--btn-ghost);
+      border: 1px solid var(--card-border);
+      min-width: 0;
     }
-    .row { display: flex; align-items: center; gap: 8px; }
+    .player-title {
+      font-size: 12px; font-weight: 600; line-height: 1.2;
+      display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+    }
+    .player .muted { font-size: 11px; margin-top: 2px; }
+    .player .grow { min-width: 0; flex: 1; }
     .stone {
-      width: 16px; height: 16px; border-radius: 50%;
+      width: 15px; height: 15px; border-radius: 50%;
       box-shadow: 0 1px 3px rgba(0,0,0,.35); flex-shrink: 0;
     }
     .stone.black { background: radial-gradient(circle at 35% 30%, #555, #111 60%, #000); }
     .stone.white { background: radial-gradient(circle at 35% 30%, #fff, #eee 55%, #c8c8c8); }
     [data-theme="notebook"] .stone {
       box-shadow: none; border-radius: 0; background: transparent !important;
-      display: grid; place-items: center; font-size: 14px; line-height: 1; color: #2a3140;
+      display: grid; place-items: center; font-size: 13px; line-height: 1; color: #2a3140;
     }
     [data-theme="notebook"] .stone.black::after { content: "△"; }
     [data-theme="notebook"] .stone.white::after { content: "○"; }
@@ -280,23 +287,46 @@
     [data-theme="notebook"] .seg button.active {
       background: color-mix(in srgb, var(--accent) 16%, var(--btn));
     }
-    .grow { flex: 1; }
     .badge {
-      font-size: 10px; padding: 2px 8px; border-radius: 999px;
+      font-size: 9px; padding: 1px 6px; border-radius: 999px;
       background: color-mix(in srgb, var(--accent) 85%, #000);
-      color: #1a120a; font-weight: 650;
+      color: #1a120a; font-weight: 650; letter-spacing: 0.02em;
     }
     [data-theme="day"] .badge,
     [data-theme="notebook"] .badge { color: #fff; }
     .muted { color: var(--muted); font-size: 12px; }
+    .meta-line {
+      font-size: 12px; color: var(--muted); line-height: 1.4;
+      display: flex; flex-wrap: wrap; gap: 4px 0; align-items: baseline;
+    }
+    .meta-line strong.num { color: var(--text); font-weight: 600; }
+    .meta-line .dot { margin: 0 6px; opacity: 0.45; }
     .meta { font-size: 12px; line-height: 1.55; color: var(--text); }
     .meta span { color: var(--muted); }
     .meta strong.num { font-weight: 600; }
-    .seg { display: flex; gap: 4px; flex-wrap: wrap; }
+
+    .field {
+      display: grid;
+      grid-template-columns: 40px 1fr;
+      gap: 8px;
+      align-items: center;
+    }
+    .field-label {
+      font-size: 11px; font-weight: 600; color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .field.stack {
+      grid-template-columns: 1fr;
+      gap: 6px;
+      align-items: stretch;
+    }
+    .field.stack .field-label { font-size: 11px; }
+
+    .seg { display: flex; gap: 4px; flex-wrap: nowrap; min-width: 0; }
     .seg button {
       flex: 1; min-width: 0;
       appearance: none; border: 1px solid transparent; border-radius: var(--radius-sm);
-      padding: 8px 6px; font: inherit; font-size: 12px; font-weight: 500;
+      padding: 7px 4px; font: inherit; font-size: 12px; font-weight: 500;
       background: var(--btn); color: var(--text); cursor: pointer;
       transition: background .15s var(--ease), border-color .15s, transform .12s;
     }
@@ -307,27 +337,47 @@
       background: color-mix(in srgb, var(--accent) 18%, var(--btn));
       color: var(--text);
     }
+    .theme-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
+    }
+    .theme-grid button { flex: none; padding: 8px 4px; }
+
     .btns { display: flex; flex-direction: column; gap: 6px; }
+    .btns.inline {
+      flex-direction: row; gap: 6px;
+    }
+    .btns.inline .block { flex: 1; text-align: center; }
     .side button.block {
       appearance: none; border: 1px solid var(--card-border); border-radius: var(--radius-sm);
-      padding: 10px 12px; font: inherit; font-size: 13px; font-weight: 500;
+      padding: 9px 12px; font: inherit; font-size: 13px; font-weight: 500;
       background: var(--btn); color: var(--text);
       cursor: pointer; text-align: left; width: 100%;
       transition: background .15s var(--ease), transform .12s;
     }
     .side button.block:hover { background: var(--btn-hover); }
     .side button.block:active { transform: scale(0.98); }
-    .side button.block.active {
-      border-color: color-mix(in srgb, var(--accent) 50%, transparent);
-    }
     .side button.block.primary {
       background: linear-gradient(180deg, #f0d2a8, #d4a574);
       color: #2a1c10; font-weight: 600; border-color: transparent;
     }
     .side button.block:disabled { opacity: .35; cursor: default; transform: none; }
+    .side button.block.ghost {
+      background: transparent; border-color: transparent;
+      color: var(--muted); font-size: 12px; padding: 6px 4px;
+      text-align: center;
+    }
+    .side button.block.ghost:hover {
+      background: var(--btn-ghost); color: var(--text);
+    }
+    .side-foot {
+      margin-top: auto;
+      padding-top: 10px;
+      border-top: 1px solid var(--card-border);
+      display: flex; flex-direction: column; gap: 4px;
+    }
     .footer {
-      margin-top: auto; color: var(--muted); font-size: 11px; line-height: 1.55;
-      padding-top: 8px; border-top: 1px solid var(--card-border);
+      color: var(--muted); font-size: 11px; line-height: 1.45;
+      text-align: center; padding: 2px 0 0;
     }
     .toast {
       position: absolute; left: 50%; bottom: 24px; z-index: 40;
@@ -409,31 +459,38 @@
 
     <aside class="side" id="side" aria-label="对局面板">
       <details class="group" open>
-        <summary>对局</summary>
+        <summary>本局</summary>
         <div class="group-body">
-          <div class="card">
-            <div class="row">
-              <span class="stone black"></span>
-              <span class="grow">黑棋</span>
-              <span class="badge" id="black-turn" hidden>行棋</span>
+          <div class="players">
+            <div class="player">
+              <span class="stone black" aria-hidden="true"></span>
+              <div class="grow">
+                <div class="player-title">
+                  黑棋
+                  <span class="badge" id="black-turn" hidden>行棋</span>
+                </div>
+                <div class="muted" id="black-role">你</div>
+              </div>
             </div>
-            <div class="muted" id="black-role">你</div>
-          </div>
-          <div class="card">
-            <div class="row">
-              <span class="stone white"></span>
-              <span class="grow">白棋</span>
-              <span class="badge" id="white-turn" hidden>行棋</span>
+            <div class="player">
+              <span class="stone white" aria-hidden="true"></span>
+              <div class="grow">
+                <div class="player-title">
+                  白棋
+                  <span class="badge" id="white-turn" hidden>行棋</span>
+                </div>
+                <div class="muted" id="white-role">电脑</div>
+              </div>
             </div>
-            <div class="muted" id="white-role">电脑</div>
           </div>
-          <div class="card meta">
-            <div><span>手数</span> · <strong class="num" id="info-moves">0</strong></div>
-            <div><span>用时</span> · <strong class="num" id="info-time">00:00</strong></div>
-            <div><span>开始</span> · <strong class="num" id="info-start">—</strong></div>
-            <div id="save-hint" class="muted">自动存档已开启</div>
+          <div class="meta-line">
+            <strong class="num" id="info-moves">0</strong>&nbsp;手
+            <span class="dot">·</span>
+            <strong class="num" id="info-time">00:00</strong>
+            <span class="dot">·</span>
+            <span id="save-hint">自动存档</span>
           </div>
-          <div class="btns">
+          <div class="btns inline">
             <button type="button" class="block" id="undo2" disabled>悔棋</button>
             <button type="button" class="block primary" id="reset2">新局</button>
           </div>
@@ -441,39 +498,60 @@
       </details>
 
       <details class="group" open>
-        <summary>设置</summary>
+        <summary>对局设置</summary>
         <div class="group-body">
-          <div class="seg" id="mode-seg">
-            <button type="button" data-mode="ai" class="active">人机</button>
-            <button type="button" data-mode="pvp">双人</button>
+          <div class="field">
+            <span class="field-label">模式</span>
+            <div class="seg" id="mode-seg">
+              <button type="button" data-mode="ai" class="active">人机</button>
+              <button type="button" data-mode="pvp">双人</button>
+            </div>
           </div>
-          <div class="seg" id="diff-seg">
-            <button type="button" data-diff="easy">简单</button>
-            <button type="button" data-diff="normal" class="active">普通</button>
-            <button type="button" data-diff="hard">困难</button>
+          <div class="field" id="diff-field">
+            <span class="field-label">难度</span>
+            <div class="seg" id="diff-seg">
+              <button type="button" data-diff="easy">简单</button>
+              <button type="button" data-diff="normal" class="active">普通</button>
+              <button type="button" data-diff="hard">困难</button>
+            </div>
           </div>
-          <div class="seg" id="color-seg">
-            <button type="button" data-human="b" class="active">执黑</button>
-            <button type="button" data-human="w">执白</button>
-          </div>
-          <div class="seg" id="theme-seg">
-            <button type="button" data-theme="wood" class="active">木盘</button>
-            <button type="button" data-theme="night">夜盘</button>
-            <button type="button" data-theme="day">日间</button>
-            <button type="button" data-theme="notebook">本子</button>
-          </div>
-          <div class="seg" id="opt-seg">
-            <button type="button" id="opt-sound" class="active" title="落子音效">音效开</button>
-            <button type="button" id="opt-fullscreen" title="全屏 (F)">全屏</button>
+          <div class="field" id="color-field">
+            <span class="field-label">执子</span>
+            <div class="seg" id="color-seg">
+              <button type="button" data-human="b" class="active">执黑</button>
+              <button type="button" data-human="w">执白</button>
+            </div>
           </div>
         </div>
       </details>
 
       <details class="group">
-        <summary>复盘 · 棋谱</summary>
+        <summary>外观</summary>
         <div class="group-body">
-          <div class="card meta">
-            <div><span>进度</span> · <strong class="num" id="replay-pos">0 / 0</strong></div>
+          <div class="field stack">
+            <span class="field-label">主题</span>
+            <div class="seg theme-grid" id="theme-seg">
+              <button type="button" data-theme="wood" class="active">木盘</button>
+              <button type="button" data-theme="night">夜盘</button>
+              <button type="button" data-theme="day">日间</button>
+              <button type="button" data-theme="notebook">本子</button>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">音效</span>
+            <div class="seg" id="sound-seg">
+              <button type="button" id="opt-sound" class="active" title="落子音效">开</button>
+              <button type="button" id="opt-sound-off" title="关闭音效">关</button>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="group">
+        <summary>棋谱</summary>
+        <div class="group-body">
+          <div class="meta-line">
+            进度&nbsp;<strong class="num" id="replay-pos">0 / 0</strong>
           </div>
           <div class="seg" id="replay-seg">
             <button type="button" id="rep-start" title="开局 (Home)">|&lt;</button>
@@ -483,20 +561,18 @@
           </div>
           <div class="btns">
             <button type="button" class="block" id="rep-live" disabled>回到最新一手</button>
-            <button type="button" class="block" id="sgf-copy">复制 SGF</button>
-            <button type="button" class="block" id="sgf-download">导出 SGF</button>
+            <div class="btns inline">
+              <button type="button" class="block" id="sgf-copy">复制</button>
+              <button type="button" class="block" id="sgf-download">导出</button>
+            </div>
           </div>
         </div>
       </details>
 
-      <div class="btns">
-        <button type="button" class="block" id="clear-save">清除存档并新局</button>
-        <button type="button" class="block" id="collapse">收起侧栏 · 沉浸</button>
-      </div>
-
-      <div class="footer">
-        <strong>← →</strong> 复盘 · <strong>Tab</strong> 侧栏 · <strong>?</strong> 说明<br />
-        自动存档 · 菜单栏 · 窗口位置记忆
+      <div class="side-foot">
+        <button type="button" class="block" id="collapse">收起侧栏</button>
+        <button type="button" class="block ghost" id="clear-save">清除存档并新局</button>
+        <div class="footer">Tab 侧栏 · ? 快捷键</div>
       </div>
     </aside>
 
@@ -972,14 +1048,14 @@
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(serialize()));
       const hint = document.getElementById("save-hint");
-      if (hint) hint.textContent = "已自动存档 · " + formatTime(Date.now());
+      if (hint) hint.textContent = "已存 " + formatTime(Date.now());
     } catch (_) {}
   }
 
   function clearSave() {
     localStorage.removeItem(SAVE_KEY);
     const hint = document.getElementById("save-hint");
-    if (hint) hint.textContent = "存档已清除";
+    if (hint) hint.textContent = "无存档";
   }
 
   function tryLoadSave() {
@@ -1696,11 +1772,15 @@
     document.querySelectorAll("#theme-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.theme === themeId);
     });
-    const sb = document.getElementById("opt-sound");
-    if (sb) {
-      sb.classList.toggle("active", soundOn);
-      sb.textContent = soundOn ? "音效开" : "音效关";
-    }
+    const aiOnly = mode === "ai";
+    const diffField = document.getElementById("diff-field");
+    const colorField = document.getElementById("color-field");
+    if (diffField) diffField.hidden = !aiOnly;
+    if (colorField) colorField.hidden = !aiOnly;
+    const sbOn = document.getElementById("opt-sound");
+    const sbOff = document.getElementById("opt-sound-off");
+    if (sbOn) sbOn.classList.toggle("active", soundOn);
+    if (sbOff) sbOff.classList.toggle("active", !soundOn);
   }
 
   function sync() {
@@ -1714,8 +1794,8 @@
     const nextColor = viewIndex % 2 === 0 ? "b" : "w";
 
     moves.textContent = viewIndex + "/" + history.length;
-    document.getElementById("info-moves").textContent = history.length + (live ? "" : " · 看 " + viewIndex);
-    document.getElementById("info-start").textContent = formatTime(originalStartedAt);
+    document.getElementById("info-moves").textContent =
+      history.length + (live ? "" : "·看" + viewIndex);
     document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
     updateClock();
 
@@ -1827,13 +1907,20 @@
     toast("主题：" + (names[themeId] || themeId));
   };
   document.getElementById("opt-sound").onclick = () => {
-    soundOn = !soundOn;
+    if (soundOn) return;
+    soundOn = true;
     saveSettings();
     syncSettingsUI();
-    if (soundOn) playMoveSound("b");
-    toast(soundOn ? "音效已开" : "音效已关");
+    playMoveSound("b");
+    toast("音效已开");
   };
-  document.getElementById("opt-fullscreen").onclick = () => toggleFullscreen();
+  document.getElementById("opt-sound-off").onclick = () => {
+    if (!soundOn) return;
+    soundOn = false;
+    saveSettings();
+    syncSettingsUI();
+    toast("音效已关");
+  };
   document.getElementById("color-seg").onclick = async (ev) => {
     const b = ev.target.closest("button[data-human]");
     if (!b) return;
