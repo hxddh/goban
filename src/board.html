@@ -15,7 +15,7 @@
       --btn: #3d322a;
       --btn-hover: #4a3d33;
       --win: #ffe08a;
-      --side-w: 240px;
+      --side-w: 260px;
       --chrome-h: 40px;
       --stage-pad: 6px;
       --wood-pad: 8px;
@@ -30,104 +30,59 @@
       user-select: none;
       overflow: hidden;
     }
-
-    /* Immersive: board owns the window; chrome floats on top */
-    #app {
-      position: relative;
-      height: 100%;
-      width: 100%;
-      overflow: hidden;
-    }
+    #app { position: relative; height: 100%; width: 100%; overflow: hidden; }
 
     .chrome {
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: var(--chrome-h);
-      z-index: 20;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      position: absolute; top: 0; left: 0; right: 0;
+      height: var(--chrome-h); z-index: 20;
+      display: flex; align-items: center; gap: 8px;
       padding: 0 8px 0 10px;
       background: linear-gradient(180deg, rgba(20,16,14,.88), rgba(20,16,14,.4) 75%, transparent);
       pointer-events: none;
     }
     .chrome > * { pointer-events: auto; }
-
-    .brand {
-      font-weight: 600;
-      font-size: 14px;
-      letter-spacing: 0.04em;
-    }
+    .brand { font-weight: 600; font-size: 14px; letter-spacing: 0.04em; }
     .status-pill {
-      font-size: 12px;
-      color: var(--muted);
-      padding: 3px 8px;
-      border-radius: 999px;
-      background: rgba(0,0,0,.28);
+      font-size: 12px; color: var(--muted);
+      padding: 3px 8px; border-radius: 999px; background: rgba(0,0,0,.28);
     }
     .status-pill.win { color: var(--win); }
     .spacer { flex: 1; }
-
     .icon-btn, .tool-btn {
-      appearance: none;
-      border: 0;
-      border-radius: 8px;
-      background: rgba(61,50,42,.88);
-      color: var(--text);
-      font: inherit;
-      cursor: pointer;
+      appearance: none; border: 0; border-radius: 8px;
+      background: rgba(61,50,42,.88); color: var(--text);
+      font: inherit; cursor: pointer;
     }
     .icon-btn {
-      width: 30px; height: 30px;
-      display: grid; place-items: center;
-      font-size: 15px;
-      line-height: 1;
+      width: 30px; height: 30px; display: grid; place-items: center;
+      font-size: 15px; line-height: 1;
     }
-    .tool-btn {
-      height: 30px;
-      padding: 0 10px;
-      font-size: 12px;
-    }
+    .tool-btn { height: 30px; padding: 0 10px; font-size: 12px; }
     .icon-btn:hover, .tool-btn:hover { background: var(--btn-hover); }
     .tool-btn.primary {
       background: linear-gradient(180deg, #f0d2a8, #d4a574);
-      color: #2a1c10;
-      font-weight: 600;
+      color: #2a1c10; font-weight: 600;
     }
     .tool-btn:disabled, .icon-btn:disabled { opacity: .4; cursor: default; }
 
-    /*
-     * Board stage: fill the whole window. No max-px cap.
-     * Size = min(available width, available height) so the square goban
-     * is as large as the window allows.
-     */
     .stage {
-      position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
-      /* Tiny margin only — chrome overlays, does not reserve a full band */
+      position: absolute; inset: 0;
+      display: grid; place-items: center;
       padding: var(--stage-pad);
       transition: padding-right .2s ease;
     }
     #app.panel-open .stage {
       padding-right: calc(var(--side-w) + var(--stage-pad));
     }
-
     #board-wrap {
-      /* Fill the stage box: square side = min of free width/height */
       --free-w: calc(100vw - 2 * var(--stage-pad));
       --free-h: calc(100vh - 2 * var(--stage-pad));
       width: min(var(--free-w), var(--free-h));
       height: min(var(--free-w), var(--free-h));
-      max-width: 100%;
-      max-height: 100%;
-      padding: var(--wood-pad);
-      border-radius: 10px;
+      max-width: 100%; max-height: 100%;
+      padding: var(--wood-pad); border-radius: 10px;
       background: linear-gradient(145deg, #e0b07a, #c9965c 45%, #b8864e);
-      box-shadow:
-        0 10px 36px rgba(0,0,0,.45),
-        inset 0 1px 0 rgba(255,255,255,.22);
+      box-shadow: 0 10px 36px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.22);
       transition: width .2s ease, height .2s ease;
     }
     #app.panel-open #board-wrap {
@@ -136,112 +91,105 @@
       width: min(var(--free-w), var(--free-h));
       height: min(var(--free-w), var(--free-h));
     }
-    canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-      cursor: pointer;
-      border-radius: 3px;
-    }
+    canvas { display: block; width: 100%; height: 100%; cursor: pointer; border-radius: 3px; }
 
-    /* Sliding side panel */
     .side {
-      position: absolute;
-      top: 0; right: 0; bottom: 0;
-      width: var(--side-w);
-      z-index: 30;
+      position: absolute; top: 0; right: 0; bottom: 0;
+      width: var(--side-w); z-index: 30;
       background: rgba(36, 28, 24, .96);
       border-left: 1px solid var(--panel-border);
       backdrop-filter: blur(12px);
       padding: calc(var(--chrome-h) + 8px) 14px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      display: flex; flex-direction: column; gap: 10px;
       transform: translateX(100%);
-      transition: transform .25s ease;
+      transition: transform .2s ease;
       box-shadow: -12px 0 40px rgba(0,0,0,.35);
+      overflow-y: auto;
     }
     #app.panel-open .side { transform: translateX(0); }
-
     .side h2 {
-      margin: 0;
-      font-size: 12px;
-      color: var(--muted);
-      font-weight: 600;
-      letter-spacing: 0.06em;
+      margin: 4px 0 0; font-size: 11px; color: var(--muted);
+      font-weight: 600; letter-spacing: 0.06em;
     }
     .card {
-      background: #342920;
-      border-radius: 10px;
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      background: #342920; border-radius: 10px; padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 5px;
     }
-    .row { display: flex; align-items: center; gap: 10px; }
+    .row { display: flex; align-items: center; gap: 8px; }
     .stone {
-      width: 18px; height: 18px; border-radius: 50%;
-      box-shadow: 0 1px 3px rgba(0,0,0,.4);
-      flex-shrink: 0;
+      width: 16px; height: 16px; border-radius: 50%;
+      box-shadow: 0 1px 3px rgba(0,0,0,.4); flex-shrink: 0;
     }
-    .stone.black {
-      background: radial-gradient(circle at 35% 30%, #555, #111 60%, #000);
-    }
-    .stone.white {
-      background: radial-gradient(circle at 35% 30%, #fff, #ddd 55%, #bbb);
-    }
+    .stone.black { background: radial-gradient(circle at 35% 30%, #555, #111 60%, #000); }
+    .stone.white { background: radial-gradient(circle at 35% 30%, #fff, #ddd 55%, #bbb); }
     .grow { flex: 1; }
     .badge {
-      font-size: 11px;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: var(--accent);
-      color: #2a1c10;
-      font-weight: 600;
+      font-size: 10px; padding: 2px 7px; border-radius: 999px;
+      background: var(--accent); color: #2a1c10; font-weight: 600;
     }
     .muted { color: var(--muted); font-size: 12px; }
-    .btns { display: flex; flex-direction: column; gap: 8px; }
+    .meta { font-size: 12px; line-height: 1.55; color: var(--text); }
+    .meta span { color: var(--muted); }
+    .seg {
+      display: flex; gap: 4px; flex-wrap: wrap;
+    }
+    .seg button {
+      flex: 1; min-width: 0;
+      appearance: none; border: 0; border-radius: 8px;
+      padding: 7px 6px; font: inherit; font-size: 12px;
+      background: var(--btn); color: var(--text); cursor: pointer;
+    }
+    .seg button:hover { background: var(--btn-hover); }
+    .seg button.active {
+      outline: 2px solid var(--accent); background: #4a3a2e;
+    }
+    .btns { display: flex; flex-direction: column; gap: 6px; }
     .side button.block {
-      appearance: none;
-      border: 0;
-      border-radius: 10px;
-      padding: 10px 12px;
-      font: inherit;
-      font-size: 14px;
-      background: var(--btn);
-      color: var(--text);
-      cursor: pointer;
-      text-align: left;
-      width: 100%;
+      appearance: none; border: 0; border-radius: 10px;
+      padding: 9px 12px; font: inherit; font-size: 13px;
+      background: var(--btn); color: var(--text);
+      cursor: pointer; text-align: left; width: 100%;
     }
     .side button.block:hover { background: var(--btn-hover); }
-    .side button.block.active {
-      outline: 2px solid var(--accent);
-    }
+    .side button.block.active { outline: 2px solid var(--accent); }
     .side button.block.primary {
       background: linear-gradient(180deg, #f0d2a8, #d4a574);
-      color: #2a1c10;
-      font-weight: 600;
+      color: #2a1c10; font-weight: 600;
     }
-    .footer {
-      margin-top: auto;
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.55;
+    .side button.block:disabled { opacity: .4; cursor: default; }
+    .footer { margin-top: auto; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .toast {
+      position: absolute; left: 50%; bottom: 20px; z-index: 40;
+      transform: translateX(-50%) translateY(12px);
+      background: rgba(40, 30, 24, .95); color: var(--text);
+      border: 1px solid var(--panel-border);
+      padding: 8px 14px; border-radius: 10px; font-size: 13px;
+      opacity: 0; pointer-events: none; transition: .2s ease;
     }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-    /* Dim board slightly when panel open on narrow screens */
+    .modal-bg {
+      display: none; position: absolute; inset: 0; z-index: 50;
+      background: rgba(0,0,0,.5); place-items: center;
+    }
+    .modal-bg.show { display: grid; }
+    .modal {
+      width: min(360px, calc(100vw - 32px));
+      background: #2a211c; border: 1px solid var(--panel-border);
+      border-radius: 14px; padding: 16px 18px; box-shadow: 0 20px 50px rgba(0,0,0,.5);
+    }
+    .modal h3 { margin: 0 0 10px; font-size: 16px; }
+    .modal table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .modal td { padding: 6px 0; border-bottom: 1px solid #3a2f28; }
+    .modal td:first-child { color: var(--accent); width: 42%; font-family: ui-monospace, monospace; }
+    .modal .close-row { margin-top: 14px; text-align: right; }
+
     .scrim {
-      display: none;
-      position: absolute;
-      inset: 0;
-      z-index: 25;
+      display: none; position: absolute; inset: 0; z-index: 25;
       background: rgba(0,0,0,.35);
     }
     #app.panel-open.scrim-on .scrim { display: block; }
-
     @media (max-width: 820px) {
-      /* Panel overlays; board keeps full size underneath */
       #app.panel-open .stage { padding-right: var(--stage-pad); }
       #app.panel-open #board-wrap {
         --free-w: calc(100vw - 2 * var(--stage-pad));
@@ -253,20 +201,20 @@
   </style>
 </head>
 <body>
-  <!-- Default: panel closed so the board is as large as possible -->
   <div id="app">
     <header class="chrome">
       <span class="brand">五子棋</span>
       <span class="status-pill" id="status">黑棋落子</span>
       <span class="muted" id="moves" style="font-size:12px">第 0 手</span>
+      <span class="muted" id="clock" style="font-size:12px">00:00</span>
       <span class="spacer"></span>
       <button type="button" class="tool-btn" id="undo" disabled title="悔棋 (Z)">悔棋</button>
       <button type="button" class="tool-btn primary" id="reset" title="新局 (N)">新局</button>
-      <button type="button" class="icon-btn" id="toggle-panel" title="收起/展开侧栏 (Tab)" aria-label="切换侧栏">☰</button>
+      <button type="button" class="icon-btn" id="help-btn" title="快捷键 (?)">?</button>
+      <button type="button" class="icon-btn" id="toggle-panel" title="侧栏 (Tab)" aria-label="侧栏">☰</button>
     </header>
 
     <div class="scrim" id="scrim"></div>
-
     <div class="stage">
       <div id="board-wrap">
         <canvas id="board" width="900" height="900" aria-label="棋盘"></canvas>
@@ -292,30 +240,76 @@
         <div class="muted" id="white-role">电脑</div>
       </div>
 
+      <h2>本局</h2>
+      <div class="card meta">
+        <div><span>手数</span> · <strong id="info-moves">0</strong></div>
+        <div><span>用时</span> · <strong id="info-time">00:00</strong></div>
+        <div><span>开始</span> · <strong id="info-start">—</strong></div>
+        <div id="save-hint" class="muted">自动存档已开启</div>
+      </div>
+
       <h2>模式</h2>
-      <div class="btns">
-        <button type="button" class="block active" id="mode-ai">人机对战</button>
-        <button type="button" class="block" id="mode-pvp">双人对战</button>
+      <div class="seg" id="mode-seg">
+        <button type="button" data-mode="ai" class="active">人机</button>
+        <button type="button" data-mode="pvp">双人</button>
+      </div>
+
+      <h2>难度（人机）</h2>
+      <div class="seg" id="diff-seg">
+        <button type="button" data-diff="easy">简单</button>
+        <button type="button" data-diff="normal" class="active">普通</button>
+        <button type="button" data-diff="hard">困难</button>
+      </div>
+
+      <h2>你执（人机）</h2>
+      <div class="seg" id="color-seg">
+        <button type="button" data-human="b" class="active">执黑</button>
+        <button type="button" data-human="w">执白</button>
       </div>
 
       <h2>操作</h2>
       <div class="btns">
         <button type="button" class="block" id="undo2" disabled>悔棋</button>
         <button type="button" class="block primary" id="reset2">新局</button>
+        <button type="button" class="block" id="clear-save">清除存档并新局</button>
         <button type="button" class="block" id="collapse">收起侧栏 · 沉浸</button>
       </div>
 
       <div class="footer">
-        <strong>沉浸</strong>：点 ☰ 或 Tab 收起侧栏，棋盘占满窗口。<br />
-        Z 悔棋 · N 新局 · 1 双人 · 2 人机<br />
+        <strong>Tab</strong> 侧栏 · <strong>?</strong> 快捷键 · 自动存档续局<br />
         点交叉点落子 · 五子连珠胜
       </div>
     </aside>
+
+    <div class="toast" id="toast"></div>
+
+    <div class="modal-bg" id="help-modal" role="dialog" aria-label="快捷键">
+      <div class="modal">
+        <h3>快捷键</h3>
+        <table>
+          <tr><td>点击交叉点</td><td>落子</td></tr>
+          <tr><td>Z / ⌘Z</td><td>悔棋</td></tr>
+          <tr><td>N / ⌘N</td><td>新局</td></tr>
+          <tr><td>Tab / ☰</td><td>收起/展开侧栏</td></tr>
+          <tr><td>[ / ]</td><td>收起 / 展开侧栏</td></tr>
+          <tr><td>1 / 2</td><td>双人 / 人机（新局）</td></tr>
+          <tr><td>?</td><td>打开本说明</td></tr>
+          <tr><td>Esc</td><td>关闭说明 / 收起侧栏</td></tr>
+        </table>
+        <div class="close-row">
+          <button type="button" class="tool-btn primary" id="help-close">知道了</button>
+        </div>
+      </div>
+    </div>
   </div>
   <script>
 (function () {
   const SIZE = 15;
   const WIN = 5;
+  const SAVE_KEY = "goban.v11.save";
+  const SETTINGS_KEY = "goban.v11.settings";
+  const PANEL_KEY = "goban.panelOpen";
+
   const canvas = document.getElementById("board");
   const ctx = canvas.getContext("2d");
   const appEl = document.getElementById("app");
@@ -328,10 +322,19 @@
   let result = "play";
   /** @type {'ai' | 'pvp'} */
   let mode = "ai";
+  /** @type {'easy' | 'normal' | 'hard'} */
+  let difficulty = "normal";
+  /** @type {'b' | 'w'} human color in AI mode */
+  let humanColor = "b";
   /** @type {{r:number,c:number}[]} */
   let history = [];
   /** @type {{r:number,c:number}[] | null} */
   let winLine = null;
+  let startedAt = Date.now();       // wall time of current running segment
+  let elapsedBaseMs = 0;            // frozen elapsed when paused/loaded
+  let originalStartedAt = Date.now(); // first start (for display)
+  let clockTimer = null;
+  let aiThinking = false;
 
   const STARS = [
     [3, 3], [3, 7], [3, 11],
@@ -351,17 +354,116 @@
 
   function opp(t) { return t === "b" ? "w" : "b"; }
 
+  function toast(msg) {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.classList.remove("show"), 2200);
+  }
+
+  function formatDuration(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(s / 60);
+    const ss = s % 60;
+    const h = Math.floor(m / 60);
+    if (h > 0) {
+      return h + ":" + String(m % 60).padStart(2, "0") + ":" + String(ss).padStart(2, "0");
+    }
+    return String(m).padStart(2, "0") + ":" + String(ss).padStart(2, "0");
+  }
+
+  function formatTime(ts) {
+    const d = new Date(ts);
+    const p = (n) => String(n).padStart(2, "0");
+    return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  function nowElapsed() {
+    if (result !== "play") return elapsedBaseMs;
+    return elapsedBaseMs + (Date.now() - startedAt);
+  }
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (s.mode === "ai" || s.mode === "pvp") mode = s.mode;
+      if (s.difficulty === "easy" || s.difficulty === "normal" || s.difficulty === "hard") difficulty = s.difficulty;
+      if (s.humanColor === "b" || s.humanColor === "w") humanColor = s.humanColor;
+    } catch (_) {}
+  }
+
+  function saveSettings() {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      mode, difficulty, humanColor,
+    }));
+  }
+
+  function serialize() {
+    return {
+      v: 1,
+      board,
+      turn,
+      result,
+      mode,
+      difficulty,
+      humanColor,
+      history,
+      winLine,
+      startedAt,
+      elapsedBaseMs: nowElapsed(),
+      originalStartedAt,
+      savedAt: Date.now(),
+    };
+  }
+
+  function saveGame() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(serialize()));
+      const hint = document.getElementById("save-hint");
+      if (hint) hint.textContent = "已自动存档 · " + formatTime(Date.now());
+    } catch (_) {}
+  }
+
+  function clearSave() {
+    localStorage.removeItem(SAVE_KEY);
+    const hint = document.getElementById("save-hint");
+    if (hint) hint.textContent = "存档已清除";
+  }
+
+  function tryLoadSave() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return false;
+      const s = JSON.parse(raw);
+      if (!s || s.v !== 1 || !Array.isArray(s.board) || s.board.length !== SIZE) return false;
+      board = s.board;
+      turn = s.turn === "w" ? "w" : "b";
+      result = s.result || "play";
+      mode = s.mode === "pvp" ? "pvp" : "ai";
+      difficulty = s.difficulty || "normal";
+      humanColor = s.humanColor === "w" ? "w" : "b";
+      history = Array.isArray(s.history) ? s.history : [];
+      winLine = s.winLine || null;
+      elapsedBaseMs = typeof s.elapsedBaseMs === "number" ? s.elapsedBaseMs : 0;
+      originalStartedAt = typeof s.originalStartedAt === "number"
+        ? s.originalStartedAt
+        : (Date.now() - elapsedBaseMs);
+      startedAt = Date.now();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function setPanelOpen(open) {
     appEl.classList.toggle("panel-open", open);
-    // On narrow screens, show scrim when panel open
     appEl.classList.toggle("scrim-on", open && window.innerWidth < 900);
-    localStorage.setItem("goban.panelOpen", open ? "1" : "0");
-    // reflow board size after transition
-    requestAnimationFrame(() => {
-      resizeCanvas();
-      draw();
-    });
-    setTimeout(() => { resizeCanvas(); draw(); }, 280);
+    localStorage.setItem(PANEL_KEY, open ? "1" : "0");
+    requestAnimationFrame(() => { resizeCanvas(); draw(); });
+    setTimeout(() => { resizeCanvas(); draw(); }, 220);
   }
 
   function togglePanel() {
@@ -370,7 +472,6 @@
 
   function geometry() {
     const w = canvas.width;
-    // Tighter margin → larger playable grid inside the wood frame
     const pad = w * 0.045;
     const span = w - pad * 2;
     const step = span / (SIZE - 1);
@@ -380,7 +481,6 @@
   function resizeCanvas() {
     const wrap = document.getElementById("board-wrap");
     const rect = wrap.getBoundingClientRect();
-    // Internal resolution follows CSS box for crisp stones
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const css = Math.max(200, Math.floor(Math.min(rect.width, rect.height)));
     const px = Math.floor(css * dpr);
@@ -397,15 +497,13 @@
     if (r < 0 || r >= SIZE || c < 0 || c >= SIZE) return null;
     const px = pad + c * step;
     const py = pad + r * step;
-    const dist = Math.hypot(x - px, y - py);
-    if (dist > step * 0.45) return null;
+    if (Math.hypot(x - px, y - py) > step * 0.45) return null;
     return { r, c };
   }
 
   function draw() {
     const { pad, step, w } = geometry();
     ctx.clearRect(0, 0, w, w);
-
     const g = ctx.createLinearGradient(0, 0, w, w);
     g.addColorStop(0, "#e8c49a");
     g.addColorStop(0.5, "#d4a574");
@@ -438,7 +536,6 @@
       ctx.lineTo(p, pad + step * (SIZE - 1));
       ctx.stroke();
     }
-
     ctx.lineWidth = Math.max(2, w / 280);
     ctx.strokeRect(pad - 1, pad - 1, step * (SIZE - 1) + 2, step * (SIZE - 1) + 2);
 
@@ -614,85 +711,184 @@
     return false;
   }
 
+  function randomPick(candidates) {
+    if (!candidates.length) return null;
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
   function aiMove() {
-    let best = null;
-    let bestScore = -1e12;
     let any = false;
     for (let r = 0; r < SIZE; r++)
       for (let c = 0; c < SIZE; c++)
         if (board[r][c]) any = true;
 
-    if (!any) return { r: 7, c: 7 };
+    const me = opp(humanColor); // AI plays the other color
+    if (!any) {
+      if (difficulty === "easy") {
+        const opts = [[7, 7], [6, 6], [6, 8], [8, 6], [8, 8], [7, 6], [7, 8]];
+        const p = randomPick(opts);
+        return { r: p[0], c: p[1] };
+      }
+      return { r: 7, c: 7 };
+    }
 
+    const scored = [];
     for (let r = 0; r < SIZE; r++) {
       for (let c = 0; c < SIZE; c++) {
         if (board[r][c]) continue;
-        if (any && !nearStone(r, c)) continue;
-        const s = scorePlace(r, c, "w");
-        if (s > bestScore) {
-          bestScore = s;
-          best = { r, c };
-        }
+        if (!nearStone(r, c)) continue;
+        scored.push({ r, c, s: scorePlace(r, c, me) });
       }
     }
-    if (!best) {
+    if (!scored.length) {
       for (let r = 0; r < SIZE; r++)
         for (let c = 0; c < SIZE; c++)
           if (!board[r][c]) return { r, c };
+      return null;
+    }
+    scored.sort((a, b) => b.s - a.s);
+
+    if (difficulty === "easy") {
+      // Often miss perfect blocks: pick from top 8 randomly, sometimes skip best
+      const pool = scored.slice(0, Math.min(8, scored.length));
+      if (Math.random() < 0.35 && pool.length > 1) return pool[1 + Math.floor(Math.random() * (pool.length - 1))];
+      return randomPick(pool.slice(0, 3));
+    }
+    if (difficulty === "normal") {
+      // Prefer best, occasionally 2nd/3rd for variety
+      if (Math.random() < 0.15 && scored.length > 1) return scored[1];
+      if (Math.random() < 0.05 && scored.length > 2) return scored[2];
+      return scored[0];
+    }
+    // hard: always best score; break ties by first (deterministic-ish among equals)
+    let best = scored[0];
+    for (let i = 1; i < scored.length; i++) {
+      if (scored[i].s > best.s) best = scored[i];
     }
     return best;
   }
 
-  function place(r, c) {
+  function isHumanTurn() {
+    if (mode === "pvp") return true;
+    return turn === humanColor;
+  }
+
+  function maybeAiTurn() {
+    if (mode !== "ai" || result !== "play" || isHumanTurn() || aiThinking) return;
+    aiThinking = true;
+    const delay = difficulty === "hard" ? 120 : difficulty === "normal" ? 80 : 40;
+    setTimeout(() => {
+      const m = aiMove();
+      aiThinking = false;
+      if (m) place(m.r, m.c, true);
+    }, delay);
+  }
+
+  function place(r, c, fromAi) {
     if (result !== "play") return;
     if (board[r][c]) return;
+    if (!fromAi && !isHumanTurn()) return;
+
     board[r][c] = turn;
     history.push({ r, c });
     const line = findWin(r, c, turn);
     if (line) {
       result = turn;
       winLine = line;
-      turn = opp(turn);
+      elapsedBaseMs = nowElapsed();
+      startedAt = Date.now();
       sync();
+      saveGame();
       return;
     }
     if (boardFull()) {
       result = "draw";
+      elapsedBaseMs = nowElapsed();
+      startedAt = Date.now();
       sync();
+      saveGame();
       return;
     }
     turn = opp(turn);
     sync();
-
-    if (mode === "ai" && result === "play" && turn === "w") {
-      const m = aiMove();
-      if (m) setTimeout(() => place(m.r, m.c), 60);
-    }
+    saveGame();
+    maybeAiTurn();
   }
 
   function undo() {
-    if (!history.length) return;
-    const last = history[history.length - 1];
-    const lastColor = board[last.r][last.c];
-    const popOne = () => {
+    if (!history.length || aiThinking) return;
+    // In AI mode: undo until it's human's turn again (and at least one human stone if possible)
+    if (mode === "ai") {
+      // Always remove last stone; if that was AI, also remove human's previous
+      const last = history[history.length - 1];
+      const lastColor = board[last.r][last.c];
+      const popOne = () => {
+        const p = history.pop();
+        if (p) board[p.r][p.c] = "";
+      };
+      popOne();
+      if (lastColor !== humanColor && history.length) popOne();
+      // If still AI to move (edge), pop once more
+      while (history.length && result === "play") {
+        // recompute turn from history length relative to first player
+        break;
+      }
+    } else {
       const p = history.pop();
       if (p) board[p.r][p.c] = "";
-    };
-    popOne();
-    if (mode === "ai" && lastColor === "w" && history.length) popOne();
+    }
+
     result = "play";
     winLine = null;
+    // turn = next player after history.length stones, black always first
     turn = history.length % 2 === 0 ? "b" : "w";
+    // if AI to move after undo, let human have the turn by undoing one more? 
+    // Prefer: after undo, it should be human's turn in AI mode
+    if (mode === "ai" && turn !== humanColor && history.length) {
+      const p = history.pop();
+      if (p) board[p.r][p.c] = "";
+      turn = history.length % 2 === 0 ? "b" : "w";
+    }
     sync();
+    saveGame();
   }
 
-  function reset() {
+  function reset(opts) {
+    const keepSettings = opts && opts.keepSettings;
     board = emptyBoard();
     turn = "b";
     result = "play";
     history = [];
     winLine = null;
+    elapsedBaseMs = 0;
+    startedAt = Date.now();
+    originalStartedAt = startedAt;
+    aiThinking = false;
+    if (!keepSettings) saveSettings();
     sync();
+    saveGame();
+    // If AI plays black (human white), AI opens
+    maybeAiTurn();
+  }
+
+  function updateClock() {
+    const el = formatDuration(nowElapsed());
+    const c1 = document.getElementById("clock");
+    const c2 = document.getElementById("info-time");
+    if (c1) c1.textContent = el;
+    if (c2) c2.textContent = el;
+  }
+
+  function syncSettingsUI() {
+    document.querySelectorAll("#mode-seg button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.mode === mode);
+    });
+    document.querySelectorAll("#diff-seg button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.diff === difficulty);
+    });
+    document.querySelectorAll("#color-seg button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.human === humanColor);
+    });
   }
 
   function sync() {
@@ -704,10 +900,19 @@
     const undoBtns = [document.getElementById("undo"), document.getElementById("undo2")];
 
     moves.textContent = "第 " + history.length + " 手";
-    undoBtns.forEach((b) => { if (b) b.disabled = history.length === 0; });
+    document.getElementById("info-moves").textContent = String(history.length);
+    document.getElementById("info-start").textContent = formatTime(originalStartedAt);
+    updateClock();
 
-    document.getElementById("black-role").textContent = mode === "ai" ? "你" : "玩家 1";
-    document.getElementById("white-role").textContent = mode === "ai" ? "电脑" : "玩家 2";
+    undoBtns.forEach((b) => { if (b) b.disabled = history.length === 0 || aiThinking; });
+
+    if (mode === "ai") {
+      document.getElementById("black-role").textContent = humanColor === "b" ? "你" : "电脑";
+      document.getElementById("white-role").textContent = humanColor === "w" ? "你" : "电脑";
+    } else {
+      document.getElementById("black-role").textContent = "玩家 1";
+      document.getElementById("white-role").textContent = "玩家 2";
+    }
 
     blackTurn.hidden = !(result === "play" && turn === "b");
     whiteTurn.hidden = !(result === "play" && turn === "w");
@@ -716,19 +921,17 @@
     if (result === "b") status.textContent = "黑棋胜";
     else if (result === "w") status.textContent = "白棋胜";
     else if (result === "draw") status.textContent = "平局";
+    else if (aiThinking) status.textContent = "电脑思考中…";
     else status.textContent = turn === "b" ? "黑棋落子" : "白棋落子";
 
-    document.getElementById("mode-ai").classList.toggle("active", mode === "ai");
-    document.getElementById("mode-pvp").classList.toggle("active", mode === "pvp");
+    syncSettingsUI();
   }
 
   function canvasPoint(ev) {
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
     return {
-      x: (ev.clientX - rect.left) * scaleX,
-      y: (ev.clientY - rect.top) * scaleY,
+      x: (ev.clientX - rect.left) * (canvas.width / rect.width),
+      y: (ev.clientY - rect.top) * (canvas.height / rect.height),
     };
   }
 
@@ -736,34 +939,86 @@
     const { x, y } = canvasPoint(ev);
     const cell = cellAt(x, y);
     if (!cell) return;
-    if (mode === "ai" && turn === "w") return;
-    place(cell.r, cell.c);
+    place(cell.r, cell.c, false);
   });
 
   document.getElementById("undo").onclick = undo;
   document.getElementById("undo2").onclick = undo;
-  document.getElementById("reset").onclick = reset;
-  document.getElementById("reset2").onclick = reset;
-  document.getElementById("mode-ai").onclick = () => { mode = "ai"; reset(); };
-  document.getElementById("mode-pvp").onclick = () => { mode = "pvp"; reset(); };
+  document.getElementById("reset").onclick = () => {
+    if (history.length && !confirm("开始新局？当前进度会写入存档为新局。")) return;
+    reset();
+    toast("新局已开始");
+  };
+  document.getElementById("reset2").onclick = () => document.getElementById("reset").click();
+  document.getElementById("clear-save").onclick = () => {
+    if (!confirm("清除自动存档并开始新局？")) return;
+    clearSave();
+    reset();
+    toast("存档已清除");
+  };
   document.getElementById("toggle-panel").onclick = togglePanel;
   document.getElementById("collapse").onclick = () => setPanelOpen(false);
   document.getElementById("scrim").onclick = () => setPanelOpen(false);
 
+  document.getElementById("mode-seg").onclick = (ev) => {
+    const b = ev.target.closest("button[data-mode]");
+    if (!b) return;
+    if (b.dataset.mode === mode) return;
+    if (history.length && !confirm("切换模式将开始新局，是否继续？")) return;
+    mode = b.dataset.mode;
+    saveSettings();
+    reset({ keepSettings: true });
+    toast(mode === "ai" ? "人机对战" : "双人对战");
+  };
+  document.getElementById("diff-seg").onclick = (ev) => {
+    const b = ev.target.closest("button[data-diff]");
+    if (!b) return;
+    difficulty = b.dataset.diff;
+    saveSettings();
+    syncSettingsUI();
+    toast("难度：" + ({ easy: "简单", normal: "普通", hard: "困难" })[difficulty]);
+    // difficulty applies next AI move; no forced new game
+  };
+  document.getElementById("color-seg").onclick = (ev) => {
+    const b = ev.target.closest("button[data-human]");
+    if (!b) return;
+    if (b.dataset.human === humanColor) return;
+    if (mode === "ai" && history.length && !confirm("更换执子将开始新局，是否继续？")) return;
+    humanColor = b.dataset.human;
+    saveSettings();
+    if (mode === "ai") {
+      reset({ keepSettings: true });
+      toast(humanColor === "b" ? "你执黑" : "你执白（电脑先手）");
+    } else {
+      syncSettingsUI();
+    }
+  };
+
+  const helpModal = document.getElementById("help-modal");
+  function openHelp() { helpModal.classList.add("show"); }
+  function closeHelp() { helpModal.classList.remove("show"); }
+  document.getElementById("help-btn").onclick = openHelp;
+  document.getElementById("help-close").onclick = closeHelp;
+  helpModal.onclick = (ev) => { if (ev.target === helpModal) closeHelp(); };
+
   window.addEventListener("keydown", (ev) => {
     const k = ev.key.toLowerCase();
-    if (ev.key === "Tab") {
-      ev.preventDefault();
-      togglePanel();
+    if (ev.key === "Escape") {
+      if (helpModal.classList.contains("show")) { closeHelp(); return; }
+      if (appEl.classList.contains("panel-open")) setPanelOpen(false);
       return;
     }
+    if (ev.key === "?" || (ev.shiftKey && k === "/")) { openHelp(); return; }
+    if (ev.key === "Tab") { ev.preventDefault(); togglePanel(); return; }
     if ((ev.metaKey || ev.ctrlKey) && k === "z") { ev.preventDefault(); undo(); }
-    else if ((ev.metaKey || ev.ctrlKey) && k === "n") { ev.preventDefault(); reset(); }
-    else if ((ev.metaKey || ev.ctrlKey) && k === "1") { mode = "pvp"; reset(); }
-    else if ((ev.metaKey || ev.ctrlKey) && k === "2") { mode = "ai"; reset(); }
-    else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
-    else if (k === "n" && !ev.metaKey && !ev.ctrlKey) reset();
-    else if (k === "[" ) setPanelOpen(false);
+    else if ((ev.metaKey || ev.ctrlKey) && k === "n") { ev.preventDefault(); document.getElementById("reset").click(); }
+    else if ((ev.metaKey || ev.ctrlKey) && k === "1") {
+      if (mode !== "pvp") { mode = "pvp"; saveSettings(); reset({ keepSettings: true }); }
+    } else if ((ev.metaKey || ev.ctrlKey) && k === "2") {
+      if (mode !== "ai") { mode = "ai"; saveSettings(); reset({ keepSettings: true }); }
+    } else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
+    else if (k === "n" && !ev.metaKey && !ev.ctrlKey) document.getElementById("reset").click();
+    else if (k === "[") setPanelOpen(false);
     else if (k === "]") setPanelOpen(true);
   });
 
@@ -773,13 +1028,29 @@
     draw();
   });
 
-  // Default closed (max board). Remember last choice if user set one.
-  const saved = localStorage.getItem("goban.panelOpen");
-  if (saved === "1") setPanelOpen(true);
-  else setPanelOpen(false);
+  window.addEventListener("beforeunload", () => saveGame());
+
+  // boot
+  loadSettings();
+  const savedPanel = localStorage.getItem(PANEL_KEY);
+  setPanelOpen(savedPanel === "1");
+
+  const resumed = tryLoadSave();
+  if (resumed) {
+    toast("已恢复上次对局");
+  } else {
+    startedAt = Date.now();
+    originalStartedAt = startedAt;
+    elapsedBaseMs = 0;
+  }
 
   resizeCanvas();
   sync();
+  saveSettings();
+  if (!resumed) saveGame();
+  maybeAiTurn();
+
+  clockTimer = setInterval(updateClock, 500);
 })();
   </script>
 </body>
