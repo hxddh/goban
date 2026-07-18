@@ -267,6 +267,26 @@
         <button type="button" data-human="w">执白</button>
       </div>
 
+      <h2>复盘</h2>
+      <div class="card meta">
+        <div><span>进度</span> · <strong id="replay-pos">0 / 0</strong></div>
+      </div>
+      <div class="seg" id="replay-seg">
+        <button type="button" id="rep-start" title="开局 (Home)">|&lt;</button>
+        <button type="button" id="rep-prev" title="上一手 (←)">&lt;</button>
+        <button type="button" id="rep-next" title="下一手 (→)">&gt;</button>
+        <button type="button" id="rep-end" title="终局 (End)">&gt;|</button>
+      </div>
+      <div class="btns">
+        <button type="button" class="block" id="rep-live" disabled>回到最新一手</button>
+      </div>
+
+      <h2>棋谱</h2>
+      <div class="btns">
+        <button type="button" class="block" id="sgf-copy">复制 SGF</button>
+        <button type="button" class="block" id="sgf-download">导出 SGF 文件</button>
+      </div>
+
       <h2>操作</h2>
       <div class="btns">
         <button type="button" class="block" id="undo2" disabled>悔棋</button>
@@ -276,8 +296,8 @@
       </div>
 
       <div class="footer">
-        <strong>Tab</strong> 侧栏 · <strong>?</strong> 快捷键 · 自动存档续局<br />
-        点交叉点落子 · 五子连珠胜
+        <strong>← →</strong> 复盘 · <strong>Tab</strong> 侧栏 · <strong>?</strong> 说明<br />
+        自动存档 · 五子连珠胜
       </div>
     </aside>
 
@@ -287,7 +307,9 @@
       <div class="modal">
         <h3>快捷键</h3>
         <table>
-          <tr><td>点击交叉点</td><td>落子</td></tr>
+          <tr><td>点击交叉点</td><td>落子（须在最新一手）</td></tr>
+          <tr><td>← →</td><td>复盘：上一手 / 下一手</td></tr>
+          <tr><td>Home / End</td><td>复盘：开局 / 终局</td></tr>
           <tr><td>Z / ⌘Z</td><td>悔棋</td></tr>
           <tr><td>N / ⌘N</td><td>新局</td></tr>
           <tr><td>Tab / ☰</td><td>收起/展开侧栏</td></tr>
@@ -306,7 +328,7 @@
 (function () {
   const SIZE = 15;
   const WIN = 5;
-  const SAVE_KEY = "goban.v11.save";
+  const SAVE_KEY = "goban.v12.save";
   const SETTINGS_KEY = "goban.v11.settings";
   const PANEL_KEY = "goban.panelOpen";
 
@@ -330,9 +352,11 @@
   let history = [];
   /** @type {{r:number,c:number}[] | null} */
   let winLine = null;
-  let startedAt = Date.now();       // wall time of current running segment
-  let elapsedBaseMs = 0;            // frozen elapsed when paused/loaded
-  let originalStartedAt = Date.now(); // first start (for display)
+  /** How many moves are currently shown (0..history.length). */
+  let viewIndex = 0;
+  let startedAt = Date.now();
+  let elapsedBaseMs = 0;
+  let originalStartedAt = Date.now();
   let clockTimer = null;
   let aiThinking = false;
 
@@ -353,6 +377,126 @@
   }
 
   function opp(t) { return t === "b" ? "w" : "b"; }
+
+  function isLive() {
+    return viewIndex === history.length;
+  }
+
+  /** Board state after the first `n` moves. */
+  function boardAfter(n) {
+    const b = emptyBoard();
+    const lim = Math.max(0, Math.min(n, history.length));
+    for (let i = 0; i < lim; i++) {
+      const p = history[i];
+      b[p.r][p.c] = i % 2 === 0 ? "b" : "w";
+    }
+    return b;
+  }
+
+  function winLineAt(n) {
+    if (n <= 0) return null;
+    const b = boardAfter(n);
+    const last = history[n - 1];
+    const color = (n - 1) % 2 === 0 ? "b" : "w";
+    // temporarily use global board for findWin helpers
+    const saved = board;
+    board = b;
+    const line = findWin(last.r, last.c, color);
+    board = saved;
+    return line;
+  }
+
+  function setViewIndex(n) {
+    viewIndex = Math.max(0, Math.min(n, history.length));
+    board = boardAfter(viewIndex);
+    winLine = viewIndex > 0 ? winLineAt(viewIndex) : null;
+    sync();
+  }
+
+  function goLive() {
+    viewIndex = history.length;
+    board = boardAfter(history.length);
+    if (result === "play") {
+      turn = history.length % 2 === 0 ? "b" : "w";
+      winLine = null;
+    } else {
+      winLine = winLineAt(history.length);
+    }
+    sync();
+  }
+
+  /** SGF: col a–o left→right; row a–o bottom→top (Go FF4). */
+  function sgfCoord(r, c) {
+    return String.fromCharCode(97 + c) + String.fromCharCode(97 + (SIZE - 1 - r));
+  }
+
+  function buildSgf() {
+    const dt = new Date(originalStartedAt);
+    const pad = (n) => String(n).padStart(2, "0");
+    const dtStr =
+      dt.getFullYear() +
+      "-" + pad(dt.getMonth() + 1) + "-" + pad(dt.getDate());
+    const re =
+      result === "b" ? "B+R" : result === "w" ? "W+R" : result === "draw" ? "0" : "Void";
+    let s = "(;FF[4]GM[1]SZ[" + SIZE + "]AP[Goban:1.2]DT[" + dtStr + "]RE[" + re + "]";
+    if (mode === "ai") {
+      s += "PB[" + (humanColor === "b" ? "Human" : "Computer") + "]";
+      s += "PW[" + (humanColor === "w" ? "Human" : "Computer") + "]";
+    } else {
+      s += "PB[Black]PW[White]";
+    }
+    for (let i = 0; i < history.length; i++) {
+      const p = history[i];
+      const tag = i % 2 === 0 ? "B" : "W";
+      s += ";" + tag + "[" + sgfCoord(p.r, p.c) + "]";
+    }
+    s += ")";
+    return s;
+  }
+
+  function downloadSgf() {
+    if (!history.length) {
+      toast("还没有棋谱可导出");
+      return;
+    }
+    const sgf = buildSgf();
+    const blob = new Blob([sgf], { type: "application/x-go-sgf" });
+    const a = document.createElement("a");
+    const name =
+      "goban-" +
+      new Date(originalStartedAt).toISOString().slice(0, 19).replace(/[:T]/g, "") +
+      ".sgf";
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast("已导出 " + name);
+  }
+
+  async function copySgf() {
+    if (!history.length) {
+      toast("还没有棋谱可复制");
+      return;
+    }
+    const sgf = buildSgf();
+    try {
+      await navigator.clipboard.writeText(sgf);
+      toast("SGF 已复制到剪贴板");
+    } catch (_) {
+      // fallback
+      const ta = document.createElement("textarea");
+      ta.value = sgf;
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        toast("SGF 已复制到剪贴板");
+      } catch (e) {
+        toast("复制失败，请用导出文件");
+      }
+      document.body.removeChild(ta);
+    }
+  }
 
   function toast(msg) {
     const el = document.getElementById("toast");
@@ -403,7 +547,7 @@
 
   function serialize() {
     return {
-      v: 1,
+      v: 2,
       board,
       turn,
       result,
@@ -435,18 +579,40 @@
 
   function tryLoadSave() {
     try {
-      const raw = localStorage.getItem(SAVE_KEY);
+      const raw = localStorage.getItem(SAVE_KEY) || localStorage.getItem("goban.v11.save");
       if (!raw) return false;
       const s = JSON.parse(raw);
-      if (!s || s.v !== 1 || !Array.isArray(s.board) || s.board.length !== SIZE) return false;
-      board = s.board;
-      turn = s.turn === "w" ? "w" : "b";
-      result = s.result || "play";
-      mode = s.mode === "pvp" ? "pvp" : "ai";
-      difficulty = s.difficulty || "normal";
-      humanColor = s.humanColor === "w" ? "w" : "b";
+      if (!s || (s.v !== 1 && s.v !== 2)) return false;
       history = Array.isArray(s.history) ? s.history : [];
-      winLine = s.winLine || null;
+      if (!history.length && Array.isArray(s.board) && s.board.length === SIZE) {
+        // rebuild history is not available from board alone — keep board snapshot
+        board = s.board;
+        turn = s.turn === "w" ? "w" : "b";
+        result = s.result || "play";
+        mode = s.mode === "pvp" ? "pvp" : "ai";
+        difficulty = s.difficulty || "normal";
+        humanColor = s.humanColor === "w" ? "w" : "b";
+        winLine = s.winLine || null;
+        viewIndex = 0;
+        // count stones for viewIndex estimate
+        let n = 0;
+        for (let r = 0; r < SIZE; r++)
+          for (let c = 0; c < SIZE; c++)
+            if (board[r][c]) n++;
+        viewIndex = n;
+      } else if (!history.length && !Array.isArray(s.board)) {
+        return false;
+      } else {
+        turn = s.turn === "w" ? "w" : "b";
+        result = s.result || "play";
+        mode = s.mode === "pvp" ? "pvp" : "ai";
+        difficulty = s.difficulty || "normal";
+        humanColor = s.humanColor === "w" ? "w" : "b";
+        winLine = s.winLine || null;
+        viewIndex = history.length;
+        board = boardAfter(history.length);
+        if (result === "play") turn = history.length % 2 === 0 ? "b" : "w";
+      }
       elapsedBaseMs = typeof s.elapsedBaseMs === "number" ? s.elapsedBaseMs : 0;
       originalStartedAt = typeof s.originalStartedAt === "number"
         ? s.originalStartedAt
@@ -583,8 +749,8 @@
       }
     }
 
-    if (history.length) {
-      const last = history[history.length - 1];
+    if (viewIndex > 0 && history[viewIndex - 1]) {
+      const last = history[viewIndex - 1];
       const x = pad + last.c * step;
       const y = pad + last.r * step;
       ctx.beginPath();
@@ -786,11 +952,19 @@
 
   function place(r, c, fromAi) {
     if (result !== "play") return;
+    if (!isLive()) {
+      if (!fromAi) toast("请先「回到最新一手」再落子");
+      return;
+    }
+    // live board must match full history
+    board = boardAfter(history.length);
+    turn = history.length % 2 === 0 ? "b" : "w";
     if (board[r][c]) return;
     if (!fromAi && !isHumanTurn()) return;
 
     board[r][c] = turn;
     history.push({ r, c });
+    viewIndex = history.length;
     const line = findWin(r, c, turn);
     if (line) {
       result = turn;
@@ -803,6 +977,7 @@
     }
     if (boardFull()) {
       result = "draw";
+      winLine = null;
       elapsedBaseMs = nowElapsed();
       startedAt = Date.now();
       sync();
@@ -810,6 +985,7 @@
       return;
     }
     turn = opp(turn);
+    winLine = null;
     sync();
     saveGame();
     maybeAiTurn();
@@ -817,57 +993,40 @@
 
   function undo() {
     if (!history.length || aiThinking) return;
-    // In AI mode: undo until it's human's turn again (and at least one human stone if possible)
     if (mode === "ai") {
-      // Always remove last stone; if that was AI, also remove human's previous
-      const last = history[history.length - 1];
-      const lastColor = board[last.r][last.c];
-      const popOne = () => {
-        const p = history.pop();
-        if (p) board[p.r][p.c] = "";
-      };
-      popOne();
-      if (lastColor !== humanColor && history.length) popOne();
-      // If still AI to move (edge), pop once more
-      while (history.length && result === "play") {
-        // recompute turn from history length relative to first player
-        break;
-      }
+      const lastColor = (history.length - 1) % 2 === 0 ? "b" : "w";
+      history.pop();
+      if (lastColor !== humanColor && history.length) history.pop();
     } else {
-      const p = history.pop();
-      if (p) board[p.r][p.c] = "";
+      history.pop();
     }
-
-    result = "play";
-    winLine = null;
-    // turn = next player after history.length stones, black always first
     turn = history.length % 2 === 0 ? "b" : "w";
-    // if AI to move after undo, let human have the turn by undoing one more? 
-    // Prefer: after undo, it should be human's turn in AI mode
     if (mode === "ai" && turn !== humanColor && history.length) {
-      const p = history.pop();
-      if (p) board[p.r][p.c] = "";
+      history.pop();
       turn = history.length % 2 === 0 ? "b" : "w";
     }
+    result = "play";
+    winLine = null;
+    viewIndex = history.length;
+    board = boardAfter(history.length);
     sync();
     saveGame();
   }
 
   function reset(opts) {
-    const keepSettings = opts && opts.keepSettings;
     board = emptyBoard();
     turn = "b";
     result = "play";
     history = [];
     winLine = null;
+    viewIndex = 0;
     elapsedBaseMs = 0;
     startedAt = Date.now();
     originalStartedAt = startedAt;
     aiThinking = false;
-    if (!keepSettings) saveSettings();
+    saveSettings();
     sync();
     saveGame();
-    // If AI plays black (human white), AI opens
     maybeAiTurn();
   }
 
@@ -898,13 +1057,25 @@
     const blackTurn = document.getElementById("black-turn");
     const whiteTurn = document.getElementById("white-turn");
     const undoBtns = [document.getElementById("undo"), document.getElementById("undo2")];
+    const live = isLive();
+    const nextColor = viewIndex % 2 === 0 ? "b" : "w";
 
-    moves.textContent = "第 " + history.length + " 手";
-    document.getElementById("info-moves").textContent = String(history.length);
+    moves.textContent = "第 " + viewIndex + "/" + history.length + " 手";
+    document.getElementById("info-moves").textContent = history.length + (live ? "" : " · 看第 " + viewIndex);
     document.getElementById("info-start").textContent = formatTime(originalStartedAt);
+    document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
     updateClock();
 
-    undoBtns.forEach((b) => { if (b) b.disabled = history.length === 0 || aiThinking; });
+    undoBtns.forEach((b) => {
+      if (b) b.disabled = history.length === 0 || aiThinking || !live;
+    });
+    document.getElementById("rep-start").disabled = viewIndex <= 0;
+    document.getElementById("rep-prev").disabled = viewIndex <= 0;
+    document.getElementById("rep-next").disabled = viewIndex >= history.length;
+    document.getElementById("rep-end").disabled = viewIndex >= history.length;
+    document.getElementById("rep-live").disabled = live;
+    document.getElementById("sgf-copy").disabled = history.length === 0;
+    document.getElementById("sgf-download").disabled = history.length === 0;
 
     if (mode === "ai") {
       document.getElementById("black-role").textContent = humanColor === "b" ? "你" : "电脑";
@@ -914,11 +1085,15 @@
       document.getElementById("white-role").textContent = "玩家 2";
     }
 
-    blackTurn.hidden = !(result === "play" && turn === "b");
-    whiteTurn.hidden = !(result === "play" && turn === "w");
+    const showTurn = live && result === "play";
+    blackTurn.hidden = !(showTurn && turn === "b");
+    whiteTurn.hidden = !(showTurn && turn === "w");
 
-    status.classList.toggle("win", result === "b" || result === "w");
-    if (result === "b") status.textContent = "黑棋胜";
+    status.classList.toggle("win", live && (result === "b" || result === "w"));
+    if (!live) {
+      status.textContent = "复盘 " + viewIndex + "/" + history.length;
+      if (winLine) status.textContent += " · 已成五";
+    } else if (result === "b") status.textContent = "黑棋胜";
     else if (result === "w") status.textContent = "白棋胜";
     else if (result === "draw") status.textContent = "平局";
     else if (aiThinking) status.textContent = "电脑思考中…";
@@ -959,6 +1134,17 @@
   document.getElementById("toggle-panel").onclick = togglePanel;
   document.getElementById("collapse").onclick = () => setPanelOpen(false);
   document.getElementById("scrim").onclick = () => setPanelOpen(false);
+
+  document.getElementById("rep-start").onclick = () => setViewIndex(0);
+  document.getElementById("rep-prev").onclick = () => setViewIndex(viewIndex - 1);
+  document.getElementById("rep-next").onclick = () => setViewIndex(viewIndex + 1);
+  document.getElementById("rep-end").onclick = () => setViewIndex(history.length);
+  document.getElementById("rep-live").onclick = () => {
+    goLive();
+    toast("已回到最新一手");
+  };
+  document.getElementById("sgf-copy").onclick = () => { copySgf(); };
+  document.getElementById("sgf-download").onclick = () => { downloadSgf(); };
 
   document.getElementById("mode-seg").onclick = (ev) => {
     const b = ev.target.closest("button[data-mode]");
@@ -1010,12 +1196,16 @@
     }
     if (ev.key === "?" || (ev.shiftKey && k === "/")) { openHelp(); return; }
     if (ev.key === "Tab") { ev.preventDefault(); togglePanel(); return; }
+    if (ev.key === "ArrowLeft") { ev.preventDefault(); setViewIndex(viewIndex - 1); return; }
+    if (ev.key === "ArrowRight") { ev.preventDefault(); setViewIndex(viewIndex + 1); return; }
+    if (ev.key === "Home") { ev.preventDefault(); setViewIndex(0); return; }
+    if (ev.key === "End") { ev.preventDefault(); setViewIndex(history.length); return; }
     if ((ev.metaKey || ev.ctrlKey) && k === "z") { ev.preventDefault(); undo(); }
     else if ((ev.metaKey || ev.ctrlKey) && k === "n") { ev.preventDefault(); document.getElementById("reset").click(); }
     else if ((ev.metaKey || ev.ctrlKey) && k === "1") {
-      if (mode !== "pvp") { mode = "pvp"; saveSettings(); reset({ keepSettings: true }); }
+      if (mode !== "pvp") { mode = "pvp"; saveSettings(); reset(); }
     } else if ((ev.metaKey || ev.ctrlKey) && k === "2") {
-      if (mode !== "ai") { mode = "ai"; saveSettings(); reset({ keepSettings: true }); }
+      if (mode !== "ai") { mode = "ai"; saveSettings(); reset(); }
     } else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
     else if (k === "n" && !ev.metaKey && !ev.ctrlKey) document.getElementById("reset").click();
     else if (k === "[") setPanelOpen(false);
