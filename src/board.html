@@ -488,7 +488,7 @@
 
       <div class="footer">
         <strong>← →</strong> 复盘 · <strong>Tab</strong> 侧栏 · <strong>?</strong> 说明<br />
-        悬停预览落子 · 自动存档
+        自动存档 · 失活/退出时保存
       </div>
     </aside>
 
@@ -505,7 +505,7 @@
           <tr><td>N / ⌘N</td><td>新局</td></tr>
           <tr><td>Tab / ☰</td><td>收起/展开侧栏</td></tr>
           <tr><td>[ / ]</td><td>收起 / 展开侧栏</td></tr>
-          <tr><td>1 / 2</td><td>双人 / 人机（新局）</td></tr>
+          <tr><td>⌘1 / ⌘2</td><td>双人 / 人机（确认后新局）</td></tr>
           <tr><td>F</td><td>全屏 / 退出全屏</td></tr>
           <tr><td>?</td><td>打开本说明</td></tr>
           <tr><td>Esc</td><td>关闭说明 / 收起侧栏</td></tr>
@@ -555,11 +555,30 @@
   let audioCtx = null;
   /** @type {'wood' | 'night' | 'day' | 'notebook'} */
   let themeId = "wood";
-  /** @type {{r:number,c:number}|null} */
-  let hoverCell = null;
   /** @type {{r:number,c:number,t0:number}|null} */
   let placeAnim = null;
   let rafId = 0;
+
+  function hasZero() {
+    return typeof window.zero === "object" && window.zero != null;
+  }
+
+  /** @returns {Promise<boolean>} */
+  async function confirmNative(message, title) {
+    if (hasZero() && window.zero.dialogs && window.zero.dialogs.showMessage) {
+      try {
+        const r = await window.zero.dialogs.showMessage({
+          style: "warning",
+          title: title || "确认",
+          message: message,
+          primaryButton: "继续",
+          secondaryButton: "取消",
+        });
+        return r === "primary";
+      } catch (_) {}
+    }
+    return window.confirm(message);
+  }
 
   const THEMES = {
     wood: {
@@ -683,7 +702,7 @@
       "-" + pad(dt.getMonth() + 1) + "-" + pad(dt.getDate());
     const re =
       result === "b" ? "B+R" : result === "w" ? "W+R" : result === "draw" ? "0" : "Void";
-    let s = "(;FF[4]GM[1]SZ[" + SIZE + "]AP[Goban:1.2]DT[" + dtStr + "]RE[" + re + "]";
+    let s = "(;FF[4]GM[4]SZ[" + SIZE + "]AP[Goban:1.6]DT[" + dtStr + "]RE[" + re + "]";
     if (mode === "ai") {
       s += "PB[" + (humanColor === "b" ? "Human" : "Computer") + "]";
       s += "PW[" + (humanColor === "w" ? "Human" : "Computer") + "]";
@@ -699,23 +718,88 @@
     return s;
   }
 
-  function downloadSgf() {
+  function sgfFileName() {
+    return (
+      "goban-" +
+      new Date(originalStartedAt).toISOString().slice(0, 19).replace(/[:T]/g, "") +
+      ".sgf"
+    );
+  }
+
+  function bytesToBase64(str) {
+    const bytes = new TextEncoder().encode(str);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+
+  function downloadSgfBlob(sgf, name) {
+    const blob = new Blob([sgf], { type: "application/x-go-sgf" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  async function downloadSgf() {
     if (!history.length) {
       toast("还没有棋谱可导出");
       return;
     }
     const sgf = buildSgf();
-    const blob = new Blob([sgf], { type: "application/x-go-sgf" });
-    const a = document.createElement("a");
-    const name =
-      "goban-" +
-      new Date(originalStartedAt).toISOString().slice(0, 19).replace(/[:T]/g, "") +
-      ".sgf";
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-    toast("已导出 " + name);
+    const name = sgfFileName();
+    if (hasZero() && window.zero.dialogs && window.zero.dialogs.saveFile) {
+      try {
+        const path = await window.zero.dialogs.saveFile({
+          title: "导出 SGF",
+          defaultName: name,
+        });
+        if (path == null) {
+          toast("已取消导出");
+          return;
+        }
+        await window.zero.invoke("goban.writeTextFile", {
+          path: path,
+          b64: bytesToBase64(sgf),
+        });
+        toast("已导出 " + name);
+        return;
+      } catch (e) {
+        // fall through to blob / copy
+      }
+    }
+    try {
+      downloadSgfBlob(sgf, name);
+      toast("已导出 " + name);
+    } catch (_) {
+      try {
+        await copySgfText(sgf);
+        toast("导出受限，SGF 已复制到剪贴板");
+      } catch (e2) {
+        toast("导出失败");
+      }
+    }
+  }
+
+  async function copySgfText(sgf) {
+    if (hasZero() && window.zero.clipboard && window.zero.clipboard.writeText) {
+      await window.zero.clipboard.writeText(sgf);
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(sgf);
+      return;
+    }
+    const ta = document.createElement("textarea");
+    ta.value = sgf;
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      if (!document.execCommand("copy")) throw new Error("copy failed");
+    } finally {
+      document.body.removeChild(ta);
+    }
   }
 
   async function copySgf() {
@@ -725,21 +809,10 @@
     }
     const sgf = buildSgf();
     try {
-      await navigator.clipboard.writeText(sgf);
+      await copySgfText(sgf);
       toast("SGF 已复制到剪贴板");
     } catch (_) {
-      // fallback
-      const ta = document.createElement("textarea");
-      ta.value = sgf;
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand("copy");
-        toast("SGF 已复制到剪贴板");
-      } catch (e) {
-        toast("复制失败，请用导出文件");
-      }
-      document.body.removeChild(ta);
+      toast("复制失败，请用导出文件");
     }
   }
 
@@ -882,36 +955,19 @@
       if (!raw) return false;
       const s = JSON.parse(raw);
       if (!s || (s.v !== 1 && s.v !== 2)) return false;
-      history = Array.isArray(s.history) ? s.history : [];
-      if (!history.length && Array.isArray(s.board) && s.board.length === SIZE) {
-        // rebuild history is not available from board alone — keep board snapshot
-        board = s.board;
-        turn = s.turn === "w" ? "w" : "b";
-        result = s.result || "play";
-        mode = s.mode === "pvp" ? "pvp" : "ai";
-        difficulty = s.difficulty || "normal";
-        humanColor = s.humanColor === "w" ? "w" : "b";
-        winLine = s.winLine || null;
-        viewIndex = 0;
-        // count stones for viewIndex estimate
-        let n = 0;
-        for (let r = 0; r < SIZE; r++)
-          for (let c = 0; c < SIZE; c++)
-            if (board[r][c]) n++;
-        viewIndex = n;
-      } else if (!history.length && !Array.isArray(s.board)) {
-        return false;
-      } else {
-        turn = s.turn === "w" ? "w" : "b";
-        result = s.result || "play";
-        mode = s.mode === "pvp" ? "pvp" : "ai";
-        difficulty = s.difficulty || "normal";
-        humanColor = s.humanColor === "w" ? "w" : "b";
-        winLine = s.winLine || null;
-        viewIndex = history.length;
-        board = boardAfter(history.length);
-        if (result === "play") turn = history.length % 2 === 0 ? "b" : "w";
-      }
+      // Resume only with a move list — board-only snapshots cannot place safely.
+      const loadedHistory = Array.isArray(s.history) ? s.history : [];
+      if (!loadedHistory.length) return false;
+      history = loadedHistory;
+      turn = s.turn === "w" ? "w" : "b";
+      result = s.result || "play";
+      mode = s.mode === "pvp" ? "pvp" : "ai";
+      difficulty = s.difficulty || "normal";
+      humanColor = s.humanColor === "w" ? "w" : "b";
+      winLine = s.winLine || null;
+      viewIndex = history.length;
+      board = boardAfter(history.length);
+      if (result === "play") turn = history.length % 2 === 0 ? "b" : "w";
       elapsedBaseMs = typeof s.elapsedBaseMs === "number" ? s.elapsedBaseMs : 0;
       originalStartedAt = typeof s.originalStartedAt === "number"
         ? s.originalStartedAt
@@ -1080,18 +1136,6 @@
         ctx.lineTo(x - s, y + s);
         ctx.stroke();
       }
-      // hover preview (empty)
-      if (hoverCell && isLive() && result === "play" && isHumanTurn() && !aiThinking) {
-        const hc = hoverCell;
-        if (!board[hc.r][hc.c]) {
-          const x = pad + hc.c * step;
-          const y = pad + hc.r * step;
-          const color = turn === "b" ? "rgba(42,49,64,0.35)" : "rgba(42,49,64,0.28)";
-          const lw = Math.max(1.5, step * 0.07);
-          if (turn === "b") drawOutlineTriangle(x, y, step * 0.72, color, lw);
-          else drawOutlineCircle(x, y, step * 0.34, color, lw);
-        }
-      }
       // pencil marks: outline triangle / circle only
       const markR = step * 0.36;
       const lw = Math.max(1.8, step * 0.08);
@@ -1156,28 +1200,6 @@
         ctx.beginPath();
         ctx.arc(x, y, Math.max(2.5, step * 0.09), 0, Math.PI * 2);
         ctx.fill();
-      }
-
-      // hover ghost stone
-      if (hoverCell && isLive() && result === "play" && isHumanTurn() && !aiThinking) {
-        const hc = hoverCell;
-        if (!board[hc.r][hc.c]) {
-          const x = pad + hc.c * step;
-          const y = pad + hc.r * step;
-          const radius = step * 0.4;
-          ctx.beginPath();
-          ctx.arc(x, y, radius, 0, Math.PI * 2);
-          if (turn === "b") {
-            ctx.fillStyle = "rgba(0,0,0,0.22)";
-            ctx.fill();
-          } else {
-            ctx.fillStyle = "rgba(255,255,255,0.35)";
-            ctx.fill();
-            ctx.strokeStyle = "rgba(0,0,0,0.18)";
-            ctx.lineWidth = 1.2;
-            ctx.stroke();
-          }
-        }
       }
 
       const radius = step * 0.43;
@@ -1542,7 +1564,6 @@
     board[r][c] = turn;
     history.push({ r, c });
     viewIndex = history.length;
-    hoverCell = null;
     placeAnim = { r, c, t0: performance.now() };
     ensureAnimLoop();
     playMoveSound(turn);
@@ -1707,36 +1728,17 @@
     if (!cell) return;
     place(cell.r, cell.c, false);
   });
-  canvas.addEventListener("mousemove", (ev) => {
-    if (!isLive() || result !== "play" || !isHumanTurn() || aiThinking) {
-      if (hoverCell) { hoverCell = null; draw(); }
-      return;
-    }
-    const { x, y } = canvasPoint(ev);
-    const cell = cellAt(x, y);
-    const next = cell && !board[cell.r][cell.c] ? cell : null;
-    if (!hoverCell && !next) return;
-    if (hoverCell && next && hoverCell.r === next.r && hoverCell.c === next.c) return;
-    hoverCell = next;
-    draw();
-  });
-  canvas.addEventListener("mouseleave", () => {
-    if (hoverCell) {
-      hoverCell = null;
-      draw();
-    }
-  });
 
   document.getElementById("undo").onclick = undo;
   document.getElementById("undo2").onclick = undo;
-  document.getElementById("reset").onclick = () => {
-    if (history.length && !confirm("开始新局？当前进度会写入存档为新局。")) return;
+  document.getElementById("reset").onclick = async () => {
+    if (history.length && !(await confirmNative("开始新局？当前进度会写入存档为新局。", "新局"))) return;
     reset();
     toast("新局已开始");
   };
   document.getElementById("reset2").onclick = () => document.getElementById("reset").click();
-  document.getElementById("clear-save").onclick = () => {
-    if (!confirm("清除自动存档并开始新局？")) return;
+  document.getElementById("clear-save").onclick = async () => {
+    if (!(await confirmNative("清除自动存档并开始新局？", "清除存档"))) return;
     clearSave();
     reset();
     toast("存档已清除");
@@ -1756,11 +1758,11 @@
   document.getElementById("sgf-copy").onclick = () => { copySgf(); };
   document.getElementById("sgf-download").onclick = () => { downloadSgf(); };
 
-  document.getElementById("mode-seg").onclick = (ev) => {
+  document.getElementById("mode-seg").onclick = async (ev) => {
     const b = ev.target.closest("button[data-mode]");
     if (!b) return;
     if (b.dataset.mode === mode) return;
-    if (history.length && !confirm("切换模式将开始新局，是否继续？")) return;
+    if (history.length && !(await confirmNative("切换模式将开始新局，是否继续？", "切换模式"))) return;
     mode = b.dataset.mode;
     saveSettings();
     reset({ keepSettings: true });
@@ -1789,11 +1791,11 @@
     toast(soundOn ? "音效已开" : "音效已关");
   };
   document.getElementById("opt-fullscreen").onclick = () => toggleFullscreen();
-  document.getElementById("color-seg").onclick = (ev) => {
+  document.getElementById("color-seg").onclick = async (ev) => {
     const b = ev.target.closest("button[data-human]");
     if (!b) return;
     if (b.dataset.human === humanColor) return;
-    if (mode === "ai" && history.length && !confirm("更换执子将开始新局，是否继续？")) return;
+    if (mode === "ai" && history.length && !(await confirmNative("更换执子将开始新局，是否继续？", "更换执子"))) return;
     humanColor = b.dataset.human;
     saveSettings();
     if (mode === "ai") {
@@ -1827,9 +1829,25 @@
     if ((ev.metaKey || ev.ctrlKey) && k === "z") { ev.preventDefault(); undo(); }
     else if ((ev.metaKey || ev.ctrlKey) && k === "n") { ev.preventDefault(); document.getElementById("reset").click(); }
     else if ((ev.metaKey || ev.ctrlKey) && k === "1") {
-      if (mode !== "pvp") { mode = "pvp"; saveSettings(); reset(); }
+      ev.preventDefault();
+      if (mode === "pvp") return;
+      (async () => {
+        if (history.length && !(await confirmNative("切换到双人对战将开始新局，是否继续？", "切换模式"))) return;
+        mode = "pvp";
+        saveSettings();
+        reset({ keepSettings: true });
+        toast("双人对战");
+      })();
     } else if ((ev.metaKey || ev.ctrlKey) && k === "2") {
-      if (mode !== "ai") { mode = "ai"; saveSettings(); reset(); }
+      ev.preventDefault();
+      if (mode === "ai") return;
+      (async () => {
+        if (history.length && !(await confirmNative("切换到人机对战将开始新局，是否继续？", "切换模式"))) return;
+        mode = "ai";
+        saveSettings();
+        reset({ keepSettings: true });
+        toast("人机对战");
+      })();
     } else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
     else if (k === "n" && !ev.metaKey && !ev.ctrlKey) document.getElementById("reset").click();
     else if (k === "[") setPanelOpen(false);
@@ -1846,6 +1864,16 @@
   });
 
   window.addEventListener("beforeunload", () => saveGame());
+  window.addEventListener("pagehide", () => saveGame());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") saveGame();
+  });
+  if (hasZero() && typeof window.zero.on === "function") {
+    try {
+      window.zero.on("app:deactivate", () => { saveGame(); });
+      window.zero.on("app:activate", () => { updateClock(); });
+    } catch (_) {}
+  }
 
   // boot
   loadSettings();
