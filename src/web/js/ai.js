@@ -1,9 +1,10 @@
 /**
- * C1.d / P0 — pattern tables + compound threats + tight VCT.
+ * C1.e / P0 — pattern tables + compound threats + tight VCT.
  * Freestyle 15×15.
  *
- * Hierarchy: win > block win > dual/compound > rush4 > block rush4/live4 >
- *            live3 attack|block (quality) > VCF > VCT > α-β.
+ * Hierarchy: win > block win > VCF > forced (own compound≥3 > block their
+ *            compound≥3 (incl. live3 ends) > own rush4) > deny VCF > VCT > α-β.
+ * Live3-level attack/pre-block is search-ordered, never hard-forced.
  * @module ai
  */
 (function (global) {
@@ -223,12 +224,12 @@
     }
     // Sleep three: OXXX_, _XXXO, OXX_X_ etc.
     if (!live3) {
+      // note: bare "OXXX" (e.g. OXXXO, dead both ends) is worthless — not counted
       if (
         str.indexOf("OXXX_") >= 0 ||
         str.indexOf("_XXXO") >= 0 ||
         str.indexOf("OXX_X") >= 0 ||
-        str.indexOf("X_XXO") >= 0 ||
-        str.indexOf("OXXX") >= 0
+        str.indexOf("X_XXO") >= 0
       ) {
         sleep3 = 1;
       }
@@ -475,6 +476,8 @@
       else if (off.tier >= 3) s = 1e10 + off.score;
       else if (def.tier >= 3) s = 5e9 + def.score + off.score * 0.35;
       else if (off.tier >= 2 && def.tier >= 2) s = 2e9 + off.score + def.score; // dual purpose
+      else if (off.tier >= 2) s = 1.2e9 + off.score + def.score * 0.4; // own live3: keeps tempo
+      else if (def.tier >= 2) s = 8e8 + def.score + off.score * 0.4; // pre-block their live3
       out.push({ r: m.r, c: m.c, s: s, off: off, def: def });
     }
     out.sort((a, b) => b.s - a.s);
@@ -545,43 +548,18 @@
     // 3 my compound ≥3 (double live3 / four-three / dual)
     let mv = pickMy(3, 4);
     if (mv) return mv;
-    // 4 block their compound ≥3
+    // 4 block their compound ≥3 — covers existing live threes: their
+    // extension points analyze as live4/compound for the attacker.
     mv = pickTheir(3, 4);
     if (mv) return mv;
     // 5 my rush4 / winCells
     mv = pickMy(2, 3);
     if (mv) return mv;
-    // 6 block their rush4
-    mv = pickTheir(2, 3);
-    if (mv) return mv;
 
-    // 7 dual-purpose live3: our attack that also lands on their critical cell
-    {
-      const theirKeys = {};
-      for (let i = 0; i < theirC.length; i++) {
-        if (theirC[i].d.tier >= 2 || theirC[i].d.compound >= 1) {
-          theirKeys[theirC[i].m.r + "," + theirC[i].m.c] = true;
-        }
-      }
-      for (let i = 0; i < myC.length; i++) {
-        if (myC[i].o.tier < 2 && myC[i].o.compound < 1) continue;
-        const k = myC[i].m.r + "," + myC[i].m.c;
-        if (theirKeys[k]) return myC[i].m;
-      }
-    }
-
-    // 8 block their live3 BEFORE playing a pure own live3
-    // (leaving opponent live3 free usually loses in freestyle)
-    const theirLive = theirC.some((x) => x.d.live3 >= 1 || x.d.tier >= 2);
-    if (theirLive) {
-      mv = pickTheir(1, 2);
-      if (mv) return mv;
-    }
-
-    // 9 my live3
-    mv = pickMy(1, 2);
-    if (mv) return mv;
-
+    // Anything softer (pre-blocking a *potential* rush4/live3, or playing a
+    // plain own live3) is NOT a forced move: hard-returning those made the
+    // engine trade tempo for pre-emptive blocks and drew won games. Those
+    // moves now surface through rankMoves ordering + search instead.
     return null;
   }
 
@@ -699,8 +677,17 @@
         board[m.r][m.c] = "";
         continue;
       }
+      // Defender counter-fours: a rush4 punch elsewhere steals the tempo and
+      // can refute the whole sequence — occupying/blocking is not the only reply.
+      const punch = mustDefendPoints(board, them).slice(0, 2);
+      for (let j = 0; j < punch.length; j++) {
+        const p = punch[j];
+        if (!replies.some((x) => x.r === p.r && x.c === p.c)) {
+          replies.push({ r: p.r, c: p.c });
+        }
+      }
       // limit fan-out
-      if (replies.length > 4) replies = replies.slice(0, 4);
+      if (replies.length > 6) replies = replies.slice(0, 6);
 
       let allGood = true;
       for (let j = 0; j < replies.length; j++) {
@@ -816,10 +803,13 @@
         break;
       }
     }
-    let fl = EX;
-    if (best <= a0) fl = UP;
-    else if (best >= beta) fl = LO;
-    ttPut(h, depth, fl, best, bestC);
+    // A timed-out (or empty) scan yields a bogus/partial score — never store it.
+    if (best > -Infinity && !timedOut(ctx)) {
+      let fl = EX;
+      if (best <= a0) fl = UP;
+      else if (best >= beta) fl = LO;
+      ttPut(h, depth, fl, best, bestC);
+    }
     return best;
   }
 
@@ -843,6 +833,7 @@
       }
       let iBest = best,
         iVal = -Infinity;
+      let alpha = -Infinity;
       for (let i = 0; i < moves.length; i++) {
         if (timedOut(ctx)) break;
         const m = moves[i];
@@ -853,13 +844,15 @@
         else if (listWins(board, them).length) val = -9e6;
         else {
           const h2 = xorPlace(h0, m.r, m.c, me) ^ zobrist[Z_SIDE];
-          val = -negamax(board, depth - 1, -Infinity, Infinity, them, me, ctx, 1, h2, killers, depth >= 3);
+          // root window (alpha, +inf): later siblings prune against the best so far
+          val = -negamax(board, depth - 1, -Infinity, -alpha, them, me, ctx, 1, h2, killers, depth >= 3);
         }
         board[m.r][m.c] = "";
         if (val > iVal) {
           iVal = val;
           iBest = { r: m.r, c: m.c };
         }
+        if (val > alpha) alpha = val;
       }
       if (iBest) {
         best = iBest;
@@ -939,12 +932,8 @@
       if (v) return v;
     }
 
-    if (force) {
-      const fo = analyzePlace(board, force.r, force.c, me);
-      const fd = analyzePlace(board, force.r, force.c, them);
-      // Always take compound/rush; for live3 allow VCT try first if time
-      if (fo.compound >= 2 || fd.compound >= 2 || fo.tier >= 3 || fd.tier >= 3) return force;
-    }
+    // forcedMove now yields only compound≥3 / rush4-level moves — take them.
+    if (force) return force;
 
     // Deny opponent VCF
     if (prof.vcfDepth > 0 && !timedOut(ctx)) {
@@ -971,9 +960,6 @@
       const vt = findVCT(board, me, prof.vctDepth, ctx);
       if (vt) return vt;
     }
-
-    // Apply forced live3 block/attack if still pending
-    if (force) return force;
 
     // Block opponent next-move compound points (bud stage)
     const danger = mustDefendPoints(board, them);

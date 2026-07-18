@@ -157,7 +157,7 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.17]"), "SGF AP version");
+  assert(text.includes("AP[Goban:1.18]"), "SGF AP version");
 }
 
 // importPaused persists only when open game
@@ -245,6 +245,21 @@ load("src/web/js/draw.js");
   b[14][14] = b[14][13] = b[14][12] = "w";
   const m = Ai.aiMove({ board: b, side: "w", difficulty: "hard", timeMs: 150 });
   assert(m && m.r === 10 && (m.c === 0 || m.c === 5), "block open four ends " + JSON.stringify(m));
+}
+
+// forcedMove is strictly forced: a mere opponent live-two (potential live3)
+// must NOT trigger a hard pre-block — that passivity drew won games (v1.17).
+{
+  const b = Core.emptyBoard();
+  b[7][6] = b[7][7] = "b"; // black live two only
+  b[2][2] = "w";
+  assert(Ai.forcedMove(b, "w") == null, "no forced pre-block vs live two");
+  // …but an existing live three still forces a block (extensions = compound4)
+  const b2 = Core.emptyBoard();
+  b2[7][5] = b2[7][6] = b2[7][7] = "b";
+  b2[2][2] = "w";
+  const f = Ai.forcedMove(b2, "w");
+  assert(f && f.r === 7 && (f.c === 4 || f.c === 8), "live3 still forced " + JSON.stringify(f));
 }
 
 // findVCF exists

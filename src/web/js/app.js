@@ -103,8 +103,8 @@
     // normal/hard both prefer worker (C1 can be heavy)
     const useWorker = payload.difficulty === "hard" || payload.difficulty === "normal";
     const timeMs =
-      typeof payload.timeMs === "number" ? payload.timeMs : budgetForDiff(payload.difficulty);
-    const think = payload.think || thinkLevel;
+      typeof (opts && opts.timeMs) === "number" ? opts.timeMs : budgetForDiff(payload.difficulty);
+    const think = (opts && opts.think) || thinkLevel;
     const w = useWorker ? getAiWorker() : null;
     if (w) {
       return new Promise((resolve) => {
@@ -118,8 +118,14 @@
         };
         aiPending.set(id, {
           resolve: (move) => finish(move),
+          // Worker died: fall back on the main thread with a capped budget —
+          // a full hard/deep budget here would freeze the UI for seconds.
           reject: () =>
-            finish(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs, think: think }))),
+            finish(
+              aiMoveSync(
+                Object.assign({}, payload, { timeMs: Math.min(200, timeMs), think: think })
+              )
+            ),
         });
         try {
           w.postMessage({
@@ -513,6 +519,7 @@
     sync();
     const side = history.length % 2 === 0 ? "b" : "w";
     const gen = gameGen;
+    const histLen = history.length;
     const liveBoard = boardAfter(history.length);
     try {
       const m = await aiMoveAsync({
@@ -522,8 +529,8 @@
         think: thinkLevel,
         timeMs: budgetForDiff(difficulty === "easy" ? "normal" : difficulty),
       });
-      if (gen !== gameGen) {
-        // discarded late result
+      if (gen !== gameGen || histLen !== history.length) {
+        // discarded late result (new game or a stone was placed meanwhile)
       } else if (!m) {
         toast("没有可用提示");
         hintCell = null;
@@ -742,10 +749,15 @@
       // Resume only with a move list — board-only snapshots cannot place safely.
       const loadedHistory = Array.isArray(s.history) ? s.history : [];
       if (!loadedHistory.length) return false;
-      // Validate move coords
+      // Validate move coords (strict: `undefined < 0` is false, so type-check too)
       for (let i = 0; i < loadedHistory.length; i++) {
         const p = loadedHistory[i];
-        if (!p || p.r < 0 || p.r >= SIZE || p.c < 0 || p.c >= SIZE) return false;
+        if (
+          !p ||
+          !Number.isInteger(p.r) ||
+          !Number.isInteger(p.c) ||
+          p.r < 0 || p.r >= SIZE || p.c < 0 || p.c >= SIZE
+        ) return false;
       }
       history = loadedHistory;
       mode = s.mode === "pvp" ? "pvp" : "ai";
@@ -857,8 +869,13 @@
   function place(r, c, fromAi) {
     if (result !== "play") return;
     if (!isLive()) {
-      if (!fromAi) toast("请先「回到最新一手」再落子");
-      return;
+      if (!fromAi) {
+        toast("请先「回到最新一手」再落子");
+        return;
+      }
+      // AI reply landed while the user browses the replay: snap to live and
+      // apply it — dropping the move would deadlock the game (AI never re-fires).
+      viewIndex = history.length;
     }
     // live board must match full history
     board = boardAfter(history.length);
