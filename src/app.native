@@ -1,0 +1,104 @@
+<!-- Goban — 15×15 five-in-a-row board. Binds Model from core.ts.
+     Bundled font is Latin-only for reference/mobile paths; keep labels ASCII. -->
+<column gap="12" padding="16" background="background" grow="1">
+  <row gap="10" cross="center" window-drag="true">
+    <text size="heading">Goban</text>
+    <spacer grow="1" />
+    <if test="{blackWins}">
+      <badge>Black wins</badge>
+    </if>
+    <else>
+      <if test="{whiteWins}">
+        <badge>White wins</badge>
+      </if>
+      <else>
+        <if test="{isDraw}">
+          <badge>Draw</badge>
+        </if>
+        <else>
+          <if test="{isBlackTurn}">
+            <badge>Black to move</badge>
+          </if>
+          <else>
+            <badge>White to move</badge>
+          </else>
+        </else>
+      </else>
+    </else>
+    <button variant="secondary" size="sm" on-press="undo" disabled="{cannotUndo}">
+      Undo
+    </button>
+    <button variant="primary" size="sm" on-press="reset">
+      New game
+    </button>
+  </row>
+
+  <separator />
+
+  <column grow="1" main="center" cross="center" gap="10">
+    <column background="surface" radius="md" padding="10">
+      <grid columns="15" gap="2">
+        <for each="cells" key="index" as="c">
+          <if test="{c.isBlack}">
+            <button
+              size="icon"
+              width="30"
+              height="30"
+              variant="primary"
+              selected="{c.isLast}"
+              on-press="place:{c.index}"
+              label="black stone"
+            >B</button>
+          </if>
+          <else>
+            <if test="{c.isWhite}">
+              <button
+                size="icon"
+                width="30"
+                height="30"
+                variant="secondary"
+                selected="{c.isLast}"
+                on-press="place:{c.index}"
+                label="white stone"
+              >W</button>
+            </if>
+            <else>
+              <button
+                size="icon"
+                width="30"
+                height="30"
+                variant="ghost"
+                on-press="place:{c.index}"
+                label="empty"
+              >.</button>
+            </else>
+          </else>
+        </for>
+      </grid>
+    </column>
+
+    <text foreground="text_muted">Black first · five in a row · move {moveCount}</text>
+  </column>
+
+  <if test="{blackWins}">
+    <status-bar>Black wins · Undo or start a new game</status-bar>
+  </if>
+  <else>
+    <if test="{whiteWins}">
+      <status-bar>White wins · Undo or start a new game</status-bar>
+    </if>
+    <else>
+      <if test="{isDraw}">
+        <status-bar>Draw · start a new game</status-bar>
+      </if>
+      <else>
+        <if test="{isBlackTurn}">
+          <status-bar>Black to move · {moveCount} moves played</status-bar>
+        </if>
+        <else>
+          <status-bar>White to move · {moveCount} moves played</status-bar>
+        </else>
+      </else>
+    </else>
+  </else>
+</column>

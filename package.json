@@ -1,0 +1,8 @@
+{
+  "name": "goban",
+  "private": true,
+  "description": "Gomoku (五子棋) for macOS — editor surface for @native-sdk/core. The native CLI builds without reading this file.",
+  "dependencies": {
+    "@native-sdk/core": "0.5.3"
+  }
+}
