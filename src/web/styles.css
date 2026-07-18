@@ -416,8 +416,10 @@
     .stone.white { background: radial-gradient(circle at 35% 30%, #fff, #eee 55%, #c8c8c8); }
     [data-theme="notebook"] .stone {
       box-shadow: none; border-radius: 0; background: transparent !important;
-      display: grid; place-items: center; font-size: 12px; line-height: 1; color: #2a3140;
+      display: grid; place-items: center; font-size: 12px; line-height: 1;
     }
+    [data-theme="notebook"] .stone.black { color: #1e3a5f; }
+    [data-theme="notebook"] .stone.white { color: #9a3412; }
     [data-theme="notebook"] .stone.black::after { content: "△"; }
     [data-theme="notebook"] .stone.white::after { content: "○"; }
     [data-theme="day"] .tool-btn.primary,

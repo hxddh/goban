@@ -308,10 +308,13 @@
       gridStrong: "#9db4d0",
       margin: "#e8a0a0",
       line: "#5a6a80",
-      pencil: "#2a3140",
+      pencil: "#2a3140", // grid marks / stars
+      // Distinct pen colors: △ black vs ○ white
+      pencilB: "#1e3a5f", // deep blue-ink triangle
+      pencilW: "#9a3412", // warm rust-ink circle
       style: "pencil",
-      lastB: "rgba(42,49,64,0.38)",
-      lastW: "rgba(42,49,64,0.38)",
+      lastB: "rgba(30,58,95,0.45)",
+      lastW: "rgba(154,52,18,0.4)",
       win: "rgba(120, 60, 55, 0.5)",
     },
   };
@@ -685,9 +688,11 @@
         ctx.lineTo(x - s, y + s);
         ctx.stroke();
       }
-      // pencil marks: outline triangle / circle only
+      // pencil marks: outline triangle / circle with distinct ink colors
       const markR = step * 0.36;
       const lw = Math.max(1.8, step * 0.08);
+      const inkB = th.pencilB || th.pencil;
+      const inkW = th.pencilW || th.pencil;
       for (let r = 0; r < SIZE; r++) {
         for (let c = 0; c < SIZE; c++) {
           const s = board[r][c];
@@ -699,8 +704,8 @@
           ctx.translate(x, y);
           ctx.scale(sc, sc);
           ctx.translate(-x, -y);
-          if (s === "b") drawOutlineTriangle(x, y, step * 0.78, th.pencil, lw);
-          else drawOutlineCircle(x, y, markR, th.pencil, lw);
+          if (s === "b") drawOutlineTriangle(x, y, step * 0.78, inkB, lw);
+          else drawOutlineCircle(x, y, markR, inkW, lw);
           ctx.restore();
         }
       }
