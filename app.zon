@@ -2,8 +2,8 @@
     .id = "dev.hxddh.goban",
     .name = "goban",
     .display_name = "Goban",
-    .description = "Gomoku (五子棋) for macOS — personal daily driver.",
-    .version = "0.2.0",
+    .description = "Gomoku for macOS.",
+    .version = "0.2.1",
     .icons = .{"assets/icon.png"},
     .platforms = .{"macos"},
     .permissions = .{ "view", "command" },
@@ -41,11 +41,11 @@
             .{
                 .label = "main",
                 .title = "Goban",
-                .width = 600,
-                .height = 720,
-                .min_width = 520,
-                .min_height = 640,
-                .restore_state = true,
+                .width = 640,
+                .height = 780,
+                .min_width = 560,
+                .min_height = 700,
+                .restore_state = false,
                 .restore_policy = "center_on_primary",
                 .views = .{
                     .{

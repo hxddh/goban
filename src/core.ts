@@ -17,11 +17,15 @@ export type Player = "black" | "white";
 export type Phase = "playing" | "black_wins" | "white_wins" | "draw";
 export type Mode = "pvp" | "ai";
 
+/** Single-character cell label for markup (string-literal union, not free text). */
+export type Mark = "B" | "W" | "+";
+
 export interface Cell {
   readonly index: number;
   readonly row: number;
   readonly col: number;
   readonly stone: Stone;
+  readonly mark: Mark;
   readonly isBlack: boolean;
   readonly isWhite: boolean;
   readonly isEmpty: boolean;
@@ -77,6 +81,12 @@ function lineContains(line: readonly Move[], index: number): boolean {
   return false;
 }
 
+function markOf(stone: Stone): Mark {
+  if (stone === "black") return "B";
+  if (stone === "white") return "W";
+  return "+";
+}
+
 function makeCell(
   index: number,
   row: number,
@@ -92,6 +102,7 @@ function makeCell(
     row,
     col,
     stone,
+    mark: markOf(stone),
     isBlack: stone === "black",
     isWhite: stone === "white",
     isEmpty: stone === "empty",
@@ -332,30 +343,6 @@ function scoreAllDirs(cells: readonly Cell[], row: number, col: number, color: S
   );
 }
 
-/** How many empty cells would immediately win for `color`? */
-function countWinningCells(cells: readonly Cell[], color: Stone): number {
-  let n = 0;
-  for (let i = 0; i < cells.length; i++) {
-    if (!cells[i].isEmpty) continue;
-    if (!isNearStone(cells, i)) continue;
-    if (wouldWinAt(cells, i, color)) n++;
-  }
-  return n;
-}
-
-function withStone(cells: readonly Cell[], index: number, color: Stone): Cell[] {
-  const placed: Cell[] = [];
-  for (let i = 0; i < cells.length; i++) {
-    const c = cells[i];
-    if (c.index === index) {
-      placed.push(makeCell(c.index, c.row, c.col, color, index, []));
-    } else {
-      placed.push(c);
-    }
-  }
-  return placed;
-}
-
 function evaluateEmpty(cells: readonly Cell[], index: number, me: Player): number {
   const cell = cells[index];
   if (!cell.isEmpty) return -1;
@@ -363,7 +350,7 @@ function evaluateEmpty(cells: readonly Cell[], index: number, me: Player): numbe
   const mine: Stone = me;
   const theirs: Stone = opponent(me);
 
-  // Tactical absolute priorities.
+  // Tactical absolute priorities (cheap; no multi-board forks scan).
   if (wouldWinAt(cells, index, mine)) return 200000;
   if (wouldWinAt(cells, index, theirs)) return 150000;
 
@@ -371,20 +358,7 @@ function evaluateEmpty(cells: readonly Cell[], index: number, me: Player): numbe
   const defense = scoreAllDirs(cells, cell.row, cell.col, theirs);
   const dist = absInt(cell.row - CENTER) + absInt(cell.col - CENTER);
   const centerBias = (14 - dist) * 3;
-
-  // One-ply look: after we place, count forced wins next turn.
-  const after = withStone(cells, index, mine);
-  const myThreats = countWinningCells(after, mine);
-  const theirThreats = countWinningCells(after, theirs);
-
-  let threatBonus = 0;
-  if (myThreats >= 2) threatBonus += 80000; // double threat / fork
-  else if (myThreats === 1) threatBonus += 12000;
-  // Leaving the opponent a win is almost always wrong (unless we already won).
-  if (theirThreats >= 1) threatBonus -= 60000;
-
-  // Prefer defense a bit more than pure attack when pattern scores are close.
-  return attack + defense * 2 + centerBias + threatBonus;
+  return attack + defense * 2 + centerBias;
 }
 
 function hasAnyStone(cells: readonly Cell[]): boolean {
@@ -396,8 +370,8 @@ function hasAnyStone(cells: readonly Cell[]): boolean {
 
 function isNearStone(cells: readonly Cell[], index: number): boolean {
   const cell = cells[index];
-  for (let dr = -3; dr <= 3; dr++) {
-    for (let dc = -3; dc <= 3; dc++) {
+  for (let dr = -2; dr <= 2; dr++) {
+    for (let dc = -2; dc <= 2; dc++) {
       if (dr === 0 && dc === 0) continue;
       const r = cell.row + dr;
       const c = cell.col + dc;

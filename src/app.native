@@ -1,7 +1,16 @@
-<!-- Goban — 15×15 five-in-a-row. Latin labels only (bundled font coverage). -->
-<column gap="12" padding="16" background="background" grow="1">
-  <row gap="10" cross="center" window-drag="true">
+<!-- Goban UI — flat grid, one pressable cell per intersection. -->
+<column background="background" grow="1" gap="0">
+  <row height="48" padding="12" gap="8" cross="center" background="surface" window-drag="true" label="header">
     <text size="heading">Goban</text>
+    <spacer grow="1" />
+    <button size="sm" variant="secondary" on-press="undo" disabled="{cannotUndo}">Undo</button>
+    <button size="sm" variant="primary" on-press="reset">New</button>
+  </row>
+  <separator />
+
+  <row padding="10" gap="8" cross="center" background="surface_subtle">
+    <button size="sm" selected="{vsHuman}" on-press="set_mode_pvp">2P</button>
+    <button size="sm" selected="{vsAi}" on-press="set_mode_ai">AI</button>
     <spacer grow="1" />
     <if test="{blackWins}">
       <badge>Black wins</badge>
@@ -24,65 +33,40 @@
         </else>
       </else>
     </else>
-    <button variant="secondary" size="sm" on-press="undo" disabled="{cannotUndo}">
-      Undo
-    </button>
-    <button variant="primary" size="sm" on-press="reset">
-      New game
-    </button>
   </row>
-
-  <row gap="8" cross="center">
-    <text foreground="text_muted">Mode</text>
-    <button size="sm" selected="{vsHuman}" on-press="set_mode_pvp">
-      2 players
-    </button>
-    <button size="sm" selected="{vsAi}" on-press="set_mode_ai">
-      vs computer
-    </button>
-    <spacer grow="1" />
-    <if test="{vsAi}">
-      <text foreground="text_muted">You Black · computer White</text>
-    </if>
-  </row>
-
   <separator />
 
-  <column grow="1" main="center" cross="center" gap="10">
+  <column grow="1" padding="12" gap="10" main="start" cross="center">
+    <text foreground="text_muted">Tap a square to place · B=black · W=white</text>
+
     <column background="surface" radius="md" padding="8" border-color="border">
-      <grid columns="15" gap="1">
+      <grid columns="15" gap="2">
         <for each="cells" key="index" as="c">
           <if test="{c.isBlack}">
             <button
-              size="icon"
-              width="32"
-              height="32"
+              width="34"
+              height="34"
               variant="primary"
               selected="{c.highlight}"
               on-press="place:{c.index}"
-              label="black stone"
-            >X</button>
+            >B</button>
           </if>
           <else>
             <if test="{c.isWhite}">
               <button
-                size="icon"
-                width="32"
-                height="32"
+                width="34"
+                height="34"
                 variant="secondary"
                 selected="{c.highlight}"
                 on-press="place:{c.index}"
-                label="white stone"
-              >O</button>
+              >W</button>
             </if>
             <else>
               <button
-                size="icon"
-                width="32"
-                height="32"
-                variant="ghost"
+                width="34"
+                height="34"
+                variant="outline"
                 on-press="place:{c.index}"
-                label="empty intersection"
               >+</button>
             </else>
           </else>
@@ -90,33 +74,8 @@
       </grid>
     </column>
 
-    <text foreground="text_muted">Five in a row · move {moveCount} · Cmd+N new · Cmd+Z undo</text>
+    <text foreground="text_muted">moves {moveCount} · Cmd+Z undo · Cmd+N new</text>
   </column>
 
-  <if test="{blackWins}">
-    <status-bar>Black wins · Cmd+Z undo · Cmd+N new game</status-bar>
-  </if>
-  <else>
-    <if test="{whiteWins}">
-      <status-bar>White wins · Cmd+Z undo · Cmd+N new game</status-bar>
-    </if>
-    <else>
-      <if test="{isDraw}">
-        <status-bar>Draw · Cmd+N new game</status-bar>
-      </if>
-      <else>
-        <if test="{vsAi}">
-          <status-bar>Your move (Black) · Cmd+1 2P · Cmd+2 AI · {moveCount} moves</status-bar>
-        </if>
-        <else>
-          <if test="{isBlackTurn}">
-            <status-bar>Black · Cmd+Z undo · {moveCount} moves</status-bar>
-          </if>
-          <else>
-            <status-bar>White · Cmd+Z undo · {moveCount} moves</status-bar>
-          </else>
-        </else>
-      </else>
-    </else>
-  </else>
+  <status-bar>Game menu · Cmd+1 2P · Cmd+2 AI</status-bar>
 </column>
