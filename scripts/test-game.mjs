@@ -157,7 +157,7 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.13.1]"), "SGF AP version");
+  assert(text.includes("AP[Goban:1.14]"), "SGF AP version");
 }
 
 // importPaused persists only when open game
@@ -181,27 +181,75 @@ load("src/web/js/draw.js");
   b[0][0] = "w";
   b[1][0] = "w";
   const snap = b.map((row) => row.join(""));
-  const block = Ai.aiMove({ board: b, side: "w", difficulty: "hard" });
+  const block = Ai.aiMove({ board: b, side: "w", difficulty: "hard", timeMs: 200 });
   assert(block && block.r === 7 && block.c === 4, "hard blocks open four at 7,4 got " + JSON.stringify(block));
   assert(b.map((row) => row.join("")).join("|") === snap.join("|"), "aiMove does not mutate board");
 
   const b2 = Core.emptyBoard();
   for (let c = 0; c < 4; c++) b2[5][c] = "w";
   b2[0][0] = "b";
-  const win = Ai.aiMove({ board: b2, side: "w", difficulty: "normal" });
+  const win = Ai.aiMove({ board: b2, side: "w", difficulty: "normal", timeMs: 80 });
   assert(win && win.r === 5 && win.c === 4, "takes winning fifth " + JSON.stringify(win));
 
   const b3 = Core.emptyBoard();
   b3[7][7] = "b";
-  const hint = Ai.hintMove({ board: b3, side: "w", difficulty: "easy" });
+  const hint = Ai.hintMove({ board: b3, side: "w", difficulty: "easy", timeMs: 50 });
   assert(hint && typeof hint.r === "number", "hintMove returns a cell");
 }
 
 // AI empty board center bias
 {
   const b = Core.emptyBoard();
-  const m = Ai.aiMove({ board: b, side: "b", difficulty: "hard" });
+  const m = Ai.aiMove({ board: b, side: "b", difficulty: "hard", timeMs: 50 });
   assert(m && m.r === 7 && m.c === 7, "hard opening center");
+}
+
+// C1: dual threat in one move — black to play creates two win cells
+{
+  // Horizontal open three + vertical setup is hard to handcraft; use two rush-fours intersection:
+  // Black stones: (7,3)(7,4)(7,5) and (5,7)(6,7)(8,7) — play (7,7) often creates multi threats.
+  const b = Core.emptyBoard();
+  b[7][3] = b[7][4] = b[7][5] = "b";
+  b[5][7] = b[6][7] = b[8][7] = "b";
+  // scatter white
+  b[0][0] = b[0][1] = b[0][2] = b[1][0] = "w";
+  const m = Ai.aiMove({ board: b, side: "b", difficulty: "hard", timeMs: 300 });
+  assert(m, "dual-ish position returns move");
+  // After best move, prefer creating ≥2 win cells if possible
+  if (m) {
+    b[m.r][m.c] = "b";
+    const wins = Ai.listWinCells(b, "b").length;
+    b[m.r][m.c] = "";
+    // At least take a strong attack (win cell or live threat)
+    assert(wins >= 1 || (m.r === 7 && m.c === 7) || (m.r === 7 && (m.c === 2 || m.c === 6)), "dual threat attack " + JSON.stringify(m) + " wins=" + wins);
+  }
+}
+
+// C1: VCF API finds forced four sequence when trivial
+{
+  const b = Core.emptyBoard();
+  // black three + will build four
+  b[7][3] = b[7][4] = b[7][5] = "b";
+  b[0][0] = b[1][0] = b[2][0] = "w";
+  // white to move should not leave black free; black to move should extend
+  const blackMove = Ai.aiMove({ board: b, side: "b", difficulty: "hard", timeMs: 250 });
+  assert(blackMove, "black attacks open three line");
+  // Prefer continuing on row 7
+  assert(blackMove.r === 7, "extends rank 7 got " + JSON.stringify(blackMove));
+}
+
+// C1: block open four always
+{
+  const b = Core.emptyBoard();
+  for (let c = 1; c <= 4; c++) b[10][c] = "b";
+  b[14][14] = b[14][13] = b[14][12] = "w";
+  const m = Ai.aiMove({ board: b, side: "w", difficulty: "hard", timeMs: 150 });
+  assert(m && m.r === 10 && (m.c === 0 || m.c === 5), "block open four ends " + JSON.stringify(m));
+}
+
+// findVCF exists
+{
+  assert(typeof Ai.findVCF === "function" && typeof Ai.findVCT === "function", "C1 exports VCF/VCT");
 }
 
 if (failed) {

@@ -16,7 +16,7 @@ open ~/Applications/Goban.app   # 本地安装路径
 |------|------|
 | 点交叉点 | 落子（须在最新一手；悬停有预览） |
 | 侧栏 | **Tab** 开关；本局 / 对局 / 外观 / 棋谱 |
-| 人机 | 难度、执子（双人时隐藏）；困难更深搜索 + Worker |
+| 人机 | 难度、执子；**困难 = C1 引擎**（棋型 + VCF/VCT + 限时搜索，Worker） |
 | 提示 | **H** / 顶栏「提示」：虚线十字建议点（不自动落子） |
 | 全屏 | **View → Enter Full Screen（⌘⌃F）**；绿键 Zoom |
 | 棋谱 | 复制 / 导出 / 导入 / **粘贴** SGF（可拖入 `.sgf`） |
@@ -39,8 +39,8 @@ src/web/
   index.html · styles.css
   js/core.js       # 规则（纯）
   js/sgf.js        # SGF
-  js/ai.js         # AI（启发式 + α-β）
-  js/ai-worker.js  # 困难难度后台计算
+  js/ai.js         # C1 引擎：棋型 / VCF·VCT / 迭代 α-β
+  js/ai-worker.js  # 普通·困难后台计算
   js/host.js       # Native / localStorage 门面
   js/state.js      # 对局状态 / 导入快照
   js/draw.js       # 棋盘 Canvas 渲染

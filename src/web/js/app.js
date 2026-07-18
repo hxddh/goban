@@ -25,11 +25,21 @@
   function boardFull() { return Core.boardFull(board); }
   function wouldWin(r, c, color) { return Core.wouldWin(board, r, c, color); }
   function aiMoveSync(opts) {
+    const diff = (opts && opts.difficulty) || difficulty;
+    const timeMs =
+      typeof (opts && opts.timeMs) === "number"
+        ? opts.timeMs
+        : diff === "hard"
+          ? 450
+          : diff === "normal"
+            ? 100
+            : 30;
     return Ai.aiMove({
       board: (opts && opts.board) || board,
       humanColor: (opts && opts.humanColor) || humanColor,
       side: opts && opts.side,
-      difficulty: (opts && opts.difficulty) || difficulty,
+      difficulty: diff,
+      timeMs: timeMs,
     });
   }
 
@@ -80,7 +90,10 @@
       side: opts && opts.side,
       difficulty: (opts && opts.difficulty) || difficulty,
     };
-    const useWorker = payload.difficulty === "hard";
+    // normal/hard both prefer worker (C1 can be heavy)
+    const useWorker = payload.difficulty === "hard" || payload.difficulty === "normal";
+    const timeMs =
+      payload.difficulty === "hard" ? 450 : payload.difficulty === "normal" ? 100 : 30;
     const w = useWorker ? getAiWorker() : null;
     if (w) {
       return new Promise((resolve) => {
@@ -94,7 +107,7 @@
         };
         aiPending.set(id, {
           resolve: (move) => finish(move),
-          reject: () => finish(aiMoveSync(payload)),
+          reject: () => finish(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs }))),
         });
         try {
           w.postMessage({
@@ -103,20 +116,24 @@
             humanColor: payload.humanColor,
             side: payload.side,
             difficulty: payload.difficulty,
+            timeMs: timeMs,
           });
         } catch (e) {
-          finish(aiMoveSync(payload));
+          finish(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs })));
           return;
         }
-        // safety timeout → main-thread fallback
+        // safety: budget + margin
         setTimeout(() => {
           if (settled) return;
-          finish(aiMoveSync(payload));
-        }, 8000);
+          finish(aiMoveSync(Object.assign({}, payload, { timeMs: Math.min(80, timeMs) })));
+        }, timeMs + 600);
       });
     }
     return new Promise((resolve) => {
-      setTimeout(() => resolve(aiMoveSync(payload)), 0);
+      setTimeout(
+        () => resolve(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs }))),
+        0
+      );
     });
   }
   function buildSgf() {
