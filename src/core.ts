@@ -294,13 +294,15 @@ function ray(
 }
 
 function patternScore(count: number, openEnds: number): number {
+  // C1 weights: value live threes/fours more so the AI blocks them earlier.
   if (count >= 5) return 100000;
-  if (count === 4 && openEnds >= 1) return 10000;
-  if (count === 3 && openEnds === 2) return 1000;
-  if (count === 3 && openEnds === 1) return 200;
-  if (count === 2 && openEnds === 2) return 100;
-  if (count === 2 && openEnds === 1) return 20;
-  if (count === 1 && openEnds === 2) return 10;
+  if (count === 4 && openEnds === 2) return 50000; // open four
+  if (count === 4 && openEnds === 1) return 20000; // half-open four
+  if (count === 3 && openEnds === 2) return 5000; // open three
+  if (count === 3 && openEnds === 1) return 400;
+  if (count === 2 && openEnds === 2) return 200;
+  if (count === 2 && openEnds === 1) return 30;
+  if (count === 1 && openEnds === 2) return 12;
   return openEnds;
 }
 
@@ -330,6 +332,30 @@ function scoreAllDirs(cells: readonly Cell[], row: number, col: number, color: S
   );
 }
 
+/** How many empty cells would immediately win for `color`? */
+function countWinningCells(cells: readonly Cell[], color: Stone): number {
+  let n = 0;
+  for (let i = 0; i < cells.length; i++) {
+    if (!cells[i].isEmpty) continue;
+    if (!isNearStone(cells, i)) continue;
+    if (wouldWinAt(cells, i, color)) n++;
+  }
+  return n;
+}
+
+function withStone(cells: readonly Cell[], index: number, color: Stone): Cell[] {
+  const placed: Cell[] = [];
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    if (c.index === index) {
+      placed.push(makeCell(c.index, c.row, c.col, color, index, []));
+    } else {
+      placed.push(c);
+    }
+  }
+  return placed;
+}
+
 function evaluateEmpty(cells: readonly Cell[], index: number, me: Player): number {
   const cell = cells[index];
   if (!cell.isEmpty) return -1;
@@ -337,14 +363,28 @@ function evaluateEmpty(cells: readonly Cell[], index: number, me: Player): numbe
   const mine: Stone = me;
   const theirs: Stone = opponent(me);
 
+  // Tactical absolute priorities.
   if (wouldWinAt(cells, index, mine)) return 200000;
-  if (wouldWinAt(cells, index, theirs)) return 100000;
+  if (wouldWinAt(cells, index, theirs)) return 150000;
 
   const attack = scoreAllDirs(cells, cell.row, cell.col, mine);
   const defense = scoreAllDirs(cells, cell.row, cell.col, theirs);
   const dist = absInt(cell.row - CENTER) + absInt(cell.col - CENTER);
   const centerBias = (14 - dist) * 3;
-  return attack * 2 + defense + centerBias;
+
+  // One-ply look: after we place, count forced wins next turn.
+  const after = withStone(cells, index, mine);
+  const myThreats = countWinningCells(after, mine);
+  const theirThreats = countWinningCells(after, theirs);
+
+  let threatBonus = 0;
+  if (myThreats >= 2) threatBonus += 80000; // double threat / fork
+  else if (myThreats === 1) threatBonus += 12000;
+  // Leaving the opponent a win is almost always wrong (unless we already won).
+  if (theirThreats >= 1) threatBonus -= 60000;
+
+  // Prefer defense a bit more than pure attack when pattern scores are close.
+  return attack + defense * 2 + centerBias + threatBonus;
 }
 
 function hasAnyStone(cells: readonly Cell[]): boolean {
@@ -356,8 +396,8 @@ function hasAnyStone(cells: readonly Cell[]): boolean {
 
 function isNearStone(cells: readonly Cell[], index: number): boolean {
   const cell = cells[index];
-  for (let dr = -2; dr <= 2; dr++) {
-    for (let dc = -2; dc <= 2; dc++) {
+  for (let dr = -3; dr <= 3; dr++) {
+    for (let dc = -3; dc <= 3; dc++) {
       if (dr === 0 && dc === 0) continue;
       const r = cell.row + dr;
       const c = cell.col + dc;
@@ -461,6 +501,15 @@ function fresh(mode: Mode): Model {
 
 export function initialModel(): Model {
   return fresh("ai");
+}
+
+/** Menus + shortcuts from app.zon → Msg. Unknown ids are ignored. */
+export function commandMsg(name: string): Msg | null {
+  if (name === "goban.new-game") return { kind: "reset" };
+  if (name === "goban.undo") return { kind: "undo" };
+  if (name === "goban.mode-pvp") return { kind: "set_mode_pvp" };
+  if (name === "goban.mode-ai") return { kind: "set_mode_ai" };
+  return null;
 }
 
 export function update(model: Model, msg: Msg): Model {

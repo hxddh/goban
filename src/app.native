@@ -90,30 +90,30 @@
       </grid>
     </column>
 
-    <text foreground="text_muted">Five in a row · move {moveCount}</text>
+    <text foreground="text_muted">Five in a row · move {moveCount} · Cmd+N new · Cmd+Z undo</text>
   </column>
 
   <if test="{blackWins}">
-    <status-bar>Black wins · winning line highlighted · Undo or New game</status-bar>
+    <status-bar>Black wins · Cmd+Z undo · Cmd+N new game</status-bar>
   </if>
   <else>
     <if test="{whiteWins}">
-      <status-bar>White wins · winning line highlighted · Undo or New game</status-bar>
+      <status-bar>White wins · Cmd+Z undo · Cmd+N new game</status-bar>
     </if>
     <else>
       <if test="{isDraw}">
-        <status-bar>Draw · start a new game</status-bar>
+        <status-bar>Draw · Cmd+N new game</status-bar>
       </if>
       <else>
         <if test="{vsAi}">
-          <status-bar>Your move (Black) · computer replies as White · {moveCount} moves</status-bar>
+          <status-bar>Your move (Black) · Cmd+1 2P · Cmd+2 AI · {moveCount} moves</status-bar>
         </if>
         <else>
           <if test="{isBlackTurn}">
-            <status-bar>Black to move · {moveCount} moves played</status-bar>
+            <status-bar>Black · Cmd+Z undo · {moveCount} moves</status-bar>
           </if>
           <else>
-            <status-bar>White to move · {moveCount} moves played</status-bar>
+            <status-bar>White · Cmd+Z undo · {moveCount} moves</status-bar>
           </else>
         </else>
       </else>

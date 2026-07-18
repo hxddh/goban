@@ -2,12 +2,40 @@
     .id = "dev.hxddh.goban",
     .name = "goban",
     .display_name = "Goban",
-    .description = "Gomoku (五子棋) for macOS, built with Native SDK.",
-    .version = "0.1.0",
+    .description = "Gomoku (五子棋) for macOS — personal daily driver.",
+    .version = "0.2.0",
     .icons = .{"assets/icon.png"},
     .platforms = .{"macos"},
     .permissions = .{ "view", "command" },
-    .capabilities = .{ "native_views", "gpu_surfaces" },
+    .capabilities = .{ "native_views", "gpu_surfaces", "shortcuts", "menus" },
+    .commands = .{
+        .{ .id = "goban.new-game", .title = "New Game" },
+        .{ .id = "goban.undo", .title = "Undo" },
+        .{ .id = "goban.mode-pvp", .title = "2 Players" },
+        .{ .id = "goban.mode-ai", .title = "vs Computer" },
+    },
+    .shortcuts = .{
+        .{ .id = "goban.new-game", .key = "n", .modifiers = .{"primary"} },
+        .{ .id = "goban.undo", .key = "z", .modifiers = .{"primary"} },
+        .{ .id = "goban.mode-pvp", .key = "1", .modifiers = .{"primary"} },
+        .{ .id = "goban.mode-ai", .key = "2", .modifiers = .{"primary"} },
+    },
+    .menus = .{
+        .{
+            .title = "Game",
+            .items = .{
+                .{ .label = "New Game", .command = "goban.new-game", .key = "n", .modifiers = .{"primary"} },
+                .{ .label = "Undo", .command = "goban.undo", .key = "z", .modifiers = .{"primary"} },
+            },
+        },
+        .{
+            .title = "Mode",
+            .items = .{
+                .{ .label = "2 Players", .command = "goban.mode-pvp", .key = "1", .modifiers = .{"primary"} },
+                .{ .label = "vs Computer", .command = "goban.mode-ai", .key = "2", .modifiers = .{"primary"} },
+            },
+        },
+    },
     .shell = .{
         .windows = .{
             .{
@@ -15,7 +43,9 @@
                 .title = "Goban",
                 .width = 600,
                 .height = 720,
-                .restore_state = false,
+                .min_width = 520,
+                .min_height = 640,
+                .restore_state = true,
                 .restore_policy = "center_on_primary",
                 .views = .{
                     .{
