@@ -15,8 +15,10 @@
       --btn: #3d322a;
       --btn-hover: #4a3d33;
       --win: #ffe08a;
-      --side-w: 260px;
-      --chrome-h: 48px;
+      --side-w: 240px;
+      --chrome-h: 40px;
+      --stage-pad: 6px;
+      --wood-pad: 8px;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -44,22 +46,22 @@
       z-index: 20;
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 0 12px 0 14px;
-      background: linear-gradient(180deg, rgba(20,16,14,.92), rgba(20,16,14,.55) 70%, transparent);
+      gap: 8px;
+      padding: 0 8px 0 10px;
+      background: linear-gradient(180deg, rgba(20,16,14,.88), rgba(20,16,14,.4) 75%, transparent);
       pointer-events: none;
     }
     .chrome > * { pointer-events: auto; }
 
     .brand {
       font-weight: 600;
-      font-size: 15px;
+      font-size: 14px;
       letter-spacing: 0.04em;
     }
     .status-pill {
-      font-size: 13px;
+      font-size: 12px;
       color: var(--muted);
-      padding: 4px 10px;
+      padding: 3px 8px;
       border-radius: 999px;
       background: rgba(0,0,0,.28);
     }
@@ -69,22 +71,22 @@
     .icon-btn, .tool-btn {
       appearance: none;
       border: 0;
-      border-radius: 9px;
-      background: rgba(61,50,42,.9);
+      border-radius: 8px;
+      background: rgba(61,50,42,.88);
       color: var(--text);
       font: inherit;
       cursor: pointer;
     }
     .icon-btn {
-      width: 34px; height: 34px;
+      width: 30px; height: 30px;
       display: grid; place-items: center;
-      font-size: 16px;
+      font-size: 15px;
       line-height: 1;
     }
     .tool-btn {
-      height: 34px;
-      padding: 0 12px;
-      font-size: 13px;
+      height: 30px;
+      padding: 0 10px;
+      font-size: 12px;
     }
     .icon-btn:hover, .tool-btn:hover { background: var(--btn-hover); }
     .tool-btn.primary {
@@ -94,58 +96,52 @@
     }
     .tool-btn:disabled, .icon-btn:disabled { opacity: .4; cursor: default; }
 
-    /* Board stage fills everything under chrome */
+    /*
+     * Board stage: fill the whole window. No max-px cap.
+     * Size = min(available width, available height) so the square goban
+     * is as large as the window allows.
+     */
     .stage {
       position: absolute;
       inset: 0;
       display: grid;
       place-items: center;
-      padding: calc(var(--chrome-h) + 8px) 12px 16px;
-      transition: padding-right .25s ease;
+      /* Tiny margin only — chrome overlays, does not reserve a full band */
+      padding: var(--stage-pad);
+      transition: padding-right .2s ease;
     }
     #app.panel-open .stage {
-      padding-right: calc(var(--side-w) + 20px);
+      padding-right: calc(var(--side-w) + var(--stage-pad));
     }
 
     #board-wrap {
-      width: min(
-        calc(100vw - 24px),
-        calc(100vh - var(--chrome-h) - 28px),
-        920px
-      );
-      height: min(
-        calc(100vw - 24px),
-        calc(100vh - var(--chrome-h) - 28px),
-        920px
-      );
+      /* Fill the stage box: square side = min of free width/height */
+      --free-w: calc(100vw - 2 * var(--stage-pad));
+      --free-h: calc(100vh - 2 * var(--stage-pad));
+      width: min(var(--free-w), var(--free-h));
+      height: min(var(--free-w), var(--free-h));
       max-width: 100%;
       max-height: 100%;
-      padding: clamp(10px, 2.2vmin, 22px);
-      border-radius: 16px;
+      padding: var(--wood-pad);
+      border-radius: 10px;
       background: linear-gradient(145deg, #e0b07a, #c9965c 45%, #b8864e);
       box-shadow:
-        0 16px 50px rgba(0,0,0,.5),
+        0 10px 36px rgba(0,0,0,.45),
         inset 0 1px 0 rgba(255,255,255,.22);
-      transition: width .25s ease, height .25s ease;
+      transition: width .2s ease, height .2s ease;
     }
     #app.panel-open #board-wrap {
-      width: min(
-        calc(100vw - var(--side-w) - 40px),
-        calc(100vh - var(--chrome-h) - 28px),
-        920px
-      );
-      height: min(
-        calc(100vw - var(--side-w) - 40px),
-        calc(100vh - var(--chrome-h) - 28px),
-        920px
-      );
+      --free-w: calc(100vw - var(--side-w) - 2 * var(--stage-pad));
+      --free-h: calc(100vh - 2 * var(--stage-pad));
+      width: min(var(--free-w), var(--free-h));
+      height: min(var(--free-w), var(--free-h));
     }
     canvas {
       display: block;
       width: 100%;
       height: 100%;
       cursor: pointer;
-      border-radius: 4px;
+      border-radius: 3px;
     }
 
     /* Sliding side panel */
@@ -245,16 +241,20 @@
     #app.panel-open.scrim-on .scrim { display: block; }
 
     @media (max-width: 820px) {
-      #app.panel-open .stage { padding-right: 12px; }
+      /* Panel overlays; board keeps full size underneath */
+      #app.panel-open .stage { padding-right: var(--stage-pad); }
       #app.panel-open #board-wrap {
-        width: min(calc(100vw - 24px), calc(100vh - var(--chrome-h) - 28px), 920px);
-        height: min(calc(100vw - 24px), calc(100vh - var(--chrome-h) - 28px), 920px);
+        --free-w: calc(100vw - 2 * var(--stage-pad));
+        --free-h: calc(100vh - 2 * var(--stage-pad));
+        width: min(var(--free-w), var(--free-h));
+        height: min(var(--free-w), var(--free-h));
       }
     }
   </style>
 </head>
 <body>
-  <div id="app" class="panel-open">
+  <!-- Default: panel closed so the board is as large as possible -->
+  <div id="app">
     <header class="chrome">
       <span class="brand">五子棋</span>
       <span class="status-pill" id="status">黑棋落子</span>
@@ -370,7 +370,8 @@
 
   function geometry() {
     const w = canvas.width;
-    const pad = w * 0.065;
+    // Tighter margin → larger playable grid inside the wood frame
+    const pad = w * 0.045;
     const span = w - pad * 2;
     const step = span / (SIZE - 1);
     return { pad, step, w };
@@ -772,10 +773,10 @@
     draw();
   });
 
-  // restore panel preference — default open once, then remember
+  // Default closed (max board). Remember last choice if user set one.
   const saved = localStorage.getItem("goban.panelOpen");
-  if (saved === "0") setPanelOpen(false);
-  else setPanelOpen(true);
+  if (saved === "1") setPanelOpen(true);
+  else setPanelOpen(false);
 
   resizeCanvas();
   sync();
