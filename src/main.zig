@@ -6,6 +6,24 @@ pub const panic = std.debug.FullPanic(native_sdk.debug.capturePanic);
 
 const allowed_origins = [_][]const u8{ "zero://app", "zero://inline", "http://127.0.0.1:5173" };
 
+const game_items = [_]native_sdk.MenuItem{
+    .{ .label = "新局", .command = "goban.new", .key = "n", .modifiers = .{ .command = true } },
+    .{ .label = "悔棋", .command = "goban.undo", .key = "z", .modifiers = .{ .command = true } },
+    .{ .separator = true },
+    .{ .label = "复制 SGF", .command = "goban.sgf-copy" },
+    .{ .label = "导出 SGF…", .command = "goban.sgf-export", .key = "s", .modifiers = .{ .command = true } },
+};
+
+const view_items = [_]native_sdk.MenuItem{
+    .{ .label = "切换侧栏", .command = "goban.toggle-panel", .key = "t", .modifiers = .{ .command = true } },
+    .{ .label = "全屏", .command = "goban.fullscreen", .key = "f", .modifiers = .{ .command = true, .control = true } },
+};
+
+const app_menus = [_]native_sdk.Menu{
+    .{ .title = "对局", .items = &game_items },
+    .{ .title = "视图", .items = &view_items },
+};
+
 // Serve the board UI from frontend/dist (packaged under Resources).
 // Inline HTML is capped at 64KiB by the SDK; asset loading has no such limit.
 const App = struct {
@@ -20,6 +38,7 @@ const App = struct {
             .name = "goban",
             .source = native_sdk.frontend.productionSource(.{ .dist = "frontend/dist" }),
             .source_fn = source,
+            .event_fn = onEvent,
         };
     }
 
@@ -50,6 +69,26 @@ const App = struct {
         };
     }
 };
+
+/// Forward menu/runtime commands into the WebView as `shortcut` events
+/// (same channel the JS `window.zero.on("shortcut")` already understands).
+fn onEvent(context: *anyopaque, runtime: *native_sdk.Runtime, event: native_sdk.Event) anyerror!void {
+    _ = context;
+    switch (event) {
+        .command => |cmd| {
+            var buf: [256]u8 = undefined;
+            // command ids are fixed ascii tokens (goban.*)
+            const detail = std.fmt.bufPrint(
+                &buf,
+                "{{\"id\":\"{s}\",\"command\":\"{s}\",\"key\":\"\",\"windowId\":{d},\"modifiers\":{{\"primary\":false,\"command\":false,\"control\":false,\"option\":false,\"shift\":false}}}}",
+                .{ cmd.name, cmd.name, if (cmd.window_id == 0) @as(u64, 1) else cmd.window_id },
+            ) catch return;
+            const wid: native_sdk.WindowId = if (cmd.window_id == 0) 1 else cmd.window_id;
+            runtime.emitWindowEvent(wid, "shortcut", detail) catch {};
+        },
+        else => {},
+    }
+}
 
 /// Extract a JSON string field value (no unescape; paths/base64 need none).
 fn jsonStringField(payload: []const u8, key: []const u8) ?[]const u8 {
@@ -101,6 +140,7 @@ pub fn main(init: std.process.Init) !void {
         .icon_path = "assets/icon.png",
         .js_window_api = true,
         .bridge = app_state.bridge(),
+        .menus = &app_menus,
         .security = .{
             .navigation = .{ .allowed_origins = &allowed_origins },
         },

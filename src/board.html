@@ -123,6 +123,14 @@
       border-color: color-mix(in srgb, var(--win) 35%, transparent);
       background: color-mix(in srgb, var(--win) 12%, transparent);
     }
+    .status-pill.thinking {
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+      background: color-mix(in srgb, var(--accent) 10%, transparent);
+    }
+    .status-pill.replay {
+      color: var(--muted);
+    }
     .meta-chip {
       font-size: 11px; color: var(--muted);
       padding: 4px 8px; border-radius: 999px;
@@ -180,7 +188,7 @@
     }
     canvas {
       display: block; width: 100%; height: 100%;
-      cursor: crosshair; border-radius: calc(var(--radius-sm) - 2px);
+      cursor: default; border-radius: calc(var(--radius-sm) - 2px);
     }
 
     .side {
@@ -488,7 +496,7 @@
 
       <div class="footer">
         <strong>← →</strong> 复盘 · <strong>Tab</strong> 侧栏 · <strong>?</strong> 说明<br />
-        自动存档 · 失活/退出时保存
+        自动存档 · 菜单栏 · 窗口位置记忆
       </div>
     </aside>
 
@@ -506,9 +514,12 @@
           <tr><td>Tab / ☰</td><td>收起/展开侧栏</td></tr>
           <tr><td>[ / ]</td><td>收起 / 展开侧栏</td></tr>
           <tr><td>⌘1 / ⌘2</td><td>双人 / 人机（确认后新局）</td></tr>
-          <tr><td>F</td><td>全屏 / 退出全屏</td></tr>
+          <tr><td>F · ⌘⌃F</td><td>全屏 / 退出全屏</td></tr>
+          <tr><td>⌘S</td><td>导出 SGF</td></tr>
+          <tr><td>⌘T</td><td>切换侧栏</td></tr>
           <tr><td>?</td><td>打开本说明</td></tr>
           <tr><td>Esc</td><td>关闭说明 / 收起侧栏</td></tr>
+          <tr><td>菜单栏</td><td>对局 / 视图</td></tr>
         </table>
         <div class="close-row">
           <button type="button" class="tool-btn primary" id="help-close">知道了</button>
@@ -551,6 +562,8 @@
   let originalStartedAt = Date.now();
   let clockTimer = null;
   let aiThinking = false;
+  /** Bumps on reset/load so late AI timeouts cannot place on a new game. */
+  let gameGen = 0;
   let soundOn = true;
   let audioCtx = null;
   /** @type {'wood' | 'night' | 'day' | 'notebook'} */
@@ -702,7 +715,7 @@
       "-" + pad(dt.getMonth() + 1) + "-" + pad(dt.getDate());
     const re =
       result === "b" ? "B+R" : result === "w" ? "W+R" : result === "draw" ? "0" : "Void";
-    let s = "(;FF[4]GM[4]SZ[" + SIZE + "]AP[Goban:1.6]DT[" + dtStr + "]RE[" + re + "]";
+    let s = "(;FF[4]GM[4]SZ[" + SIZE + "]AP[Goban:1.7]DT[" + dtStr + "]RE[" + re + "]";
     if (mode === "ai") {
       s += "PB[" + (humanColor === "b" ? "Human" : "Computer") + "]";
       s += "PW[" + (humanColor === "w" ? "Human" : "Computer") + "]";
@@ -763,6 +776,11 @@
           path: path,
           b64: bytesToBase64(sgf),
         });
+        if (window.zero.os && window.zero.os.revealPath) {
+          try {
+            await window.zero.os.revealPath(path);
+          } catch (_) {}
+        }
         toast("已导出 " + name);
         return;
       } catch (e) {
@@ -910,10 +928,25 @@
 
   function toggleFullscreen() {
     const root = document.documentElement;
-    if (!document.fullscreenElement) {
-      (root.requestFullscreen || root.webkitRequestFullscreen || (() => {})).call(root);
-    } else {
-      (document.exitFullscreen || document.webkitExitFullscreen || (() => {})).call(document);
+    const req = root.requestFullscreen || root.webkitRequestFullscreen;
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    try {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        if (!req) {
+          toast("当前环境不支持网页全屏，可用绿键最大化窗口");
+          return;
+        }
+        const p = req.call(root);
+        if (p && typeof p.then === "function") {
+          p.catch(function () {
+            toast("无法进入全屏，可用绿键最大化窗口");
+          });
+        }
+      } else if (exit) {
+        exit.call(document);
+      }
+    } catch (_) {
+      toast("无法切换全屏，可用绿键最大化窗口");
     }
   }
 
@@ -1018,7 +1051,7 @@
     if (r < 0 || r >= SIZE || c < 0 || c >= SIZE) return null;
     const px = pad + c * step;
     const py = pad + r * step;
-    if (Math.hypot(x - px, y - py) > step * 0.45) return null;
+    if (Math.hypot(x - px, y - py) > step * 0.52) return null;
     return { r, c };
   }
 
@@ -1054,9 +1087,9 @@
 
   function stoneScale(r, c) {
     if (!placeAnim || placeAnim.r !== r || placeAnim.c !== c) return 1;
-    const t = Math.min(1, (performance.now() - placeAnim.t0) / 140);
+    const t = Math.min(1, (performance.now() - placeAnim.t0) / 120);
     if (t >= 1) return 1;
-    return 0.72 + 0.28 * easeOutBack(t);
+    return 0.78 + 0.22 * easeOutBack(t);
   }
 
   function ensureAnimLoop() {
@@ -1065,7 +1098,7 @@
       rafId = 0;
       let need = false;
       if (placeAnim) {
-        if (performance.now() - placeAnim.t0 < 160) need = true;
+        if (performance.now() - placeAnim.t0 < 140) need = true;
         else placeAnim = null;
       }
       if (winLine && winLine.length && result !== "play" && isLive()) need = true;
@@ -1212,34 +1245,38 @@
           const sc = stoneScale(r, c);
           const rr = radius * sc;
           ctx.beginPath();
-          ctx.arc(x + 1.5 * sc, y + 2 * sc, rr, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(0,0,0,0.22)";
+          ctx.arc(x + 1.2 * sc, y + 1.8 * sc, rr, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(0,0,0,0.18)";
           ctx.fill();
           const sg = ctx.createRadialGradient(
-            x - rr * 0.35, y - rr * 0.4, rr * 0.1, x, y, rr
+            x - rr * 0.38, y - rr * 0.42, rr * 0.08, x, y, rr
           );
           if (s === "b") {
             if (themeId === "night") {
-              sg.addColorStop(0, "#3a3a3a");
-              sg.addColorStop(0.5, "#151515");
-              sg.addColorStop(1, "#000");
+              sg.addColorStop(0, "#4a4a4a");
+              sg.addColorStop(0.35, "#1c1c1c");
+              sg.addColorStop(1, "#050505");
             } else {
-              sg.addColorStop(0, "#666");
-              sg.addColorStop(0.45, "#222");
-              sg.addColorStop(1, "#000");
+              sg.addColorStop(0, "#6a6a6a");
+              sg.addColorStop(0.4, "#242424");
+              sg.addColorStop(1, "#050505");
             }
           } else {
-            sg.addColorStop(0, "#fff");
-            sg.addColorStop(0.55, "#eee");
-            sg.addColorStop(1, themeId === "day" ? "#d0d0d0" : "#c8c8c8");
+            sg.addColorStop(0, "#ffffff");
+            sg.addColorStop(0.5, "#f2f2f2");
+            sg.addColorStop(1, themeId === "day" ? "#c8c8c8" : "#bcbcbc");
           }
           ctx.beginPath();
           ctx.arc(x, y, rr, 0, Math.PI * 2);
           ctx.fillStyle = sg;
           ctx.fill();
           if (s === "w") {
-            ctx.strokeStyle = themeId === "day" ? "rgba(0,0,0,0.28)" : "rgba(0,0,0,0.2)";
-            ctx.lineWidth = themeId === "day" ? 1.4 : 1;
+            ctx.strokeStyle = themeId === "day" ? "rgba(0,0,0,0.26)" : "rgba(0,0,0,0.18)";
+            ctx.lineWidth = themeId === "day" ? 1.35 : 1;
+            ctx.stroke();
+          } else if (themeId === "night") {
+            ctx.strokeStyle = "rgba(255,255,255,0.06)";
+            ctx.lineWidth = 1;
             ctx.stroke();
           }
         }
@@ -1250,18 +1287,20 @@
       const last = history[viewIndex - 1];
       const x = pad + last.c * step;
       const y = pad + last.r * step;
+      const markR = Math.max(3.2, step * 0.16);
       ctx.beginPath();
-      ctx.arc(x, y, Math.max(2.2, step * 0.1), 0, Math.PI * 2);
-      ctx.fillStyle = board[last.r][last.c] === "b" ? th.lastB : th.lastW;
-      ctx.fill();
+      ctx.arc(x, y, markR, 0, Math.PI * 2);
+      ctx.strokeStyle = board[last.r][last.c] === "b" ? th.lastB : th.lastW;
+      ctx.lineWidth = Math.max(1.6, step * 0.055);
+      ctx.stroke();
     }
 
     if (winLine && winLine.length) {
-      const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 280);
+      const pulse = 0.72 + 0.28 * Math.sin(performance.now() / 320);
       ctx.save();
-      ctx.globalAlpha = th.style === "pencil" ? 0.75 + 0.2 * pulse : pulse;
+      ctx.globalAlpha = th.style === "pencil" ? 0.78 + 0.14 * pulse : 0.55 + 0.35 * pulse;
       ctx.strokeStyle = th.win;
-      ctx.lineWidth = Math.max(2.5, step * 0.12) * (0.92 + 0.08 * pulse);
+      ctx.lineWidth = Math.max(2.2, step * 0.1) * (0.94 + 0.06 * pulse);
       ctx.lineCap = "round";
       if (th.style === "pencil") {
         ctx.setLineDash([Math.max(4, step * 0.15), Math.max(3, step * 0.1)]);
@@ -1533,15 +1572,18 @@
   function maybeAiTurn() {
     if (mode !== "ai" || result !== "play" || isHumanTurn() || aiThinking) return;
     aiThinking = true;
+    const gen = gameGen;
     sync();
-    const delay = difficulty === "hard" ? 30 : difficulty === "normal" ? 50 : 40;
+    const delay = difficulty === "hard" ? 40 : difficulty === "normal" ? 70 : 55;
     // yield so UI paints "思考中"
     setTimeout(() => {
+      if (gen !== gameGen) return;
       const t0 = performance.now();
       const m = aiMove();
       const spent = performance.now() - t0;
       const wait = Math.max(0, delay - spent);
       setTimeout(() => {
+        if (gen !== gameGen) return;
         aiThinking = false;
         if (m) place(m.r, m.c, true);
         else sync();
@@ -1598,17 +1640,14 @@
   function undo() {
     if (!history.length || aiThinking) return;
     if (mode === "ai") {
-      const lastColor = (history.length - 1) % 2 === 0 ? "b" : "w";
-      history.pop();
-      if (lastColor !== humanColor && history.length) history.pop();
+      // Pop until it is the human's turn again (undo AI reply + human move).
+      do {
+        history.pop();
+      } while (history.length && (history.length % 2 === 0 ? "b" : "w") !== humanColor);
     } else {
       history.pop();
     }
     turn = history.length % 2 === 0 ? "b" : "w";
-    if (mode === "ai" && turn !== humanColor && history.length) {
-      history.pop();
-      turn = history.length % 2 === 0 ? "b" : "w";
-    }
     result = "play";
     winLine = null;
     viewIndex = history.length;
@@ -1618,6 +1657,7 @@
   }
 
   function reset(opts) {
+    gameGen += 1;
     board = emptyBoard();
     turn = "b";
     result = "play";
@@ -1628,6 +1668,7 @@
     startedAt = Date.now();
     originalStartedAt = startedAt;
     aiThinking = false;
+    placeAnim = null;
     saveSettings();
     sync();
     saveGame();
@@ -1702,6 +1743,8 @@
     whiteTurn.hidden = !(showTurn && turn === "w");
 
     status.classList.toggle("win", live && (result === "b" || result === "w"));
+    status.classList.toggle("thinking", live && result === "play" && aiThinking);
+    status.classList.toggle("replay", !live);
     if (!live) {
       status.textContent = "复盘 " + viewIndex + "/" + history.length;
       if (winLine) status.textContent += " · 已成五";
@@ -1868,10 +1911,25 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") saveGame();
   });
+
+  function handleNativeCommand(id) {
+    if (!id) return;
+    if (id === "goban.new") document.getElementById("reset").click();
+    else if (id === "goban.undo") undo();
+    else if (id === "goban.sgf-copy") copySgf();
+    else if (id === "goban.sgf-export") downloadSgf();
+    else if (id === "goban.toggle-panel") togglePanel();
+    else if (id === "goban.fullscreen") toggleFullscreen();
+  }
+
   if (hasZero() && typeof window.zero.on === "function") {
     try {
       window.zero.on("app:deactivate", () => { saveGame(); });
       window.zero.on("app:activate", () => { updateClock(); });
+      window.zero.on("shortcut", (detail) => {
+        const id = (detail && (detail.id || detail.command)) || "";
+        handleNativeCommand(id);
+      });
     } catch (_) {}
   }
 
@@ -1883,6 +1941,7 @@
 
   const resumed = tryLoadSave();
   if (resumed) {
+    gameGen += 1;
     toast("已恢复上次对局");
   } else {
     startedAt = Date.now();
