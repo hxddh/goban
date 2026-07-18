@@ -1,5 +1,4 @@
-<!-- Goban — 15×15 five-in-a-row board. Binds Model from core.ts.
-     Bundled font is Latin-only for reference/mobile paths; keep labels ASCII. -->
+<!-- Goban — 15×15 five-in-a-row. Latin labels only (bundled font coverage). -->
 <column gap="12" padding="16" background="background" grow="1">
   <row gap="10" cross="center" window-drag="true">
     <text size="heading">Goban</text>
@@ -33,70 +32,89 @@
     </button>
   </row>
 
+  <row gap="8" cross="center">
+    <text foreground="text_muted">Mode</text>
+    <button size="sm" selected="{vsHuman}" on-press="set_mode_pvp">
+      2 players
+    </button>
+    <button size="sm" selected="{vsAi}" on-press="set_mode_ai">
+      vs computer
+    </button>
+    <spacer grow="1" />
+    <if test="{vsAi}">
+      <text foreground="text_muted">You Black · computer White</text>
+    </if>
+  </row>
+
   <separator />
 
   <column grow="1" main="center" cross="center" gap="10">
-    <column background="surface" radius="md" padding="10">
-      <grid columns="15" gap="2">
+    <column background="surface" radius="md" padding="8" border-color="border">
+      <grid columns="15" gap="1">
         <for each="cells" key="index" as="c">
           <if test="{c.isBlack}">
             <button
               size="icon"
-              width="30"
-              height="30"
+              width="32"
+              height="32"
               variant="primary"
-              selected="{c.isLast}"
+              selected="{c.highlight}"
               on-press="place:{c.index}"
               label="black stone"
-            >B</button>
+            >X</button>
           </if>
           <else>
             <if test="{c.isWhite}">
               <button
                 size="icon"
-                width="30"
-                height="30"
+                width="32"
+                height="32"
                 variant="secondary"
-                selected="{c.isLast}"
+                selected="{c.highlight}"
                 on-press="place:{c.index}"
                 label="white stone"
-              >W</button>
+              >O</button>
             </if>
             <else>
               <button
                 size="icon"
-                width="30"
-                height="30"
+                width="32"
+                height="32"
                 variant="ghost"
                 on-press="place:{c.index}"
-                label="empty"
-              >.</button>
+                label="empty intersection"
+              >+</button>
             </else>
           </else>
         </for>
       </grid>
     </column>
 
-    <text foreground="text_muted">Black first · five in a row · move {moveCount}</text>
+    <text foreground="text_muted">Five in a row · move {moveCount}</text>
   </column>
 
   <if test="{blackWins}">
-    <status-bar>Black wins · Undo or start a new game</status-bar>
+    <status-bar>Black wins · winning line highlighted · Undo or New game</status-bar>
   </if>
   <else>
     <if test="{whiteWins}">
-      <status-bar>White wins · Undo or start a new game</status-bar>
+      <status-bar>White wins · winning line highlighted · Undo or New game</status-bar>
     </if>
     <else>
       <if test="{isDraw}">
         <status-bar>Draw · start a new game</status-bar>
       </if>
       <else>
-        <if test="{isBlackTurn}">
-          <status-bar>Black to move · {moveCount} moves played</status-bar>
+        <if test="{vsAi}">
+          <status-bar>Your move (Black) · computer replies as White · {moveCount} moves</status-bar>
         </if>
         <else>
-          <status-bar>White to move · {moveCount} moves played</status-bar>
+          <if test="{isBlackTurn}">
+            <status-bar>Black to move · {moveCount} moves played</status-bar>
+          </if>
+          <else>
+            <status-bar>White to move · {moveCount} moves played</status-bar>
+          </else>
         </else>
       </else>
     </else>

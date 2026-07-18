@@ -2,44 +2,53 @@
 
 macOS 五子棋（Gomoku），用 [Native SDK](https://github.com/vercel-labs/native) 编写。
 
-- 15×15 棋盘，黑先，五子连珠
-- 落子 / 悔棋 / 新局
-- 逻辑在 `src/core.ts`（TypeScript app-core，编译为原生代码）
-- 界面在 `src/app.native`
+## Features
 
-## 要求
+- 15×15 board, Black first, five in a row
+- **2 players** or **vs computer** (you Black, AI White)
+- Place / Undo / New game
+- Last-move + winning-line highlight
+- Deterministic heuristic AI (blocks fours, makes threats)
+
+Logic lives in `src/core.ts` (TypeScript app-core → native). UI in `src/app.native`.
+
+> UI copy is English/ASCII for now — the SDK bundled font does not cover CJK glyphs on the reference path.
+
+## Requirements
 
 - macOS
-- [Node.js](https://nodejs.org/) 22.15+（构建期用；发布二进制不含 JS 运行时）
-- Native SDK CLI：
+- [Node.js](https://nodejs.org/) 22.15+ (build-time only; release binary has no JS runtime)
+- Native SDK CLI:
 
 ```sh
 npm install -g @native-sdk/cli
 ```
 
-## 开发
+First build may download Zig 0.16 into `~/.native/toolchains/` (`native build --yes`).
+
+## Develop
 
 ```sh
-native check    # 校验 core + markup + app.zon
-native dev      # 打开原生窗口，支持 markup 热更
-native build    # Release 二进制 → zig-out/bin/
+native check    # validate core + markup + app.zon
+native dev      # native window, markup hot reload
+native build    # ReleaseFast → zig-out/bin/
 ```
 
-逻辑快速试跑（无窗口）：
+Logic-only smoke (no window):
 
 ```sh
 printf '%s\n' '{"kind":"place","index":112}' '{"kind":"undo"}' | native dev --core
 ```
 
-## 结构
+## Layout
 
 ```text
-app.zon           # 应用清单（窗口、平台）
-src/core.ts       # Model / Msg / update
-src/app.native    # 棋盘 UI
-assets/icon.png   # 图标
+app.zon           # app identity / window
+src/core.ts       # Model / Msg / update + AI
+src/app.native    # board UI
+assets/icon.png
 ```
 
-## 许可
+## License
 
 MIT
