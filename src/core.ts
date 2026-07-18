@@ -17,20 +17,18 @@ export type Player = "black" | "white";
 export type Phase = "playing" | "black_wins" | "white_wins" | "draw";
 export type Mode = "pvp" | "ai";
 
-/** Single-character cell label for markup (string-literal union, not free text). */
-export type Mark = "B" | "W" | "+";
-
 export interface Cell {
   readonly index: number;
   readonly row: number;
   readonly col: number;
   readonly stone: Stone;
-  readonly mark: Mark;
   readonly isBlack: boolean;
   readonly isWhite: boolean;
   readonly isEmpty: boolean;
   readonly isLast: boolean;
   readonly inLine: boolean;
+  /** Star point (hoshi) on an empty intersection. */
+  readonly isStar: boolean;
   /** Last move and/or winning line — drives button `selected`. */
   readonly highlight: boolean;
 }
@@ -81,10 +79,11 @@ function lineContains(line: readonly Move[], index: number): boolean {
   return false;
 }
 
-function markOf(stone: Stone): Mark {
-  if (stone === "black") return "B";
-  if (stone === "white") return "W";
-  return "+";
+/** Standard 15×15 star points (3-3, 3-7, 3-11, … tengen). */
+function isStarPoint(row: number, col: number): boolean {
+  const starRow = row === 3 || row === 7 || row === 11;
+  const starCol = col === 3 || col === 7 || col === 11;
+  return starRow && starCol;
 }
 
 function makeCell(
@@ -97,17 +96,18 @@ function makeCell(
 ): Cell {
   const isLast = index === lastMove && stone !== "empty";
   const inLine = lineContains(winLine, index);
+  const empty = stone === "empty";
   return {
     index,
     row,
     col,
     stone,
-    mark: markOf(stone),
     isBlack: stone === "black",
     isWhite: stone === "white",
-    isEmpty: stone === "empty",
+    isEmpty: empty,
     isLast,
     inLine,
+    isStar: empty && isStarPoint(row, col),
     highlight: isLast || inLine,
   };
 }
