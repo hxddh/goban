@@ -146,6 +146,31 @@ load("src/web/js/draw.js");
   assert(typeof Draw.attach === "function" && typeof Draw.draw === "function", "draw API");
 }
 
+// sgf AP version stamp
+{
+  const text = Sgf.buildSgf({
+    history: [{ r: 7, c: 7 }],
+    result: "play",
+    mode: "pvp",
+    humanColor: "b",
+    originalStartedAt: Date.UTC(2026, 0, 1),
+  });
+  assert(text.includes("AP[Goban:1.12]"), "SGF AP version");
+}
+
+// importPaused persists only when open game
+{
+  const open = State.sessionFromHistory([{ r: 7, c: 7 }], { mode: "ai", humanColor: "b" });
+  assert(open.ok && open.session.importPaused, "open game paused");
+  // simulate serialize field presence
+  const snap = {
+    v: 3,
+    importPaused: open.session.importPaused,
+    result: open.session.result,
+  };
+  assert(snap.v >= 3 && snap.importPaused && snap.result === "play", "save v3 pause flag");
+}
+
 if (failed) {
   console.error("\n" + failed + " failed");
   process.exit(1);

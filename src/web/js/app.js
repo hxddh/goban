@@ -243,6 +243,10 @@
   /** After SGF import: no auto-AI until「续下」or human places. */
   let importPaused = false;
   let winFlashUntil = 0;
+  /** @type {{r:number,c:number,color:string}|null} */
+  let hoverCell = null;
+  /** @type {'off' | 'last' | 'all'} */
+  let moveNumbers = "last";
 
   function hasZero() { return Host.hasZero(); }
 
@@ -329,6 +333,7 @@
     viewIndex = Math.max(0, Math.min(n, history.length));
     board = boardAfter(viewIndex);
     winLine = viewIndex > 0 ? winLineAt(viewIndex) : null;
+    hoverCell = null;
     sync();
   }
 
@@ -341,6 +346,7 @@
     } else {
       winLine = winLineAt(history.length);
     }
+    hoverCell = null;
     sync();
   }
 
@@ -393,14 +399,64 @@
       if (s.humanColor === "b" || s.humanColor === "w") humanColor = s.humanColor;
       if (typeof s.soundOn === "boolean") soundOn = s.soundOn;
       if (s.themeId && THEMES[s.themeId]) themeId = s.themeId;
+      if (s.moveNumbers === "off" || s.moveNumbers === "last" || s.moveNumbers === "all") {
+        moveNumbers = s.moveNumbers;
+      }
     } catch (_) {}
   }
 
   function saveSettings() {
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId })
+      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, moveNumbers })
     );
+  }
+
+  /** True when human may place on the live board (hover preview allowed). */
+  function canHoverPlace() {
+    if (result !== "play" || !isLive() || aiThinking) return false;
+    if (importPaused && mode === "ai" && !isHumanTurn()) return false;
+    return isHumanTurn();
+  }
+
+  function nextPlaceColor() {
+    return history.length % 2 === 0 ? "b" : "w";
+  }
+
+  function setHoverFromEvent(ev) {
+    if (!canHoverPlace()) {
+      if (hoverCell) {
+        hoverCell = null;
+        draw();
+      }
+      return;
+    }
+    const { x, y } = canvasPoint(ev);
+    const cell = cellAt(x, y);
+    if (!cell || board[cell.r][cell.c]) {
+      if (hoverCell) {
+        hoverCell = null;
+        draw();
+      }
+      return;
+    }
+    const color = nextPlaceColor();
+    if (
+      hoverCell &&
+      hoverCell.r === cell.r &&
+      hoverCell.c === cell.c &&
+      hoverCell.color === color
+    ) {
+      return;
+    }
+    hoverCell = { r: cell.r, c: cell.c, color: color };
+    draw();
+  }
+
+  function clearHover() {
+    if (!hoverCell) return;
+    hoverCell = null;
+    draw();
   }
 
   function playMoveSound(color) {
@@ -453,7 +509,7 @@
 
   function serialize() {
     return {
-      v: 2,
+      v: 3,
       board,
       turn,
       result,
@@ -465,6 +521,7 @@
       startedAt,
       elapsedBaseMs: nowElapsed(),
       originalStartedAt,
+      importPaused: !!importPaused,
       savedAt: Date.now(),
     };
   }
@@ -488,7 +545,7 @@
       const raw = Host.storageGet(SAVE_KEY) || Host.storageGet("goban.v11.save");
       if (!raw) return false;
       const s = JSON.parse(raw);
-      if (!s || (s.v !== 1 && s.v !== 2)) return false;
+      if (!s || (s.v !== 1 && s.v !== 2 && s.v !== 3)) return false;
       // Resume only with a move list — board-only snapshots cannot place safely.
       const loadedHistory = Array.isArray(s.history) ? s.history : [];
       if (!loadedHistory.length) return false;
@@ -507,6 +564,10 @@
         ? s.originalStartedAt
         : (Date.now() - elapsedBaseMs);
       startedAt = Date.now();
+      // v3+: restore import pause so AI does not auto-continue after import-only save.
+      // Older saves: treat as live (importPaused false).
+      importPaused = s.v >= 3 && !!s.importPaused && result === "play";
+      hoverCell = null;
       return true;
     } catch (_) {
       return false;
@@ -533,6 +594,8 @@
     placeAnim: placeAnim,
     winLine: winLine,
     winFlashUntil: winFlashUntil,
+    hover: hoverCell,
+    moveNumbers: moveNumbers,
     clearPlaceAnim: () => { placeAnim = null; },
   }));
 
@@ -550,6 +613,7 @@
     if (importPaused) return;
     if (mode !== "ai" || result !== "play" || isHumanTurn() || aiThinking) return;
     aiThinking = true;
+    hoverCell = null;
     const gen = gameGen;
     sync();
     const delay = difficulty === "hard" ? 40 : difficulty === "normal" ? 70 : 55;
@@ -586,6 +650,7 @@
     board[r][c] = turn;
     history.push({ r, c });
     viewIndex = history.length;
+    hoverCell = null;
     placeAnim = { r, c, t0: performance.now() };
     ensureAnimLoop();
     playMoveSound(turn);
@@ -656,6 +721,7 @@
     aiThinking = false;
     placeAnim = null;
     importPaused = false;
+    hoverCell = null;
     saveSettings();
     sync();
     saveGame();
@@ -682,6 +748,9 @@
     });
     document.querySelectorAll("#theme-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.theme === themeId);
+    });
+    document.querySelectorAll("#nums-seg button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.nums === moveNumbers);
     });
     const aiOnly = mode === "ai";
     const diffField = document.getElementById("diff-field");
@@ -749,7 +818,12 @@
     } else if (result === "b") status.textContent = "黑棋胜";
     else if (result === "w") status.textContent = "白棋胜";
     else if (result === "draw") status.textContent = "平局";
-    else if (importPaused) status.textContent = "导入复盘 · 可续下";
+    else if (importPaused) {
+      status.textContent =
+        mode === "ai" && !isHumanTurn()
+          ? "导入复盘 · 点「续下」让电脑走"
+          : "导入复盘 · 可落子或点「续下」";
+    }
     else if (aiThinking) status.textContent = "电脑思考中…";
     else status.textContent = turn === "b" ? "黑棋落子" : "白棋落子";
 
@@ -770,6 +844,9 @@
     if (!cell) return;
     place(cell.r, cell.c, false);
   });
+  canvas.addEventListener("mousemove", (ev) => { setHoverFromEvent(ev); });
+  canvas.addEventListener("mouseleave", () => { clearHover(); });
+  canvas.style.cursor = "crosshair";
 
   document.getElementById("undo").onclick = undo;
   const undo2 = document.getElementById("undo2");
@@ -827,6 +904,21 @@
     const names = { wood: "木盘", night: "夜盘", day: "日间", notebook: "练习本" };
     toast("主题：" + (names[themeId] || themeId));
   };
+  const numsSeg = document.getElementById("nums-seg");
+  if (numsSeg) {
+    numsSeg.onclick = (ev) => {
+      const b = ev.target.closest("button[data-nums]");
+      if (!b) return;
+      const id = b.dataset.nums;
+      if (id !== "off" && id !== "last" && id !== "all") return;
+      if (moveNumbers === id) return;
+      moveNumbers = id;
+      saveSettings();
+      syncSettingsUI();
+      draw();
+      toast("手数：" + ({ off: "关闭", last: "仅最新一手", all: "全部" })[id]);
+    };
+  }
   document.getElementById("opt-sound").onclick = () => {
     soundOn = !soundOn;
     saveSettings();

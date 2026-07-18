@@ -1,8 +1,8 @@
 /**
  * Canvas board rendering (themes + paint).
- * Model is provided via attach(canvas, ctx, modelFn).
- * modelFn() should return:
- *   { board, history, viewIndex, themeId, placeAnim, winLine, winFlashUntil, clearPlaceAnim }
+ * Model via attach(canvas, ctx, modelFn):
+ *   board, history, viewIndex, themeId, placeAnim, winLine, winFlashUntil,
+ *   clearPlaceAnim, hover {r,c,color}|null, moveNumbers "off"|"last"|"all"
  */
 (function (global) {
   const SIZE = (global.GobanCore && global.GobanCore.SIZE) || 15;
@@ -331,6 +331,44 @@
       }
     }
 
+    // Hover ghost (next stone preview)
+    const hover = m.hover;
+    if (hover && hover.r >= 0 && hover.c >= 0 && !board[hover.r][hover.c]) {
+      const x = pad + hover.c * step;
+      const y = pad + hover.r * step;
+      const color = hover.color === "w" ? "w" : "b";
+      ctx.save();
+      ctx.globalAlpha = th.style === "pencil" ? 0.45 : 0.38;
+      if (th.style === "pencil") {
+        const ink = color === "b" ? (th.pencilB || th.pencil) : (th.pencilW || th.pencil);
+        const lw = Math.max(1.5, step * 0.07);
+        if (color === "b") drawOutlineTriangle(x, y, step * 0.72, ink, lw);
+        else drawOutlineCircle(x, y, step * 0.34, ink, lw);
+      } else {
+        const rr = step * 0.4;
+        const sg = ctx.createRadialGradient(
+          x - rr * 0.35, y - rr * 0.4, rr * 0.1, x, y, rr
+        );
+        if (color === "b") {
+          sg.addColorStop(0, "#5a5a5a");
+          sg.addColorStop(1, "#111");
+        } else {
+          sg.addColorStop(0, "#fff");
+          sg.addColorStop(1, "#c8c8c8");
+        }
+        ctx.beginPath();
+        ctx.arc(x, y, rr, 0, Math.PI * 2);
+        ctx.fillStyle = sg;
+        ctx.fill();
+        if (color === "w") {
+          ctx.strokeStyle = "rgba(0,0,0,0.2)";
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
     if (viewIndex > 0 && history[viewIndex - 1]) {
       const last = history[viewIndex - 1];
       const x = pad + last.c * step;
@@ -341,6 +379,37 @@
       ctx.strokeStyle = board[last.r][last.c] === "b" ? th.lastB : th.lastW;
       ctx.lineWidth = Math.max(1.05, step * 0.032);
       ctx.stroke();
+    }
+
+    // Move numbers: off | last (current tip only) | all (1..viewIndex)
+    const nums = m.moveNumbers || "off";
+    if (nums !== "off" && viewIndex > 0 && history.length) {
+      const fontPx = Math.max(9, Math.min(15, step * 0.38));
+      ctx.save();
+      ctx.font = "600 " + fontPx + "px -apple-system, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const startI = nums === "last" ? viewIndex - 1 : 0;
+      for (let i = startI; i < viewIndex; i++) {
+        const p = history[i];
+        if (!p) continue;
+        const x = pad + p.c * step;
+        const y = pad + p.r * step;
+        const color = i % 2 === 0 ? "b" : "w";
+        if (th.style === "pencil") {
+          ctx.fillStyle = color === "b" ? (th.pencilB || th.pencil) : (th.pencilW || th.pencil);
+        } else {
+          ctx.fillStyle = color === "b" ? "rgba(255,255,255,0.92)" : "rgba(20,18,16,0.88)";
+        }
+        // slight outline for readability on busy boards
+        if (th.style !== "pencil") {
+          ctx.lineWidth = Math.max(2, fontPx * 0.18);
+          ctx.strokeStyle = color === "b" ? "rgba(0,0,0,0.35)" : "rgba(255,255,255,0.55)";
+          ctx.strokeText(String(i + 1), x, y + 0.5);
+        }
+        ctx.fillText(String(i + 1), x, y + 0.5);
+      }
+      ctx.restore();
     }
 
     if (winLine && winLine.length) {
