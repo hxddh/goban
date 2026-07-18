@@ -24,22 +24,32 @@
   function findWin(r, c, color) { return Core.findWin(board, r, c, color); }
   function boardFull() { return Core.boardFull(board); }
   function wouldWin(r, c, color) { return Core.wouldWin(board, r, c, color); }
+  /** @type {'fast' | 'normal' | 'deep'} hard-mode think budget */
+  let thinkLevel = "normal";
+
+  function hardTimeMs() {
+    if (thinkLevel === "fast") return 400;
+    if (thinkLevel === "deep") return 1200;
+    return 700;
+  }
+
+  function budgetForDiff(diff) {
+    if (diff === "hard") return hardTimeMs();
+    if (diff === "normal") return 120;
+    return 30;
+  }
+
   function aiMoveSync(opts) {
     const diff = (opts && opts.difficulty) || difficulty;
     const timeMs =
-      typeof (opts && opts.timeMs) === "number"
-        ? opts.timeMs
-        : diff === "hard"
-          ? 450
-          : diff === "normal"
-            ? 100
-            : 30;
+      typeof (opts && opts.timeMs) === "number" ? opts.timeMs : budgetForDiff(diff);
     return Ai.aiMove({
       board: (opts && opts.board) || board,
       humanColor: (opts && opts.humanColor) || humanColor,
       side: opts && opts.side,
       difficulty: diff,
       timeMs: timeMs,
+      think: thinkLevel,
     });
   }
 
@@ -93,7 +103,8 @@
     // normal/hard both prefer worker (C1 can be heavy)
     const useWorker = payload.difficulty === "hard" || payload.difficulty === "normal";
     const timeMs =
-      payload.difficulty === "hard" ? 450 : payload.difficulty === "normal" ? 100 : 30;
+      typeof payload.timeMs === "number" ? payload.timeMs : budgetForDiff(payload.difficulty);
+    const think = payload.think || thinkLevel;
     const w = useWorker ? getAiWorker() : null;
     if (w) {
       return new Promise((resolve) => {
@@ -107,7 +118,8 @@
         };
         aiPending.set(id, {
           resolve: (move) => finish(move),
-          reject: () => finish(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs }))),
+          reject: () =>
+            finish(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs, think: think }))),
         });
         try {
           w.postMessage({
@@ -117,21 +129,27 @@
             side: payload.side,
             difficulty: payload.difficulty,
             timeMs: timeMs,
+            think: think,
           });
         } catch (e) {
-          finish(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs })));
+          finish(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs, think: think })));
           return;
         }
-        // safety: budget + margin
+        // safety: budget + margin for TT search
         setTimeout(() => {
           if (settled) return;
-          finish(aiMoveSync(Object.assign({}, payload, { timeMs: Math.min(80, timeMs) })));
-        }, timeMs + 600);
+          finish(
+            aiMoveSync(
+              Object.assign({}, payload, { timeMs: Math.min(120, timeMs), think: think })
+            )
+          );
+        }, timeMs + 900);
       });
     }
     return new Promise((resolve) => {
       setTimeout(
-        () => resolve(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs }))),
+        () =>
+          resolve(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs, think: think }))),
         0
       );
     });
@@ -501,6 +519,8 @@
         board: liveBoard,
         side: side,
         difficulty: difficulty === "easy" ? "normal" : difficulty,
+        think: thinkLevel,
+        timeMs: budgetForDiff(difficulty === "easy" ? "normal" : difficulty),
       });
       if (gen !== gameGen) {
         // discarded late result
@@ -571,14 +591,16 @@
       if (s.humanColor === "b" || s.humanColor === "w") humanColor = s.humanColor;
       if (typeof s.soundOn === "boolean") soundOn = s.soundOn;
       if (s.themeId && THEMES[s.themeId]) themeId = s.themeId;
-      // moveNumbers removed in 1.13.1 — ignore legacy setting
+      if (s.thinkLevel === "fast" || s.thinkLevel === "normal" || s.thinkLevel === "deep") {
+        thinkLevel = s.thinkLevel;
+      }
     } catch (_) {}
   }
 
   function saveSettings() {
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId })
+      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel })
     );
   }
 
@@ -810,6 +832,8 @@
       board: boardAfter(history.length),
       humanColor: humanColor,
       difficulty: difficulty,
+      think: thinkLevel,
+      timeMs: budgetForDiff(difficulty),
     }).then((m) => {
       if (gen !== gameGen) return;
       const spent = performance.now() - t0;
@@ -947,6 +971,9 @@
     document.querySelectorAll("#diff-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.diff === difficulty);
     });
+    document.querySelectorAll("#think-seg button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.think === thinkLevel);
+    });
     document.querySelectorAll("#color-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.human === humanColor);
     });
@@ -955,8 +982,10 @@
     });
     const aiOnly = mode === "ai";
     const diffField = document.getElementById("diff-field");
+    const thinkField = document.getElementById("think-field");
     const colorField = document.getElementById("color-field");
     if (diffField) diffField.hidden = !aiOnly;
+    if (thinkField) thinkField.hidden = !(aiOnly && difficulty === "hard");
     if (colorField) colorField.hidden = !aiOnly;
     const sbOn = document.getElementById("opt-sound");
     if (sbOn) {
@@ -1113,6 +1142,23 @@
     syncSettingsUI();
     toast("难度：" + ({ easy: "简单", normal: "普通", hard: "困难" })[difficulty]);
   };
+  const thinkSeg = document.getElementById("think-seg");
+  if (thinkSeg) {
+    thinkSeg.onclick = (ev) => {
+      const b = ev.target.closest("button[data-think]");
+      if (!b) return;
+      const id = b.dataset.think;
+      if (id !== "fast" && id !== "normal" && id !== "deep") return;
+      if (thinkLevel === id) return;
+      thinkLevel = id;
+      saveSettings();
+      syncSettingsUI();
+      toast(
+        "思考：" +
+          ({ fast: "快 ~0.4s", normal: "标准 ~0.7s", deep: "深 ~1.2s" })[id]
+      );
+    };
+  }
   document.getElementById("theme-seg").onclick = (ev) => {
     const b = ev.target.closest("button[data-theme]");
     if (!b) return;

@@ -157,7 +157,7 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.14]"), "SGF AP version");
+  assert(text.includes("AP[Goban:1.15]"), "SGF AP version");
 }
 
 // importPaused persists only when open game
@@ -250,6 +250,46 @@ load("src/web/js/draw.js");
 // findVCF exists
 {
   assert(typeof Ai.findVCF === "function" && typeof Ai.findVCT === "function", "C1 exports VCF/VCT");
+}
+
+// C1.b: profile budgets
+{
+  const pFast = Ai.profileFor("hard", { think: "fast" });
+  const pDeep = Ai.profileFor("hard", { think: "deep" });
+  const pNorm = Ai.profileFor("hard", { think: "normal" });
+  assert(pFast.budgetMs === 400, "fast budget");
+  assert(pDeep.budgetMs === 1200, "deep budget");
+  assert(pNorm.budgetMs === 700, "normal hard budget");
+  assert(pDeep.abDepth >= pNorm.abDepth && pNorm.vctDepth >= 8, "hard depths");
+}
+
+// C1.b: block live three ends (white to move)
+{
+  const b = Core.emptyBoard();
+  b[7][5] = b[7][6] = b[7][7] = "b";
+  b[0][0] = b[1][0] = "w";
+  const m = Ai.aiMove({ board: b, side: "w", difficulty: "hard", timeMs: 350 });
+  assert(m && m.r === 7 && (m.c === 4 || m.c === 8), "block live3 " + JSON.stringify(m));
+}
+
+// C1.b: TT search returns legal empty cell midgame
+{
+  const b = Core.emptyBoard();
+  const seq = [
+    [7, 7],
+    [7, 8],
+    [8, 7],
+    [8, 8],
+    [6, 7],
+    [6, 8],
+    [9, 7],
+    [5, 5],
+  ];
+  seq.forEach((p, i) => {
+    b[p[0]][p[1]] = i % 2 === 0 ? "b" : "w";
+  });
+  const m = Ai.aiMove({ board: b, side: "b", difficulty: "hard", timeMs: 400 });
+  assert(m && !b[m.r][m.c], "TT search legal " + JSON.stringify(m));
 }
 
 if (failed) {

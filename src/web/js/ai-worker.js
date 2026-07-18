@@ -1,5 +1,5 @@
 /**
- * Web Worker: C1 AI off the UI thread.
+ * Web Worker: C1.b AI off the UI thread.
  */
 /* global GobanAi */
 try {
@@ -17,20 +17,21 @@ self.onmessage = function (ev) {
       return;
     }
     const difficulty = data.difficulty || "normal";
-    const timeMs =
-      typeof data.timeMs === "number"
-        ? data.timeMs
-        : difficulty === "hard"
-          ? 450
-          : difficulty === "normal"
-            ? 100
-            : 30;
+    const think = data.think || "normal";
+    let timeMs = data.timeMs;
+    if (typeof timeMs !== "number") {
+      if (difficulty === "hard") {
+        timeMs = think === "fast" ? 400 : think === "deep" ? 1200 : 700;
+      } else if (difficulty === "normal") timeMs = 120;
+      else timeMs = 30;
+    }
     const move = self.GobanAi.aiMove({
       board: data.board,
       humanColor: data.humanColor,
       side: data.side,
       difficulty: difficulty,
       timeMs: timeMs,
+      think: think,
     });
     self.postMessage({ id: id, move: move });
   } catch (err) {
