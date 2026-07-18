@@ -1,9 +1,16 @@
 /**
- * Heuristic + shallow α-β AI. Mutates board in place during search; restores.
+ * Heuristic + α-β AI. Mutates a board copy during search (never caller's board).
  * @module ai
  */
 (function (global) {
   const Core = global.GobanCore;
+
+  function cloneBoard(board) {
+    const SIZE = Core.SIZE;
+    const out = [];
+    for (let r = 0; r < SIZE; r++) out.push(board[r].slice());
+    return out;
+  }
 
   function shapeScoreFor(board, color) {
     let score = 0;
@@ -33,15 +40,15 @@
           const br = r - dr,
             bc = c - dc;
           if (br < 0 || br >= SIZE || bc < 0 || bc >= SIZE || !board[br][bc]) open++;
-          if (rr < 0 || rr >= SIZE || cc < 0 || cc >= SIZE || !board[rr][cc]) open++;
+          if (rr < 0 || rr >= SIZE || cc >= SIZE || cc < 0 || !board[rr][cc]) open++;
           if (n >= 5) score += 100000;
-          else if (n === 4 && open === 2) score += 20000;
-          else if (n === 4 && open === 1) score += 5000;
-          else if (n === 3 && open === 2) score += 2000;
-          else if (n === 3 && open === 1) score += 200;
-          else if (n === 2 && open === 2) score += 80;
-          else if (n === 2 && open === 1) score += 15;
-          else score += n * 3;
+          else if (n === 4 && open === 2) score += 50000;
+          else if (n === 4 && open === 1) score += 12000;
+          else if (n === 3 && open === 2) score += 4000;
+          else if (n === 3 && open === 1) score += 350;
+          else if (n === 2 && open === 2) score += 120;
+          else if (n === 2 && open === 1) score += 20;
+          else score += n * 4;
         }
       }
     }
@@ -58,7 +65,8 @@
         const w = 14 - (Math.abs(r - 7) + Math.abs(c - 7));
         center += board[r][c] === me ? w : -w;
       }
-    return shapeScoreFor(board, me) - shapeScoreFor(board, them) * 1.05 + center * 0.5;
+    // Slightly overweight defense so blocks are preferred when close
+    return shapeScoreFor(board, me) - shapeScoreFor(board, them) * 1.12 + center * 0.45;
   }
 
   function nearStone(board, r, c, dist) {
@@ -78,14 +86,23 @@
     if (board[r][c]) return -1e9;
     const them = Core.opp(me);
     if (Core.wouldWin(board, r, c, me)) return 1e6;
-    if (Core.wouldWin(board, r, c, them)) return 5e5;
+    if (Core.wouldWin(board, r, c, them)) return 8e5;
     board[r][c] = me;
-    const s = evaluateBoard(board, me);
+    // Count how many immediate threats we create (next-move wins for me)
+    let threats = 0;
+    const SIZE = Core.SIZE;
+    for (let rr = 0; rr < SIZE; rr++) {
+      for (let cc = 0; cc < SIZE; cc++) {
+        if (board[rr][cc]) continue;
+        if (Core.wouldWin(board, rr, cc, me)) threats++;
+      }
+    }
+    const s = evaluateBoard(board, me) + threats * 8000;
     board[r][c] = "";
     return s;
   }
 
-  /** Order by the side about to move (fixes AI-only sort bias). */
+  /** Order by the side about to move. */
   function candidateMoves(board, maxN, nearDist, sideToMove) {
     const SIZE = Core.SIZE;
     let has = false;
@@ -115,9 +132,10 @@
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
-  function negamax(board, depth, alpha, beta, side, root) {
+  function negamax(board, depth, alpha, beta, side, root, hard) {
     if (depth === 0) return evaluateBoard(board, root);
-    const moves = candidateMoves(board, depth >= 2 ? 14 : 18, 2, side);
+    const branch = hard ? (depth >= 2 ? 12 : 16) : depth >= 2 ? 14 : 18;
+    const moves = candidateMoves(board, branch, 2, side);
     if (!moves.length) return 0;
     let best = -Infinity;
     for (const m of moves) {
@@ -128,7 +146,7 @@
       if (Core.findWin(board, m.r, m.c, side)) {
         val = 900000 + depth;
       } else {
-        val = -negamax(board, depth - 1, -beta, -alpha, Core.opp(side), root);
+        val = -negamax(board, depth - 1, -beta, -alpha, Core.opp(side), root, hard);
       }
       board[m.r][m.c] = "";
       if (val > best) best = val;
@@ -141,14 +159,19 @@
   /**
    * @param {object} opts
    * @param {string[][]} opts.board
-   * @param {string} opts.humanColor
-   * @param {string} opts.difficulty easy|normal|hard
+   * @param {string} [opts.humanColor] used if side omitted (AI plays opp)
+   * @param {string} [opts.side] side to move ('b'|'w')
+   * @param {string} [opts.difficulty] easy|normal|hard
+   * @returns {{r:number,c:number}|null}
    */
   function aiMove(opts) {
-    const board = opts.board;
-    const humanColor = opts.humanColor;
+    const board = cloneBoard(opts.board);
     const difficulty = opts.difficulty || "normal";
-    const me = Core.opp(humanColor);
+    const me =
+      opts.side === "b" || opts.side === "w"
+        ? opts.side
+        : Core.opp(opts.humanColor || "b");
+    const them = Core.opp(me);
     const SIZE = Core.SIZE;
     let any = false;
     for (let r = 0; r < SIZE; r++)
@@ -165,32 +188,56 @@
           [7, 6],
           [7, 8],
         ];
-        const p = randomPick(opts0.map(([r, c]) => ({ r, c })));
-        return p;
+        return randomPick(opts0.map(([r, c]) => ({ r, c })));
       }
       return { r: 7, c: 7 };
     }
 
-    const cands = candidateMoves(board, 40, 2, me);
+    const cands = candidateMoves(board, 48, 2, me);
+    // Immediate win
     for (const m of cands) {
       if (Core.wouldWin(board, m.r, m.c, me)) return m;
     }
+    // Block opponent win
     for (const m of cands) {
-      if (Core.wouldWin(board, m.r, m.c, humanColor)) return m;
+      if (Core.wouldWin(board, m.r, m.c, them)) return m;
     }
 
     if (difficulty === "easy") {
       const scored = cands.map((m) => ({ ...m, s: scorePlace(board, m.r, m.c, me) }));
       scored.sort((a, b) => b.s - a.s);
       const pool = scored.slice(0, Math.min(8, scored.length));
-      if (Math.random() < 0.4 && pool.length > 1) {
+      if (Math.random() < 0.45 && pool.length > 1) {
         return pool[1 + Math.floor(Math.random() * (pool.length - 1))];
       }
       return randomPick(pool.slice(0, 3)) || pool[0];
     }
 
-    const depth = difficulty === "hard" ? 2 : 1;
-    const top = candidateMoves(board, difficulty === "hard" ? 16 : 20, 2, me);
+    // Prefer creating dual threats (forks) before deep search
+    if (difficulty === "hard") {
+      let bestFork = null;
+      let bestForkN = 1;
+      for (const m of cands.slice(0, 24)) {
+        board[m.r][m.c] = me;
+        let n = 0;
+        for (let r = 0; r < SIZE; r++)
+          for (let c = 0; c < SIZE; c++) {
+            if (board[r][c]) continue;
+            if (Core.wouldWin(board, r, c, me)) n++;
+          }
+        board[m.r][m.c] = "";
+        if (n >= 2 && n > bestForkN) {
+          bestForkN = n;
+          bestFork = m;
+        }
+      }
+      if (bestFork) return bestFork;
+    }
+
+    const hard = difficulty === "hard";
+    const depth = hard ? 3 : 1;
+    const topN = hard ? 18 : 20;
+    const top = candidateMoves(board, topN, 2, me);
     let bestMove = top[0];
     let bestVal = -Infinity;
     for (const m of top) {
@@ -200,10 +247,10 @@
       if (Core.findWin(board, m.r, m.c, me)) {
         val = 1e6;
       } else {
-        val = -negamax(board, depth - 1, -Infinity, Infinity, Core.opp(me), me);
+        val = -negamax(board, depth - 1, -Infinity, Infinity, them, me, hard);
       }
       board[m.r][m.c] = "";
-      if (difficulty === "normal") val += (Math.random() - 0.5) * 30;
+      if (difficulty === "normal") val += (Math.random() - 0.5) * 40;
       if (val > bestVal) {
         bestVal = val;
         bestMove = m;
@@ -212,5 +259,21 @@
     return bestMove || top[0] || null;
   }
 
-  global.GobanAi = { aiMove, candidateMoves, evaluateBoard };
+  /** Hint for the side to move (does not place). */
+  function hintMove(opts) {
+    return aiMove({
+      board: opts.board,
+      side: opts.side,
+      humanColor: opts.humanColor,
+      difficulty: opts.difficulty === "easy" ? "normal" : opts.difficulty || "normal",
+    });
+  }
+
+  global.GobanAi = {
+    aiMove,
+    hintMove,
+    candidateMoves,
+    evaluateBoard,
+    cloneBoard,
+  };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -21,10 +21,12 @@ function load(rel) {
 
 load("src/web/js/core.js");
 load("src/web/js/sgf.js");
+load("src/web/js/ai.js");
 load("src/web/js/state.js");
 
 const Core = ctx.GobanCore;
 const Sgf = ctx.GobanSgf;
+const Ai = ctx.GobanAi;
 const State = ctx.GobanState;
 
 let failed = 0;
@@ -155,7 +157,7 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.12]"), "SGF AP version");
+  assert(text.includes("AP[Goban:1.13]"), "SGF AP version");
 }
 
 // importPaused persists only when open game
@@ -169,6 +171,37 @@ load("src/web/js/draw.js");
     result: open.session.result,
   };
   assert(snap.v >= 3 && snap.importPaused && snap.result === "play", "save v3 pause flag");
+}
+
+// AI: win now / block opponent / does not mutate caller board
+{
+  const b = Core.emptyBoard();
+  // black has four in a row — white to block at (7,4)
+  for (let c = 0; c < 4; c++) b[7][c] = "b";
+  b[0][0] = "w";
+  b[1][0] = "w";
+  const snap = b.map((row) => row.join(""));
+  const block = Ai.aiMove({ board: b, side: "w", difficulty: "hard" });
+  assert(block && block.r === 7 && block.c === 4, "hard blocks open four at 7,4 got " + JSON.stringify(block));
+  assert(b.map((row) => row.join("")).join("|") === snap.join("|"), "aiMove does not mutate board");
+
+  const b2 = Core.emptyBoard();
+  for (let c = 0; c < 4; c++) b2[5][c] = "w";
+  b2[0][0] = "b";
+  const win = Ai.aiMove({ board: b2, side: "w", difficulty: "normal" });
+  assert(win && win.r === 5 && win.c === 4, "takes winning fifth " + JSON.stringify(win));
+
+  const b3 = Core.emptyBoard();
+  b3[7][7] = "b";
+  const hint = Ai.hintMove({ board: b3, side: "w", difficulty: "easy" });
+  assert(hint && typeof hint.r === "number", "hintMove returns a cell");
+}
+
+// AI empty board center bias
+{
+  const b = Core.emptyBoard();
+  const m = Ai.aiMove({ board: b, side: "b", difficulty: "hard" });
+  assert(m && m.r === 7 && m.c === 7, "hard opening center");
 }
 
 if (failed) {

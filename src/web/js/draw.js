@@ -2,7 +2,8 @@
  * Canvas board rendering (themes + paint).
  * Model via attach(canvas, ctx, modelFn):
  *   board, history, viewIndex, themeId, placeAnim, winLine, winFlashUntil,
- *   clearPlaceAnim, hover {r,c,color}|null, moveNumbers "off"|"last"|"all"
+ *   clearPlaceAnim, hover {r,c,color}|null, moveNumbers "off"|"last"|"all",
+ *   hint {r,c}|null
  */
 (function (global) {
   const SIZE = (global.GobanCore && global.GobanCore.SIZE) || 15;
@@ -21,6 +22,7 @@
       lastB: "rgba(255,255,255,0.4)",
       lastW: "rgba(30,22,14,0.32)",
       win: "rgba(160, 70, 50, 0.55)",
+      hint: "rgba(40, 110, 180, 0.75)",
     },
     night: {
       boardTop: "#1e332c", boardMid: "#172822", boardBot: "#101c18",
@@ -29,6 +31,7 @@
       lastB: "rgba(220,230,225,0.38)",
       lastW: "rgba(10,16,14,0.4)",
       win: "rgba(125, 206, 160, 0.55)",
+      hint: "rgba(120, 220, 180, 0.8)",
     },
     day: {
       boardTop: "#f6ead4", boardMid: "#ecd9b5", boardBot: "#e2cba0",
@@ -37,6 +40,7 @@
       lastB: "rgba(255,255,255,0.45)",
       lastW: "rgba(40,35,28,0.3)",
       win: "rgba(140, 90, 50, 0.5)",
+      hint: "rgba(50, 100, 170, 0.75)",
     },
     notebook: {
       paper: "#fffcf5",
@@ -51,6 +55,7 @@
       lastB: "rgba(30,58,95,0.45)",
       lastW: "rgba(154,52,18,0.4)",
       win: "rgba(120, 60, 55, 0.5)",
+      hint: "rgba(30, 100, 160, 0.85)",
     },
   };
 
@@ -409,6 +414,32 @@
         }
         ctx.fillText(String(i + 1), x, y + 0.5);
       }
+      ctx.restore();
+    }
+
+    // Hint marker (suggested move, not placed)
+    const hint = m.hint;
+    if (hint && hint.r >= 0 && hint.c >= 0 && !board[hint.r][hint.c]) {
+      const x = pad + hint.c * step;
+      const y = pad + hint.r * step;
+      const rr = Math.max(4, step * 0.28);
+      ctx.save();
+      ctx.strokeStyle = th.hint || "rgba(40,110,180,0.75)";
+      ctx.lineWidth = Math.max(1.8, step * 0.07);
+      ctx.setLineDash([Math.max(3, step * 0.12), Math.max(2.5, step * 0.09)]);
+      ctx.beginPath();
+      ctx.arc(x, y, rr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // small cross
+      const s = Math.max(3, step * 0.12);
+      ctx.lineWidth = Math.max(1.4, step * 0.05);
+      ctx.beginPath();
+      ctx.moveTo(x - s, y);
+      ctx.lineTo(x + s, y);
+      ctx.moveTo(x, y - s);
+      ctx.lineTo(x, y + s);
+      ctx.stroke();
       ctx.restore();
     }
 

@@ -24,8 +24,85 @@
   function findWin(r, c, color) { return Core.findWin(board, r, c, color); }
   function boardFull() { return Core.boardFull(board); }
   function wouldWin(r, c, color) { return Core.wouldWin(board, r, c, color); }
-  function aiMove() {
-    return Ai.aiMove({ board: board, humanColor: humanColor, difficulty: difficulty });
+  function aiMoveSync(opts) {
+    return Ai.aiMove({
+      board: (opts && opts.board) || board,
+      humanColor: (opts && opts.humanColor) || humanColor,
+      side: opts && opts.side,
+      difficulty: (opts && opts.difficulty) || difficulty,
+    });
+  }
+
+  let aiWorker = null;
+  let aiReqId = 0;
+  const aiPending = new Map();
+
+  function getAiWorker() {
+    if (aiWorker) return aiWorker;
+    if (typeof Worker === "undefined") return null;
+    try {
+      const url = new URL("js/ai-worker.js", window.location.href).href;
+      aiWorker = new Worker(url);
+      aiWorker.onmessage = (ev) => {
+        const data = ev.data || {};
+        if (data.type === "error" && !data.id) {
+          // worker bootstrap failed — disable worker
+          try { aiWorker.terminate(); } catch (_) {}
+          aiWorker = null;
+          return;
+        }
+        const pending = aiPending.get(data.id);
+        if (!pending) return;
+        aiPending.delete(data.id);
+        if (data.error) pending.reject(new Error(data.error));
+        else pending.resolve(data.move || null);
+      };
+      aiWorker.onerror = () => {
+        try { aiWorker.terminate(); } catch (_) {}
+        aiWorker = null;
+        aiPending.forEach((p) => p.reject(new Error("worker error")));
+        aiPending.clear();
+      };
+      return aiWorker;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Run AI off-thread when possible (hard), else setTimeout yield.
+   * @returns {Promise<{r:number,c:number}|null>}
+   */
+  function aiMoveAsync(opts) {
+    const payload = {
+      board: (opts && opts.board) || board,
+      humanColor: (opts && opts.humanColor) || humanColor,
+      side: opts && opts.side,
+      difficulty: (opts && opts.difficulty) || difficulty,
+    };
+    const useWorker = payload.difficulty === "hard";
+    const w = useWorker ? getAiWorker() : null;
+    if (w) {
+      return new Promise((resolve, reject) => {
+        const id = ++aiReqId;
+        aiPending.set(id, { resolve, reject });
+        try {
+          w.postMessage({ id: id, board: payload.board, humanColor: payload.humanColor, side: payload.side, difficulty: payload.difficulty });
+        } catch (e) {
+          aiPending.delete(id);
+          setTimeout(() => resolve(aiMoveSync(payload)), 0);
+        }
+        // safety timeout
+        setTimeout(() => {
+          if (!aiPending.has(id)) return;
+          aiPending.delete(id);
+          resolve(aiMoveSync(payload));
+        }, 8000);
+      });
+    }
+    return new Promise((resolve) => {
+      setTimeout(() => resolve(aiMoveSync(payload)), 0);
+    });
   }
   function buildSgf() {
     return SgfMod.buildSgf({
@@ -118,6 +195,8 @@
     aiThinking = false;
     gameGen = s.gameGen;
     placeAnim = null;
+    clearHint();
+    hoverCell = null;
     importPaused = !!s.importPaused;
     // Review-only: never maybeAiTurn after import until「续下」.
     if (result === "b" || result === "w") triggerWinFlash();
@@ -247,8 +326,15 @@
   let hoverCell = null;
   /** @type {'off' | 'last' | 'all'} */
   let moveNumbers = "last";
+  /** @type {{r:number,c:number}|null} */
+  let hintCell = null;
+  let hintBusy = false;
 
   function hasZero() { return Host.hasZero(); }
+
+  function clearHint() {
+    hintCell = null;
+  }
 
   let confirmResolver = null;
 
@@ -334,6 +420,7 @@
     board = boardAfter(viewIndex);
     winLine = viewIndex > 0 ? winLineAt(viewIndex) : null;
     hoverCell = null;
+    clearHint();
     sync();
   }
 
@@ -347,7 +434,59 @@
       winLine = winLineAt(history.length);
     }
     hoverCell = null;
+    clearHint();
     sync();
+  }
+
+  async function requestHint() {
+    if (result !== "play") {
+      toast("对局已结束");
+      return;
+    }
+    if (!isLive()) {
+      toast("请先回到最新一手再提示");
+      return;
+    }
+    if (importPaused && mode === "ai" && !isHumanTurn()) {
+      toast("请先点「续下」");
+      return;
+    }
+    if (aiThinking || hintBusy) {
+      toast("请稍候…");
+      return;
+    }
+    // Hint for the side to move (human's turn in AI mode, or either in pvp)
+    if (mode === "ai" && !isHumanTurn()) {
+      toast("轮到电脑时无需提示");
+      return;
+    }
+    hintBusy = true;
+    hoverCell = null;
+    sync();
+    const side = history.length % 2 === 0 ? "b" : "w";
+    const gen = gameGen;
+    const liveBoard = boardAfter(history.length);
+    try {
+      const m = await aiMoveAsync({
+        board: liveBoard,
+        side: side,
+        difficulty: difficulty === "easy" ? "normal" : difficulty,
+      });
+      if (gen !== gameGen) return;
+      if (!m) {
+        toast("没有可用提示");
+        hintCell = null;
+      } else {
+        hintCell = { r: m.r, c: m.c };
+        toast("提示：" + (side === "b" ? "黑" : "白") + " · 虚线十字");
+      }
+    } catch (_) {
+      toast("提示失败");
+      hintCell = null;
+    } finally {
+      hintBusy = false;
+      sync();
+    }
   }
 
   /** SGF: col a–o left→right; row a–o bottom→top (Go FF4). */
@@ -596,6 +735,7 @@
     winFlashUntil: winFlashUntil,
     hover: hoverCell,
     moveNumbers: moveNumbers,
+    hint: hintCell,
     clearPlaceAnim: () => { placeAnim = null; },
   }));
 
@@ -614,14 +754,17 @@
     if (mode !== "ai" || result !== "play" || isHumanTurn() || aiThinking) return;
     aiThinking = true;
     hoverCell = null;
+    clearHint();
     const gen = gameGen;
     sync();
-    const delay = difficulty === "hard" ? 40 : difficulty === "normal" ? 70 : 55;
-    // yield so UI paints "思考中"
-    setTimeout(() => {
+    const delay = difficulty === "hard" ? 30 : difficulty === "normal" ? 70 : 55;
+    const t0 = performance.now();
+    aiMoveAsync({
+      board: boardAfter(history.length),
+      humanColor: humanColor,
+      difficulty: difficulty,
+    }).then((m) => {
       if (gen !== gameGen) return;
-      const t0 = performance.now();
-      const m = aiMove();
       const spent = performance.now() - t0;
       const wait = Math.max(0, delay - spent);
       setTimeout(() => {
@@ -630,7 +773,14 @@
         if (m) place(m.r, m.c, true);
         else sync();
       }, wait);
-    }, 0);
+    }).catch(() => {
+      if (gen !== gameGen) return;
+      aiThinking = false;
+      // fallback sync path
+      const m = aiMoveSync({ humanColor: humanColor, difficulty: difficulty });
+      if (m) place(m.r, m.c, true);
+      else sync();
+    });
   }
 
   function place(r, c, fromAi) {
@@ -651,6 +801,7 @@
     history.push({ r, c });
     viewIndex = history.length;
     hoverCell = null;
+    clearHint();
     placeAnim = { r, c, t0: performance.now() };
     ensureAnimLoop();
     playMoveSound(turn);
@@ -701,6 +852,7 @@
     result = "play";
     winLine = null;
     placeAnim = null;
+    clearHint();
     viewIndex = history.length;
     board = boardAfter(history.length);
     sync();
@@ -722,6 +874,7 @@
     placeAnim = null;
     importPaused = false;
     hoverCell = null;
+    clearHint();
     saveSettings();
     sync();
     saveGame();
@@ -796,6 +949,18 @@
       contBtn.hidden = !showCont;
       contBtn.disabled = !showCont || aiThinking;
     }
+    const hintBtn = document.getElementById("btn-hint");
+    if (hintBtn) {
+      const canHint =
+        result === "play" &&
+        isLive() &&
+        !aiThinking &&
+        !hintBusy &&
+        !(mode === "ai" && !isHumanTurn()) &&
+        !(importPaused && mode === "ai" && !isHumanTurn());
+      hintBtn.disabled = !canHint;
+      hintBtn.classList.toggle("busy", hintBusy);
+    }
 
     if (mode === "ai") {
       document.getElementById("black-role").textContent = humanColor === "b" ? "你" : "电脑";
@@ -825,6 +990,8 @@
           : "导入复盘 · 可落子或点「续下」";
     }
     else if (aiThinking) status.textContent = "电脑思考中…";
+    else if (hintBusy) status.textContent = "计算提示…";
+    else if (hintCell) status.textContent = (turn === "b" ? "黑棋落子" : "白棋落子") + " · 有提示";
     else status.textContent = turn === "b" ? "黑棋落子" : "白棋落子";
 
     syncSettingsUI();
@@ -852,6 +1019,8 @@
   const undo2 = document.getElementById("undo2");
   if (undo2) undo2.onclick = undo;
   document.getElementById("btn-new").onclick = () => { requestNewGame(); };
+  const hintBtnEl = document.getElementById("btn-hint");
+  if (hintBtnEl) hintBtnEl.onclick = () => { requestHint(); };
   const reset2 = document.getElementById("reset2");
   if (reset2) reset2.onclick = () => { requestNewGame(); };
   document.getElementById("clear-save").onclick = async () => {
@@ -994,6 +1163,10 @@
       })();
     } else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
     else if (k === "n" && !ev.metaKey && !ev.ctrlKey) requestNewGame();
+    else if (k === "h" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+      ev.preventDefault();
+      requestHint();
+    }
     else if (k === "[") setPanelOpen(false);
     else if (k === "]") setPanelOpen(true);
     else if (k === "f" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
@@ -1021,8 +1194,9 @@
     else if (id === "goban.sgf-export") downloadSgf();
     else if (id === "goban.sgf-paste") pasteSgfFromClipboard();
     else if (id === "goban.sgf-continue") continueFromImport();
+    else if (id === "goban.hint") requestHint();
     else if (id === "goban.toggle-panel") togglePanel();
-    else if (id === "goban.fullscreen") toggleFullscreen(); // hint only; real FS is system menu
+    else if (id === "goban.fullscreen") toggleFullscreen(); // system FS hint toast
   }
 
   if (hasZero() && typeof window.zero.on === "function") {

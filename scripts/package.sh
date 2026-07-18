@@ -19,6 +19,8 @@ test -f frontend/dist/js/core.js
 test -f frontend/dist/js/host.js
 test -f frontend/dist/js/state.js
 test -f frontend/dist/js/draw.js
+test -f frontend/dist/js/ai.js
+test -f frontend/dist/js/ai-worker.js
 
 echo "==> unit tests"
 node scripts/test-game.mjs
