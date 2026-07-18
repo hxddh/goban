@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>五子棋</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div id="app">
+    <header class="chrome">
+      <span class="brand">五子棋</span>
+      <span class="status-pill" id="status">黑棋落子</span>
+      <span class="meta-chip num" id="moves">0/0</span>
+      <span class="meta-chip num" id="clock">00:00</span>
+      <span class="spacer"></span>
+      <div class="chrome-actions">
+        <button type="button" class="tool-btn" id="undo" disabled title="悔棋 (Z)">悔棋</button>
+        <button type="button" class="tool-btn primary" id="btn-new" title="新局 (N)">新局</button>
+        <button type="button" class="icon-btn" id="help-btn" title="快捷键 (?)">?</button>
+        <button type="button" class="icon-btn" id="toggle-panel" title="侧栏 (Tab)" aria-label="侧栏">☰</button>
+      </div>
+    </header>
+
+    <div class="scrim" id="scrim"></div>
+    <div class="stage">
+      <div id="board-wrap">
+        <canvas id="board" width="900" height="900" aria-label="棋盘"></canvas>
+      </div>
+    </div>
+
+    <aside class="side" id="side" aria-label="对局面板">
+      <details class="group" open data-group="match">
+        <summary>本局</summary>
+        <div class="group-body">
+          <div class="players">
+            <div class="player">
+              <span class="stone black" aria-hidden="true"></span>
+              <div class="grow">
+                <div class="player-title">
+                  黑棋
+                  <span class="badge" id="black-turn" hidden>行棋</span>
+                </div>
+                <div class="muted" id="black-role">你</div>
+              </div>
+            </div>
+            <div class="player">
+              <span class="stone white" aria-hidden="true"></span>
+              <div class="grow">
+                <div class="player-title">
+                  白棋
+                  <span class="badge" id="white-turn" hidden>行棋</span>
+                </div>
+                <div class="muted" id="white-role">电脑</div>
+              </div>
+            </div>
+          </div>
+          <div class="meta-line">
+            <strong class="num" id="info-moves">0</strong>&nbsp;手
+            <span class="dot">·</span>
+            <strong class="num" id="info-time">00:00</strong>
+            <span class="dot">·</span>
+            <span id="save-hint">自动存档</span>
+          </div>
+          <div class="btns inline">
+            <button type="button" class="block" id="undo2" disabled>悔棋</button>
+            <button type="button" class="block primary" id="reset2">新局</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="group" open data-group="setup">
+        <summary>对局设置</summary>
+        <div class="group-body">
+          <div class="field">
+            <span class="field-label">模式</span>
+            <div class="seg" id="mode-seg">
+              <button type="button" data-mode="ai" class="active">人机</button>
+              <button type="button" data-mode="pvp">双人</button>
+            </div>
+          </div>
+          <div class="field" id="diff-field">
+            <span class="field-label">难度</span>
+            <div class="seg" id="diff-seg">
+              <button type="button" data-diff="easy">简单</button>
+              <button type="button" data-diff="normal" class="active">普通</button>
+              <button type="button" data-diff="hard">困难</button>
+            </div>
+          </div>
+          <div class="field" id="color-field">
+            <span class="field-label">执子</span>
+            <div class="seg" id="color-seg">
+              <button type="button" data-human="b" class="active">执黑</button>
+              <button type="button" data-human="w">执白</button>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="group" data-group="look">
+        <summary>外观</summary>
+        <div class="group-body">
+          <div class="field stack">
+            <span class="field-label">主题</span>
+            <div class="seg theme-grid" id="theme-seg">
+              <button type="button" data-theme="wood" class="active">木盘</button>
+              <button type="button" data-theme="night">夜盘</button>
+              <button type="button" data-theme="day">日间</button>
+              <button type="button" data-theme="notebook">本子</button>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">音效</span>
+            <div class="seg" id="sound-seg">
+              <button type="button" id="opt-sound" class="active" title="落子音效">开</button>
+              <button type="button" id="opt-sound-off" title="关闭音效">关</button>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="group" data-group="sgf">
+        <summary>棋谱</summary>
+        <div class="group-body">
+          <div class="meta-line">
+            进度&nbsp;<strong class="num" id="replay-pos">0 / 0</strong>
+          </div>
+          <div class="seg" id="replay-seg">
+            <button type="button" id="rep-start" title="开局 (Home)">|&lt;</button>
+            <button type="button" id="rep-prev" title="上一手 (←)">&lt;</button>
+            <button type="button" id="rep-next" title="下一手 (→)">&gt;</button>
+            <button type="button" id="rep-end" title="终局 (End)">&gt;|</button>
+          </div>
+          <div class="btns">
+            <button type="button" class="block" id="rep-live" disabled>回到最新一手</button>
+            <div class="btns inline">
+              <button type="button" class="block" id="sgf-copy">复制</button>
+              <button type="button" class="block" id="sgf-download">导出</button>
+            </div>
+            <button type="button" class="block" id="sgf-import">导入 SGF…</button>
+            <div class="muted" style="font-size:11px;line-height:1.4">也可将 .sgf 拖入窗口</div>
+          </div>
+        </div>
+      </details>
+
+      <div class="side-foot">
+        <button type="button" class="block" id="collapse">收起侧栏</button>
+        <button type="button" class="block ghost" id="clear-save">清除存档并新局</button>
+        <div class="footer">Tab 侧栏 · ? 快捷键</div>
+      </div>
+    </aside>
+
+    <div class="toast" id="toast"></div>
+
+    <div class="modal-bg" id="confirm-modal" role="dialog" aria-label="确认">
+      <div class="modal">
+        <h3 id="confirm-title">确认</h3>
+        <p id="confirm-message" class="muted" style="margin:0 0 16px;font-size:14px;line-height:1.5;color:var(--text)"></p>
+        <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" class="tool-btn" id="confirm-cancel">取消</button>
+          <button type="button" class="tool-btn primary" id="confirm-ok">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="help-modal" role="dialog" aria-label="快捷键">
+      <div class="modal">
+        <h3>快捷键</h3>
+        <table>
+          <tr><td>点击交叉点</td><td>落子（须在最新一手）</td></tr>
+          <tr><td>← →</td><td>复盘：上一手 / 下一手</td></tr>
+          <tr><td>Home / End</td><td>复盘：开局 / 终局</td></tr>
+          <tr><td>Z / ⌘Z</td><td>悔棋</td></tr>
+          <tr><td>N / ⌘N</td><td>新局</td></tr>
+          <tr><td>Tab / ☰</td><td>收起/展开侧栏</td></tr>
+          <tr><td>[ / ]</td><td>收起 / 展开侧栏</td></tr>
+          <tr><td>⌘1 / ⌘2</td><td>双人 / 人机（确认后新局）</td></tr>
+          <tr><td>⌘⌃F</td><td>系统全屏（View → Enter Full Screen）</td></tr>
+          <tr><td>绿键</td><td>窗口 Zoom / 放大（非 Spaces 全屏）</td></tr>
+          <tr><td>F</td><td>提示全屏/放大入口</td></tr>
+          <tr><td>Tab / [ ]</td><td>切换 / 收起 / 展开侧栏</td></tr>
+          <tr><td>?</td><td>打开本说明</td></tr>
+          <tr><td>Esc</td><td>关闭说明 / 收起侧栏</td></tr>
+          <tr><td>菜单栏</td><td>系统 View / Window（全屏·缩放）</td></tr>
+        </table>
+        <div class="close-row">
+          <button type="button" class="tool-btn primary" id="help-close">知道了</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="js/core.js"></script>
+  <script src="js/sgf.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
