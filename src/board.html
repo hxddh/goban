@@ -732,22 +732,26 @@
       boardTop: "#e8c49a", boardMid: "#d4a574", boardBot: "#c28b52",
       grain: true, line: "#3d2914", star: "#3d2914",
       style: "stone",
-      lastB: "#f5d76e", lastW: "#c0392b",
-      win: "rgba(220, 40, 40, 0.88)",
+      // Soft last-move ring (low contrast — not saturated red/gold)
+      lastB: "rgba(255,255,255,0.4)",
+      lastW: "rgba(30,22,14,0.32)",
+      win: "rgba(160, 70, 50, 0.55)",
     },
     night: {
       boardTop: "#1e332c", boardMid: "#172822", boardBot: "#101c18",
       grain: false, line: "#5a7a6c", star: "#7dcea0",
       style: "stone",
-      lastB: "#a8e6cf", lastW: "#f0c27b",
-      win: "rgba(125, 206, 160, 0.9)",
+      lastB: "rgba(220,230,225,0.38)",
+      lastW: "rgba(10,16,14,0.4)",
+      win: "rgba(125, 206, 160, 0.55)",
     },
     day: {
       boardTop: "#f6ead4", boardMid: "#ecd9b5", boardBot: "#e2cba0",
       grain: true, line: "#6b5344", star: "#6b5344",
       style: "stone",
-      lastB: "#c0392b", lastW: "#2980b9",
-      win: "rgba(166, 93, 46, 0.9)",
+      lastB: "rgba(255,255,255,0.45)",
+      lastW: "rgba(40,35,28,0.3)",
+      win: "rgba(140, 90, 50, 0.5)",
     },
     notebook: {
       paper: "#fffcf5",
@@ -757,8 +761,9 @@
       line: "#5a6a80",
       pencil: "#2a3140",
       style: "pencil",
-      lastB: "#c0392b", lastW: "#c0392b",
-      win: "rgba(192, 57, 43, 0.85)",
+      lastB: "rgba(42,49,64,0.38)",
+      lastW: "rgba(42,49,64,0.38)",
+      win: "rgba(120, 60, 55, 0.5)",
     },
   };
 
@@ -1216,7 +1221,7 @@
         if (performance.now() - placeAnim.t0 < 140) need = true;
         else placeAnim = null;
       }
-      if (winLine && winLine.length && result !== "play" && isLive()) need = true;
+      // Win line is static (no pulse) so we do not keep rAF running after game over.
       draw();
       if (need) rafId = requestAnimationFrame(tick);
     };
@@ -1402,20 +1407,20 @@
       const last = history[viewIndex - 1];
       const x = pad + last.c * step;
       const y = pad + last.r * step;
-      const markR = Math.max(3.2, step * 0.16);
+      // Scheme A: smaller, thinner last-move ring — findable, not loud
+      const markR = Math.max(2.2, step * 0.105);
       ctx.beginPath();
       ctx.arc(x, y, markR, 0, Math.PI * 2);
       ctx.strokeStyle = board[last.r][last.c] === "b" ? th.lastB : th.lastW;
-      ctx.lineWidth = Math.max(1.6, step * 0.055);
+      ctx.lineWidth = Math.max(1.05, step * 0.032);
       ctx.stroke();
     }
 
     if (winLine && winLine.length) {
-      const pulse = 0.72 + 0.28 * Math.sin(performance.now() / 320);
       ctx.save();
-      ctx.globalAlpha = th.style === "pencil" ? 0.78 + 0.14 * pulse : 0.55 + 0.35 * pulse;
+      ctx.globalAlpha = th.style === "pencil" ? 0.72 : 0.62;
       ctx.strokeStyle = th.win;
-      ctx.lineWidth = Math.max(2.2, step * 0.1) * (0.94 + 0.06 * pulse);
+      ctx.lineWidth = Math.max(2, step * 0.09);
       ctx.lineCap = "round";
       if (th.style === "pencil") {
         ctx.setLineDash([Math.max(4, step * 0.15), Math.max(3, step * 0.1)]);
