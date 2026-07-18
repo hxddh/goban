@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>五子棋</title>
   <style>
-    :root {
+    :root, [data-theme="wood"] {
       --bg: #14100e;
       --panel: #241c18;
       --panel-border: #3a2f28;
@@ -15,10 +15,55 @@
       --btn: #3d322a;
       --btn-hover: #4a3d33;
       --win: #ffe08a;
+      --chrome-bg: linear-gradient(180deg, rgba(20,16,14,.88), rgba(20,16,14,.4) 75%, transparent);
+      --board-frame: linear-gradient(145deg, #e0b07a, #c9965c 45%, #b8864e);
+      --board-shadow: 0 10px 36px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.22);
       --side-w: 260px;
       --chrome-h: 40px;
       --stage-pad: 6px;
       --wood-pad: 8px;
+    }
+    [data-theme="night"] {
+      --bg: #0b1210;
+      --panel: #121a18;
+      --panel-border: #24332e;
+      --text: #dce8e3;
+      --muted: #8aa399;
+      --accent: #7dcea0;
+      --btn: #1c2a25;
+      --btn-hover: #2a3d36;
+      --win: #a8e6cf;
+      --chrome-bg: linear-gradient(180deg, rgba(11,18,16,.9), rgba(11,18,16,.35) 75%, transparent);
+      --board-frame: linear-gradient(145deg, #1a2e28, #15241f 50%, #101c18);
+      --board-shadow: 0 10px 36px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+    }
+    [data-theme="day"] {
+      --bg: #e8e4dc;
+      --panel: #f4f0e8;
+      --panel-border: #d4cdc0;
+      --text: #2c261e;
+      --muted: #7a7164;
+      --accent: #b8894a;
+      --btn: #e0d9cc;
+      --btn-hover: #d2c9b8;
+      --win: #a65d2e;
+      --chrome-bg: linear-gradient(180deg, rgba(244,240,232,.95), rgba(244,240,232,.4) 75%, transparent);
+      --board-frame: linear-gradient(145deg, #f3e6d0, #e8d4b0 45%, #dfc9a0);
+      --board-shadow: 0 10px 28px rgba(80,60,30,.18), inset 0 1px 0 rgba(255,255,255,.7);
+    }
+    [data-theme="notebook"] {
+      --bg: #e6eaf0;
+      --panel: #f7f8fb;
+      --panel-border: #c5cdd8;
+      --text: #2a3140;
+      --muted: #6b7585;
+      --accent: #3b6ea5;
+      --btn: #e8ecf2;
+      --btn-hover: #dce2eb;
+      --win: #c0392b;
+      --chrome-bg: linear-gradient(180deg, rgba(247,248,251,.96), rgba(247,248,251,.45) 75%, transparent);
+      --board-frame: linear-gradient(180deg, #fffcf5, #f7f2e6);
+      --board-shadow: 0 8px 24px rgba(40,50,70,.15), inset 0 0 0 1px #d8d0c0;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -37,7 +82,7 @@
       height: var(--chrome-h); z-index: 20;
       display: flex; align-items: center; gap: 8px;
       padding: 0 8px 0 10px;
-      background: linear-gradient(180deg, rgba(20,16,14,.88), rgba(20,16,14,.4) 75%, transparent);
+      background: var(--chrome-bg);
       pointer-events: none;
     }
     .chrome > * { pointer-events: auto; }
@@ -81,9 +126,9 @@
       height: min(var(--free-w), var(--free-h));
       max-width: 100%; max-height: 100%;
       padding: var(--wood-pad); border-radius: 10px;
-      background: linear-gradient(145deg, #e0b07a, #c9965c 45%, #b8864e);
-      box-shadow: 0 10px 36px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.22);
-      transition: width .2s ease, height .2s ease;
+      background: var(--board-frame);
+      box-shadow: var(--board-shadow);
+      transition: width .2s ease, height .2s ease, background .2s ease;
     }
     #app.panel-open #board-wrap {
       --free-w: calc(100vw - var(--side-w) - 2 * var(--stage-pad));
@@ -122,6 +167,29 @@
     }
     .stone.black { background: radial-gradient(circle at 35% 30%, #555, #111 60%, #000); }
     .stone.white { background: radial-gradient(circle at 35% 30%, #fff, #ddd 55%, #bbb); }
+    [data-theme="notebook"] .stone {
+      box-shadow: none; border-radius: 0; background: transparent !important;
+      display: grid; place-items: center; font-size: 14px; line-height: 1; color: #2a3140;
+    }
+    [data-theme="notebook"] .stone.black::after { content: "△"; }
+    [data-theme="notebook"] .stone.white::after { content: "○"; }
+    [data-theme="day"] .tool-btn.primary,
+    [data-theme="notebook"] .tool-btn.primary {
+      background: linear-gradient(180deg, #6a9fd4, #3b6ea5);
+      color: #fff;
+    }
+    [data-theme="day"] .side button.block.primary {
+      background: linear-gradient(180deg, #d4a574, #b8894a);
+      color: #2a1c10;
+    }
+    [data-theme="notebook"] .side button.block.primary {
+      background: linear-gradient(180deg, #6a9fd4, #3b6ea5);
+      color: #fff;
+    }
+    [data-theme="day"] .seg button.active,
+    [data-theme="notebook"] .seg button.active {
+      background: #dfe6ef;
+    }
     .grow { flex: 1; }
     .badge {
       font-size: 10px; padding: 2px 7px; border-radius: 999px;
@@ -267,6 +335,14 @@
         <button type="button" data-human="w">执白</button>
       </div>
 
+      <h2>主题</h2>
+      <div class="seg" id="theme-seg">
+        <button type="button" data-theme="wood" class="active">木盘</button>
+        <button type="button" data-theme="night">夜盘</button>
+        <button type="button" data-theme="day">日间</button>
+        <button type="button" data-theme="notebook">本子</button>
+      </div>
+
       <h2>选项</h2>
       <div class="seg" id="opt-seg">
         <button type="button" id="opt-sound" class="active" title="落子音效">音效开</button>
@@ -368,6 +444,52 @@
   let aiThinking = false;
   let soundOn = true;
   let audioCtx = null;
+  /** @type {'wood' | 'night' | 'day' | 'notebook'} */
+  let themeId = "wood";
+
+  const THEMES = {
+    wood: {
+      boardTop: "#e8c49a", boardMid: "#d4a574", boardBot: "#c28b52",
+      grain: true, line: "#3d2914", star: "#3d2914",
+      style: "stone",
+      lastB: "#f5d76e", lastW: "#c0392b",
+      win: "rgba(220, 40, 40, 0.88)",
+    },
+    night: {
+      boardTop: "#1e332c", boardMid: "#172822", boardBot: "#101c18",
+      grain: false, line: "#5a7a6c", star: "#7dcea0",
+      style: "stone",
+      lastB: "#a8e6cf", lastW: "#f0c27b",
+      win: "rgba(125, 206, 160, 0.9)",
+    },
+    day: {
+      boardTop: "#f6ead4", boardMid: "#ecd9b5", boardBot: "#e2cba0",
+      grain: true, line: "#6b5344", star: "#6b5344",
+      style: "stone",
+      lastB: "#c0392b", lastW: "#2980b9",
+      win: "rgba(166, 93, 46, 0.9)",
+    },
+    notebook: {
+      paper: "#fffcf5",
+      grid: "#c5d4e8",
+      gridStrong: "#9db4d0",
+      margin: "#e8a0a0",
+      line: "#5a6a80",
+      pencil: "#2a3140",
+      style: "pencil",
+      lastB: "#c0392b", lastW: "#c0392b",
+      win: "rgba(192, 57, 43, 0.85)",
+    },
+  };
+
+  function applyTheme(id) {
+    if (!THEMES[id]) id = "wood";
+    themeId = id;
+    document.documentElement.setAttribute("data-theme", id);
+    saveSettings();
+    syncSettingsUI();
+    draw();
+  }
 
   const STARS = [
     [3, 3], [3, 7], [3, 11],
@@ -546,12 +668,13 @@
       if (s.difficulty === "easy" || s.difficulty === "normal" || s.difficulty === "hard") difficulty = s.difficulty;
       if (s.humanColor === "b" || s.humanColor === "w") humanColor = s.humanColor;
       if (typeof s.soundOn === "boolean") soundOn = s.soundOn;
+      if (s.themeId && THEMES[s.themeId]) themeId = s.themeId;
     } catch (_) {}
   }
 
   function saveSettings() {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-      mode, difficulty, humanColor, soundOn,
+      mode, difficulty, humanColor, soundOn, themeId,
     }));
   }
 
@@ -729,84 +852,189 @@
     return { r, c };
   }
 
+  function drawOutlineTriangle(x, y, size, color, lineW) {
+    const h = size * 0.92;
+    const half = size * 0.82;
+    ctx.beginPath();
+    ctx.moveTo(x, y - h * 0.62);
+    ctx.lineTo(x - half * 0.58, y + h * 0.42);
+    ctx.lineTo(x + half * 0.58, y + h * 0.42);
+    ctx.closePath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineW;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.stroke();
+  }
+
+  function drawOutlineCircle(x, y, radius, color, lineW) {
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineW;
+    ctx.lineCap = "round";
+    ctx.stroke();
+  }
+
   function draw() {
     const { pad, step, w } = geometry();
+    const th = THEMES[themeId] || THEMES.wood;
     ctx.clearRect(0, 0, w, w);
-    const g = ctx.createLinearGradient(0, 0, w, w);
-    g.addColorStop(0, "#e8c49a");
-    g.addColorStop(0.5, "#d4a574");
-    g.addColorStop(1, "#c28b52");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, w);
 
-    ctx.save();
-    ctx.globalAlpha = 0.04;
-    for (let i = 0; i < 48; i++) {
-      ctx.strokeStyle = i % 2 ? "#000" : "#fff";
-      ctx.beginPath();
-      ctx.moveTo(0, (i / 48) * w);
-      ctx.lineTo(w, (i / 48) * w + 10);
-      ctx.stroke();
-    }
-    ctx.restore();
+    if (th.style === "pencil") {
+      // exercise-book paper
+      ctx.fillStyle = th.paper;
+      ctx.fillRect(0, 0, w, w);
+      // faint horizontal ruling across whole page (like workbook)
+      ctx.strokeStyle = th.grid;
+      ctx.lineWidth = Math.max(1, w / 900);
+      const rule = step;
+      for (let y = pad; y <= pad + step * (SIZE - 1) + 0.1; y += rule / 1) {
+        // grid drawn with intersection lines below
+      }
+      // graph paper aligned to intersections
+      ctx.strokeStyle = th.grid;
+      ctx.lineWidth = Math.max(1, w / 700);
+      for (let i = 0; i < SIZE; i++) {
+        const p = pad + i * step;
+        const strong = i % 5 === 0;
+        ctx.strokeStyle = strong ? th.gridStrong : th.grid;
+        ctx.lineWidth = strong ? Math.max(1.2, w / 500) : Math.max(1, w / 700);
+        ctx.beginPath();
+        ctx.moveTo(pad, p);
+        ctx.lineTo(pad + step * (SIZE - 1), p);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(p, pad);
+        ctx.lineTo(p, pad + step * (SIZE - 1));
+        ctx.stroke();
+      }
+      // red margin line (notebook vibe)
+      ctx.strokeStyle = th.margin;
+      ctx.lineWidth = Math.max(1.5, w / 400);
+      const marginX = pad - step * 0.15;
+      if (marginX > 4) {
+        ctx.beginPath();
+        ctx.moveTo(marginX, pad - step * 0.1);
+        ctx.lineTo(marginX, pad + step * (SIZE - 1) + step * 0.1);
+        ctx.stroke();
+      }
+      // outer frame
+      ctx.strokeStyle = th.line;
+      ctx.lineWidth = Math.max(1.5, w / 350);
+      ctx.strokeRect(pad - 1, pad - 1, step * (SIZE - 1) + 2, step * (SIZE - 1) + 2);
+      // stars as small pencil ×
+      ctx.strokeStyle = th.pencil;
+      ctx.lineWidth = Math.max(1.2, w / 450);
+      for (const [r, c] of STARS) {
+        const x = pad + c * step;
+        const y = pad + r * step;
+        const s = Math.max(3, step * 0.12);
+        ctx.beginPath();
+        ctx.moveTo(x - s, y - s);
+        ctx.lineTo(x + s, y + s);
+        ctx.moveTo(x + s, y - s);
+        ctx.lineTo(x - s, y + s);
+        ctx.stroke();
+      }
+      // pencil marks: outline triangle / circle only
+      const markR = step * 0.36;
+      const lw = Math.max(1.8, step * 0.08);
+      for (let r = 0; r < SIZE; r++) {
+        for (let c = 0; c < SIZE; c++) {
+          const s = board[r][c];
+          if (!s) continue;
+          const x = pad + c * step;
+          const y = pad + r * step;
+          if (s === "b") drawOutlineTriangle(x, y, step * 0.78, th.pencil, lw);
+          else drawOutlineCircle(x, y, markR, th.pencil, lw);
+        }
+      }
+    } else {
+      const g = ctx.createLinearGradient(0, 0, w, w);
+      g.addColorStop(0, th.boardTop);
+      g.addColorStop(0.5, th.boardMid);
+      g.addColorStop(1, th.boardBot);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, w);
 
-    ctx.strokeStyle = "#3d2914";
-    ctx.lineWidth = Math.max(1, w / 500);
-    ctx.lineCap = "square";
-    for (let i = 0; i < SIZE; i++) {
-      const p = pad + i * step;
-      ctx.beginPath();
-      ctx.moveTo(pad, p);
-      ctx.lineTo(pad + step * (SIZE - 1), p);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(p, pad);
-      ctx.lineTo(p, pad + step * (SIZE - 1));
-      ctx.stroke();
-    }
-    ctx.lineWidth = Math.max(2, w / 280);
-    ctx.strokeRect(pad - 1, pad - 1, step * (SIZE - 1) + 2, step * (SIZE - 1) + 2);
+      if (th.grain) {
+        ctx.save();
+        ctx.globalAlpha = themeId === "day" ? 0.035 : 0.04;
+        for (let i = 0; i < 48; i++) {
+          ctx.strokeStyle = i % 2 ? "#000" : "#fff";
+          ctx.beginPath();
+          ctx.moveTo(0, (i / 48) * w);
+          ctx.lineTo(w, (i / 48) * w + 10);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
 
-    ctx.fillStyle = "#3d2914";
-    for (const [r, c] of STARS) {
-      const x = pad + c * step;
-      const y = pad + r * step;
-      ctx.beginPath();
-      ctx.arc(x, y, Math.max(2.5, step * 0.09), 0, Math.PI * 2);
-      ctx.fill();
-    }
+      ctx.strokeStyle = th.line;
+      ctx.lineWidth = Math.max(1, w / 500);
+      ctx.lineCap = "square";
+      for (let i = 0; i < SIZE; i++) {
+        const p = pad + i * step;
+        ctx.beginPath();
+        ctx.moveTo(pad, p);
+        ctx.lineTo(pad + step * (SIZE - 1), p);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(p, pad);
+        ctx.lineTo(p, pad + step * (SIZE - 1));
+        ctx.stroke();
+      }
+      ctx.lineWidth = Math.max(2, w / 280);
+      ctx.strokeRect(pad - 1, pad - 1, step * (SIZE - 1) + 2, step * (SIZE - 1) + 2);
 
-    const radius = step * 0.43;
-    for (let r = 0; r < SIZE; r++) {
-      for (let c = 0; c < SIZE; c++) {
-        const s = board[r][c];
-        if (!s) continue;
+      ctx.fillStyle = th.star;
+      for (const [r, c] of STARS) {
         const x = pad + c * step;
         const y = pad + r * step;
         ctx.beginPath();
-        ctx.arc(x + 1.5, y + 2, radius, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(0,0,0,0.25)";
+        ctx.arc(x, y, Math.max(2.5, step * 0.09), 0, Math.PI * 2);
         ctx.fill();
-        const sg = ctx.createRadialGradient(
-          x - radius * 0.35, y - radius * 0.4, radius * 0.1, x, y, radius
-        );
-        if (s === "b") {
-          sg.addColorStop(0, "#666");
-          sg.addColorStop(0.45, "#222");
-          sg.addColorStop(1, "#000");
-        } else {
-          sg.addColorStop(0, "#fff");
-          sg.addColorStop(0.55, "#eee");
-          sg.addColorStop(1, "#c8c8c8");
-        }
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = sg;
-        ctx.fill();
-        if (s === "w") {
-          ctx.strokeStyle = "rgba(0,0,0,0.2)";
-          ctx.lineWidth = 1;
-          ctx.stroke();
+      }
+
+      const radius = step * 0.43;
+      for (let r = 0; r < SIZE; r++) {
+        for (let c = 0; c < SIZE; c++) {
+          const s = board[r][c];
+          if (!s) continue;
+          const x = pad + c * step;
+          const y = pad + r * step;
+          ctx.beginPath();
+          ctx.arc(x + 1.5, y + 2, radius, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(0,0,0,0.22)";
+          ctx.fill();
+          const sg = ctx.createRadialGradient(
+            x - radius * 0.35, y - radius * 0.4, radius * 0.1, x, y, radius
+          );
+          if (s === "b") {
+            if (themeId === "night") {
+              sg.addColorStop(0, "#3a3a3a");
+              sg.addColorStop(0.5, "#151515");
+              sg.addColorStop(1, "#000");
+            } else {
+              sg.addColorStop(0, "#666");
+              sg.addColorStop(0.45, "#222");
+              sg.addColorStop(1, "#000");
+            }
+          } else {
+            sg.addColorStop(0, "#fff");
+            sg.addColorStop(0.55, "#eee");
+            sg.addColorStop(1, themeId === "day" ? "#d0d0d0" : "#c8c8c8");
+          }
+          ctx.beginPath();
+          ctx.arc(x, y, radius, 0, Math.PI * 2);
+          ctx.fillStyle = sg;
+          ctx.fill();
+          if (s === "w") {
+            ctx.strokeStyle = themeId === "day" ? "rgba(0,0,0,0.28)" : "rgba(0,0,0,0.2)";
+            ctx.lineWidth = themeId === "day" ? 1.4 : 1;
+            ctx.stroke();
+          }
         }
       }
     }
@@ -816,15 +1044,18 @@
       const x = pad + last.c * step;
       const y = pad + last.r * step;
       ctx.beginPath();
-      ctx.arc(x, y, Math.max(2.5, step * 0.11), 0, Math.PI * 2);
-      ctx.fillStyle = board[last.r][last.c] === "b" ? "#f5d76e" : "#c0392b";
+      ctx.arc(x, y, Math.max(2.2, step * 0.1), 0, Math.PI * 2);
+      ctx.fillStyle = board[last.r][last.c] === "b" ? th.lastB : th.lastW;
       ctx.fill();
     }
 
     if (winLine && winLine.length) {
-      ctx.strokeStyle = "rgba(220, 40, 40, 0.88)";
-      ctx.lineWidth = Math.max(3, step * 0.13);
+      ctx.strokeStyle = th.win;
+      ctx.lineWidth = Math.max(2.5, step * 0.12);
       ctx.lineCap = "round";
+      if (th.style === "pencil") {
+        ctx.setLineDash([Math.max(4, step * 0.15), Math.max(3, step * 0.1)]);
+      }
       ctx.beginPath();
       for (let i = 0; i < winLine.length; i++) {
         const p = winLine[i];
@@ -834,6 +1065,7 @@
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
+      ctx.setLineDash([]);
     }
   }
 
@@ -1206,6 +1438,9 @@
     document.querySelectorAll("#color-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.human === humanColor);
     });
+    document.querySelectorAll("#theme-seg button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.theme === themeId);
+    });
     const sb = document.getElementById("opt-sound");
     if (sb) {
       sb.classList.toggle("active", soundOn);
@@ -1327,6 +1562,13 @@
     syncSettingsUI();
     toast("难度：" + ({ easy: "简单", normal: "普通", hard: "困难" })[difficulty]);
   };
+  document.getElementById("theme-seg").onclick = (ev) => {
+    const b = ev.target.closest("button[data-theme]");
+    if (!b) return;
+    applyTheme(b.dataset.theme);
+    const names = { wood: "木盘", night: "夜盘", day: "日间", notebook: "练习本" };
+    toast("主题：" + (names[themeId] || themeId));
+  };
   document.getElementById("opt-sound").onclick = () => {
     soundOn = !soundOn;
     saveSettings();
@@ -1395,6 +1637,7 @@
 
   // boot
   loadSettings();
+  document.documentElement.setAttribute("data-theme", themeId);
   const savedPanel = localStorage.getItem(PANEL_KEY);
   setPanelOpen(savedPanel === "1");
 
