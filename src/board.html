@@ -267,6 +267,12 @@
         <button type="button" data-human="w">执白</button>
       </div>
 
+      <h2>选项</h2>
+      <div class="seg" id="opt-seg">
+        <button type="button" id="opt-sound" class="active" title="落子音效">音效开</button>
+        <button type="button" id="opt-fullscreen" title="全屏 (F)">全屏</button>
+      </div>
+
       <h2>复盘</h2>
       <div class="card meta">
         <div><span>进度</span> · <strong id="replay-pos">0 / 0</strong></div>
@@ -315,6 +321,7 @@
           <tr><td>Tab / ☰</td><td>收起/展开侧栏</td></tr>
           <tr><td>[ / ]</td><td>收起 / 展开侧栏</td></tr>
           <tr><td>1 / 2</td><td>双人 / 人机（新局）</td></tr>
+          <tr><td>F</td><td>全屏 / 退出全屏</td></tr>
           <tr><td>?</td><td>打开本说明</td></tr>
           <tr><td>Esc</td><td>关闭说明 / 收起侧栏</td></tr>
         </table>
@@ -359,6 +366,8 @@
   let originalStartedAt = Date.now();
   let clockTimer = null;
   let aiThinking = false;
+  let soundOn = true;
+  let audioCtx = null;
 
   const STARS = [
     [3, 3], [3, 7], [3, 11],
@@ -536,13 +545,66 @@
       if (s.mode === "ai" || s.mode === "pvp") mode = s.mode;
       if (s.difficulty === "easy" || s.difficulty === "normal" || s.difficulty === "hard") difficulty = s.difficulty;
       if (s.humanColor === "b" || s.humanColor === "w") humanColor = s.humanColor;
+      if (typeof s.soundOn === "boolean") soundOn = s.soundOn;
     } catch (_) {}
   }
 
   function saveSettings() {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-      mode, difficulty, humanColor,
+      mode, difficulty, humanColor, soundOn,
     }));
+  }
+
+  function playMoveSound(color) {
+    if (!soundOn) return;
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      const t0 = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = color === "b" ? 320 : 420;
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.09);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.1);
+    } catch (_) {}
+  }
+
+  function playWinSound() {
+    if (!soundOn) return;
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      const notes = [523, 659, 784];
+      notes.forEach((f, i) => {
+        const t0 = audioCtx.currentTime + i * 0.08;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "triangle";
+        osc.frequency.value = f;
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(0.1, t0 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(t0);
+        osc.stop(t0 + 0.22);
+      });
+    } catch (_) {}
+  }
+
+  function toggleFullscreen() {
+    const root = document.documentElement;
+    if (!document.fullscreenElement) {
+      (root.requestFullscreen || root.webkitRequestFullscreen || (() => {})).call(root);
+    } else {
+      (document.exitFullscreen || document.webkitExitFullscreen || (() => {})).call(document);
+    }
   }
 
   function serialize() {
@@ -820,56 +882,68 @@
     return w;
   }
 
+  /** Pattern score for one color as if evaluating the whole board. */
+  function shapeScoreFor(color) {
+    let score = 0;
+    const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]];
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        if (board[r][c] !== color) continue;
+        for (const [dr, dc] of dirs) {
+          // only start of a run
+          const pr = r - dr, pc = c - dc;
+          if (pr >= 0 && pr < SIZE && pc >= 0 && pc < SIZE && board[pr][pc] === color) continue;
+          let n = 0;
+          let rr = r, cc = c;
+          while (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && board[rr][cc] === color) {
+            n++; rr += dr; cc += dc;
+          }
+          let open = 0;
+          const br = r - dr, bc = c - dc;
+          if (br < 0 || br >= SIZE || bc < 0 || bc >= SIZE || !board[br][bc]) open++;
+          if (rr < 0 || rr >= SIZE || cc < 0 || cc >= SIZE || !board[rr][cc]) open++;
+          if (n >= 5) score += 100000;
+          else if (n === 4 && open === 2) score += 20000;
+          else if (n === 4 && open === 1) score += 5000;
+          else if (n === 3 && open === 2) score += 2000;
+          else if (n === 3 && open === 1) score += 200;
+          else if (n === 2 && open === 2) score += 80;
+          else if (n === 2 && open === 1) score += 15;
+          else score += n * 3;
+        }
+      }
+    }
+    return score;
+  }
+
+  function evaluateBoard(me) {
+    const them = opp(me);
+    // center bias
+    let center = 0;
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++) {
+        if (!board[r][c]) continue;
+        const w = 14 - (Math.abs(r - 7) + Math.abs(c - 7));
+        center += board[r][c] === me ? w : -w;
+      }
+    return shapeScoreFor(me) - shapeScoreFor(them) * 1.05 + center * 0.5;
+  }
+
   function scorePlace(r, c, me) {
     if (board[r][c]) return -1e9;
     const them = opp(me);
     if (wouldWin(r, c, me)) return 1e6;
     if (wouldWin(r, c, them)) return 5e5;
-
-    let score = 0;
-    const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]];
     board[r][c] = me;
-    for (const [dr, dc] of dirs) {
-      const a = countDir(r, c, dr, dc, me);
-      const b = countDir(r, c, -dr, -dc, me);
-      const n = 1 + a + b;
-      let open = 0;
-      let rr = r + dr * (a + 1), cc = c + dc * (a + 1);
-      if (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && !board[rr][cc]) open++;
-      rr = r - dr * (b + 1); cc = c - dc * (b + 1);
-      if (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && !board[rr][cc]) open++;
-      if (n >= 4 && open >= 1) score += 8000;
-      else if (n === 3 && open === 2) score += 2000;
-      else if (n === 3 && open === 1) score += 200;
-      else if (n === 2 && open === 2) score += 80;
-      else score += n * 5 + open;
-    }
+    const s = evaluateBoard(me);
     board[r][c] = "";
-
-    board[r][c] = them;
-    for (const [dr, dc] of dirs) {
-      const a = countDir(r, c, dr, dc, them);
-      const b = countDir(r, c, -dr, -dc, them);
-      const n = 1 + a + b;
-      let open = 0;
-      let rr = r + dr * (a + 1), cc = c + dc * (a + 1);
-      if (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && !board[rr][cc]) open++;
-      rr = r - dr * (b + 1); cc = c - dc * (b + 1);
-      if (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && !board[rr][cc]) open++;
-      if (n >= 4 && open >= 1) score += 6000;
-      else if (n === 3 && open === 2) score += 1500;
-      else if (n === 3) score += 150;
-    }
-    board[r][c] = "";
-
-    const center = 7;
-    score += (14 - (Math.abs(r - center) + Math.abs(c - center))) * 2;
-    return score;
+    return s;
   }
 
-  function nearStone(r, c) {
-    for (let dr = -2; dr <= 2; dr++)
-      for (let dc = -2; dc <= 2; dc++) {
+  function nearStone(r, c, dist) {
+    const d = dist || 2;
+    for (let dr = -d; dr <= d; dr++)
+      for (let dc = -d; dc <= d; dc++) {
         if (!dr && !dc) continue;
         const rr = r + dr, cc = c + dc;
         if (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && board[rr][cc]) return true;
@@ -877,18 +951,82 @@
     return false;
   }
 
+  function candidateMoves(maxN, nearDist) {
+    const any = [];
+    let has = false;
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++)
+        if (board[r][c]) has = true;
+    if (!has) return [{ r: 7, c: 7 }];
+
+    const list = [];
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        if (board[r][c]) continue;
+        if (!nearStone(r, c, nearDist)) continue;
+        list.push({ r, c });
+      }
+    }
+    if (!list.length) {
+      for (let r = 0; r < SIZE; r++)
+        for (let c = 0; c < SIZE; c++)
+          if (!board[r][c]) list.push({ r, c });
+    }
+    // order by quick score for better alpha-beta
+    const me = opp(humanColor);
+    list.sort((a, b) => scorePlace(b.r, b.c, me) - scorePlace(a.r, a.c, me));
+    return list.slice(0, maxN || list.length);
+  }
+
   function randomPick(candidates) {
     if (!candidates.length) return null;
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
+  /**
+   * Negamax alpha-beta. `me` is the AI root color.
+   * Returns evaluation from the perspective of the side to move at this node
+   * when using classic negamax: we pass side and flip score.
+   */
+  function negamax(depth, alpha, beta, side, root) {
+    // terminal: someone already won on previous move — check last stone
+    if (history.length) {
+      // win check is done when placing; here evaluate leaves
+    }
+    if (depth === 0) return evaluateBoard(root);
+
+    const moves = candidateMoves(depth >= 2 ? 14 : 18, 2);
+    if (!moves.length) return 0;
+
+    let best = -Infinity;
+    for (const m of moves) {
+      // skip occupied (should not happen)
+      if (board[m.r][m.c]) continue;
+      // instant win
+      if (wouldWin(m.r, m.c, side)) return 900000 + depth;
+      board[m.r][m.c] = side;
+      // if opponent can win immediately next, continue search will see it
+      let val;
+      if (findWin(m.r, m.c, side)) {
+        val = 900000 + depth;
+      } else {
+        val = -negamax(depth - 1, -beta, -alpha, opp(side), root);
+      }
+      board[m.r][m.c] = "";
+      if (val > best) best = val;
+      if (val > alpha) alpha = val;
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+
   function aiMove() {
+    const me = opp(humanColor);
     let any = false;
     for (let r = 0; r < SIZE; r++)
       for (let c = 0; c < SIZE; c++)
         if (board[r][c]) any = true;
 
-    const me = opp(humanColor); // AI plays the other color
     if (!any) {
       if (difficulty === "easy") {
         const opts = [[7, 7], [6, 6], [6, 8], [8, 6], [8, 8], [7, 6], [7, 8]];
@@ -898,40 +1036,50 @@
       return { r: 7, c: 7 };
     }
 
-    const scored = [];
-    for (let r = 0; r < SIZE; r++) {
-      for (let c = 0; c < SIZE; c++) {
-        if (board[r][c]) continue;
-        if (!nearStone(r, c)) continue;
-        scored.push({ r, c, s: scorePlace(r, c, me) });
-      }
+    // tactical musts
+    const cands = candidateMoves(40, 2);
+    for (const m of cands) {
+      if (wouldWin(m.r, m.c, me)) return m;
     }
-    if (!scored.length) {
-      for (let r = 0; r < SIZE; r++)
-        for (let c = 0; c < SIZE; c++)
-          if (!board[r][c]) return { r, c };
-      return null;
+    for (const m of cands) {
+      if (wouldWin(m.r, m.c, humanColor)) return m;
     }
-    scored.sort((a, b) => b.s - a.s);
 
     if (difficulty === "easy") {
-      // Often miss perfect blocks: pick from top 8 randomly, sometimes skip best
+      const scored = cands.map((m) => ({ ...m, s: scorePlace(m.r, m.c, me) }));
+      scored.sort((a, b) => b.s - a.s);
       const pool = scored.slice(0, Math.min(8, scored.length));
-      if (Math.random() < 0.35 && pool.length > 1) return pool[1 + Math.floor(Math.random() * (pool.length - 1))];
-      return randomPick(pool.slice(0, 3));
+      if (Math.random() < 0.4 && pool.length > 1) {
+        return pool[1 + Math.floor(Math.random() * (pool.length - 1))];
+      }
+      return randomPick(pool.slice(0, 3)) || pool[0];
     }
-    if (difficulty === "normal") {
-      // Prefer best, occasionally 2nd/3rd for variety
-      if (Math.random() < 0.15 && scored.length > 1) return scored[1];
-      if (Math.random() < 0.05 && scored.length > 2) return scored[2];
-      return scored[0];
+
+    // normal: depth 1 (ordered heuristic + 1-ply look at opponent reply)
+    // hard: depth 2 negamax on top candidates
+    const depth = difficulty === "hard" ? 2 : 1;
+    const top = candidateMoves(difficulty === "hard" ? 16 : 20, 2);
+
+    let bestMove = top[0];
+    let bestVal = -Infinity;
+    for (const m of top) {
+      if (wouldWin(m.r, m.c, me)) return m;
+      board[m.r][m.c] = me;
+      let val;
+      if (findWin(m.r, m.c, me)) {
+        val = 1e6;
+      } else {
+        val = -negamax(depth - 1, -Infinity, Infinity, opp(me), me);
+      }
+      board[m.r][m.c] = "";
+      // slight jitter on normal for variety
+      if (difficulty === "normal") val += (Math.random() - 0.5) * 30;
+      if (val > bestVal) {
+        bestVal = val;
+        bestMove = m;
+      }
     }
-    // hard: always best score; break ties by first (deterministic-ish among equals)
-    let best = scored[0];
-    for (let i = 1; i < scored.length; i++) {
-      if (scored[i].s > best.s) best = scored[i];
-    }
-    return best;
+    return bestMove || top[0] || null;
   }
 
   function isHumanTurn() {
@@ -942,12 +1090,20 @@
   function maybeAiTurn() {
     if (mode !== "ai" || result !== "play" || isHumanTurn() || aiThinking) return;
     aiThinking = true;
-    const delay = difficulty === "hard" ? 120 : difficulty === "normal" ? 80 : 40;
+    sync();
+    const delay = difficulty === "hard" ? 30 : difficulty === "normal" ? 50 : 40;
+    // yield so UI paints "思考中"
     setTimeout(() => {
+      const t0 = performance.now();
       const m = aiMove();
-      aiThinking = false;
-      if (m) place(m.r, m.c, true);
-    }, delay);
+      const spent = performance.now() - t0;
+      const wait = Math.max(0, delay - spent);
+      setTimeout(() => {
+        aiThinking = false;
+        if (m) place(m.r, m.c, true);
+        else sync();
+      }, wait);
+    }, 0);
   }
 
   function place(r, c, fromAi) {
@@ -965,12 +1121,14 @@
     board[r][c] = turn;
     history.push({ r, c });
     viewIndex = history.length;
+    playMoveSound(turn);
     const line = findWin(r, c, turn);
     if (line) {
       result = turn;
       winLine = line;
       elapsedBaseMs = nowElapsed();
       startedAt = Date.now();
+      playWinSound();
       sync();
       saveGame();
       return;
@@ -1048,6 +1206,11 @@
     document.querySelectorAll("#color-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.human === humanColor);
     });
+    const sb = document.getElementById("opt-sound");
+    if (sb) {
+      sb.classList.toggle("active", soundOn);
+      sb.textContent = soundOn ? "音效开" : "音效关";
+    }
   }
 
   function sync() {
@@ -1163,8 +1326,15 @@
     saveSettings();
     syncSettingsUI();
     toast("难度：" + ({ easy: "简单", normal: "普通", hard: "困难" })[difficulty]);
-    // difficulty applies next AI move; no forced new game
   };
+  document.getElementById("opt-sound").onclick = () => {
+    soundOn = !soundOn;
+    saveSettings();
+    syncSettingsUI();
+    if (soundOn) playMoveSound("b");
+    toast(soundOn ? "音效已开" : "音效已关");
+  };
+  document.getElementById("opt-fullscreen").onclick = () => toggleFullscreen();
   document.getElementById("color-seg").onclick = (ev) => {
     const b = ev.target.closest("button[data-human]");
     if (!b) return;
@@ -1210,6 +1380,9 @@
     else if (k === "n" && !ev.metaKey && !ev.ctrlKey) document.getElementById("reset").click();
     else if (k === "[") setPanelOpen(false);
     else if (k === "]") setPanelOpen(true);
+    else if (k === "f" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+      toggleFullscreen();
+    }
   });
 
   window.addEventListener("resize", () => {
