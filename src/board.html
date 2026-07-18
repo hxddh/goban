@@ -601,12 +601,13 @@
           <tr><td>Tab / ☰</td><td>收起/展开侧栏</td></tr>
           <tr><td>[ / ]</td><td>收起 / 展开侧栏</td></tr>
           <tr><td>⌘1 / ⌘2</td><td>双人 / 人机（确认后新局）</td></tr>
-          <tr><td>F · ⌘⌃F</td><td>全屏 / 退出全屏</td></tr>
-          <tr><td>⌘S</td><td>导出 SGF</td></tr>
-          <tr><td>⌘T</td><td>切换侧栏</td></tr>
+          <tr><td>⌘⌃F</td><td>系统全屏（View → Enter Full Screen）</td></tr>
+          <tr><td>绿键</td><td>窗口 Zoom / 放大（非 Spaces 全屏）</td></tr>
+          <tr><td>F</td><td>提示全屏/放大入口</td></tr>
+          <tr><td>Tab / [ ]</td><td>切换 / 收起 / 展开侧栏</td></tr>
           <tr><td>?</td><td>打开本说明</td></tr>
           <tr><td>Esc</td><td>关闭说明 / 收起侧栏</td></tr>
-          <tr><td>菜单栏</td><td>对局 / 视图</td></tr>
+          <tr><td>菜单栏</td><td>系统 View / Window（全屏·缩放）</td></tr>
         </table>
         <div class="close-row">
           <button type="button" class="tool-btn primary" id="help-close">知道了</button>
@@ -1059,28 +1060,9 @@
     } catch (_) {}
   }
 
+  /** Point users at real macOS window chrome — not web Fullscreen API. */
   function toggleFullscreen() {
-    const root = document.documentElement;
-    const req = root.requestFullscreen || root.webkitRequestFullscreen;
-    const exit = document.exitFullscreen || document.webkitExitFullscreen;
-    try {
-      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-        if (!req) {
-          toast("当前环境不支持网页全屏，可用绿键最大化窗口");
-          return;
-        }
-        const p = req.call(root);
-        if (p && typeof p.then === "function") {
-          p.catch(function () {
-            toast("无法进入全屏，可用绿键最大化窗口");
-          });
-        }
-      } else if (exit) {
-        exit.call(document);
-      }
-    } catch (_) {
-      toast("无法切换全屏，可用绿键最大化窗口");
-    }
+    toast("全屏：菜单 View → Enter Full Screen（⌘⌃F）· 放大：窗口绿键 Zoom");
   }
 
   function serialize() {
@@ -2073,7 +2055,7 @@
     else if (id === "goban.sgf-copy") copySgf();
     else if (id === "goban.sgf-export") downloadSgf();
     else if (id === "goban.toggle-panel") togglePanel();
-    else if (id === "goban.fullscreen") toggleFullscreen();
+    else if (id === "goban.fullscreen") toggleFullscreen(); // hint only; real FS is system menu
   }
 
   if (hasZero() && typeof window.zero.on === "function") {
