@@ -16,6 +16,11 @@ cp src/web/js/*.js frontend/dist/js/
 test -f frontend/dist/index.html
 test -f frontend/dist/js/app.js
 test -f frontend/dist/js/core.js
+test -f frontend/dist/js/host.js
+test -f frontend/dist/js/state.js
+
+echo "==> unit tests"
+node scripts/test-game.mjs
 
 echo "==> zig build -Doptimize=ReleaseFast"
 zig build -Doptimize=ReleaseFast

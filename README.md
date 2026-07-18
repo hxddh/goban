@@ -33,18 +33,20 @@ cd ~/goban
 源码布局（v1.9）：
 
 ```
-src/web/           # 前端源码
-  index.html
-  styles.css
-  js/core.js       # 规则（纯）
-  js/sgf.js        # SGF 导入导出
-  js/ai.js         # AI
-  js/app.js        # UI / 状态
-src/main.zig       # 壳 + bridge（读写文本文件）
+src/web/
+  index.html · styles.css
+  js/core.js    # 规则（纯）
+  js/sgf.js     # SGF
+  js/ai.js      # AI
+  js/host.js    # Native / localStorage 门面
+  js/state.js   # 对局状态工厂 / 导入快照
+  js/app.js     # UI 编排
+src/main.zig
 scripts/package.sh
+scripts/test-game.mjs   # node 单测 core/sgf/state
 ```
 
-`frontend/dist` 由脚本从 `src/web` 生成，不要手改。
+`frontend/dist` 由脚本从 `src/web` 生成。测试：`node scripts/test-game.mjs`
 
 ## 许可
 

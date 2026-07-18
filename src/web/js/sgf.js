@@ -66,42 +66,54 @@
    * @returns {{ history: {r:number,c:number}[], error?: string }}
    */
   function parseSgf(text) {
-    if (!text || typeof text !== "string") return { history: [], error: "空棋谱" };
-    const src = text.replace(/\s+/g, " ").trim();
-    // strip size if present; we only support 15
+    if (text == null) return { history: [], error: "没有棋谱内容" };
+    if (typeof text !== "string") return { history: [], error: "棋谱格式无效" };
+    const src = text.replace(/\uFEFF/g, "").replace(/\s+/g, " ").trim();
+    if (!src) return { history: [], error: "棋谱为空" };
+    if (src.length > 200000) return { history: [], error: "棋谱过大（上限约 200KB）" };
+    if (!/[;\s]*[BW]\s*\[/i.test(src) && !/\(/.test(src)) {
+      return { history: [], error: "不像 SGF 文件（未找到 B[]/W[] 落子）" };
+    }
     const sz = src.match(/SZ\[(\d+)\]/i);
     if (sz && Number(sz[1]) !== SIZE) {
-      return { history: [], error: "仅支持 " + SIZE + " 路棋盘" };
+      return { history: [], error: "仅支持 " + SIZE + " 路（文件为 " + sz[1] + " 路）" };
     }
     const history = [];
     const occupied = Core.emptyBoard();
-    // Match ;B[xx] or ;W[xx] (empty pass [] skipped)
-    const re = /;?\s*([BW])\[([a-s]{0,2})\]/gi;
+    const re = /;?\s*([BW])\[([a-z]{0,2})\]/gi;
     let m;
-    let expect = "b";
+    let skipped = 0;
     while ((m = re.exec(src))) {
       const color = m[1].toUpperCase() === "B" ? "b" : "w";
       const coord = m[2];
-      if (!coord) continue; // pass
+      if (!coord) { skipped++; continue; }
       const p = parseSgfCoord(coord.toLowerCase());
-      if (!p) continue;
-      if (occupied[p.r][p.c]) {
-        return { history: [], error: "棋谱含重复落点" };
+      if (!p) {
+        return { history: [], error: "无法识别坐标「" + coord + "」" };
       }
-      // Allow out-of-order colors but warn by forcing sequential alternate if mismatch
-      if (color !== expect && history.length > 0) {
-        // still accept if it's the right stone for history length
-        const want = history.length % 2 === 0 ? "b" : "w";
-        if (color !== want) {
-          return { history: [], error: "棋谱黑白顺序异常" };
-        }
+      if (occupied[p.r][p.c]) {
+        return {
+          history: [],
+          error: "第 " + (history.length + 1) + " 手与已有落点重叠（" + coord + "）",
+        };
+      }
+      const want = history.length % 2 === 0 ? "b" : "w";
+      if (color !== want) {
+        return {
+          history: [],
+          error: "第 " + (history.length + 1) + " 手颜色应为" + (want === "b" ? "黑" : "白"),
+        };
       }
       occupied[p.r][p.c] = color;
       history.push({ r: p.r, c: p.c });
-      expect = Core.opp(color);
     }
-    if (!history.length) return { history: [], error: "未找到落子" };
-    return { history };
+    if (!history.length) {
+      return {
+        history: [],
+        error: skipped ? "只有停着/空落子，没有有效手数" : "未找到有效落子",
+      };
+    }
+    return { history: history, skippedPasses: skipped };
   }
 
   function fileNameFromDate(ts) {

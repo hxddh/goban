@@ -3,12 +3,13 @@
   const Core = window.GobanCore;
   const SgfMod = window.GobanSgf;
   const Ai = window.GobanAi;
+  const Host = window.GobanHost;
+  const GameState = window.GobanState;
   const SIZE = Core.SIZE;
   const WIN = Core.WIN;
   const SAVE_KEY = "goban.v12.save";
   const SETTINGS_KEY = "goban.v11.settings";
   const PANEL_KEY = "goban.panelOpen";
-  const GROUPS_KEY = "goban.v19.groups";
 
   const canvas = document.getElementById("board");
   const ctx = canvas.getContext("2d");
@@ -34,12 +35,7 @@
     });
   }
   function sgfFileName() { return SgfMod.fileNameFromDate(originalStartedAt); }
-  function bytesToBase64(str) {
-    const bytes = new TextEncoder().encode(str);
-    let bin = "";
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-    return btoa(bin);
-  }
+  function bytesToBase64(str) { return Host.bytesToBase64(str); }
   function downloadSgfBlob(sgf, name) {
     const blob = new Blob([sgf], { type: "application/x-go-sgf" });
     const a = document.createElement("a");
@@ -52,14 +48,12 @@
     if (!history.length) { toast("还没有棋谱可导出"); return; }
     const sgf = buildSgf();
     const name = sgfFileName();
-    if (hasZero() && window.zero.dialogs && window.zero.dialogs.saveFile) {
+    if (Host.hasZero()) {
       try {
-        const path = await window.zero.dialogs.saveFile({ title: "导出 SGF", defaultName: name });
+        const path = await Host.saveFileDialog({ title: "导出 SGF", defaultName: name });
         if (path == null) { toast("已取消导出"); return; }
-        await window.zero.invoke("goban.writeTextFile", { path: path, b64: bytesToBase64(sgf) });
-        if (window.zero.os && window.zero.os.revealPath) {
-          try { await window.zero.os.revealPath(path); } catch (_) {}
-        }
+        await Host.writeTextFile(path, sgf);
+        await Host.revealPath(path);
         toast("已导出 " + name);
         return;
       } catch (e) {}
@@ -72,23 +66,7 @@
       catch (e2) { toast("导出失败"); }
     }
   }
-  async function copySgfText(sgf) {
-    if (hasZero() && window.zero.clipboard && window.zero.clipboard.writeText) {
-      await window.zero.clipboard.writeText(sgf); return;
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(sgf); return;
-    }
-    const ta = document.createElement("textarea");
-    ta.value = sgf;
-    document.body.appendChild(ta);
-    ta.select();
-    try {
-      if (!document.execCommand("copy")) throw new Error("copy failed");
-    } finally {
-      document.body.removeChild(ta);
-    }
-  }
+  async function copySgfText(sgf) { await Host.writeClipboard(sgf); }
   async function copySgf() {
     if (!history.length) { toast("还没有棋谱可复制"); return; }
     try {
@@ -97,76 +75,93 @@
     } catch (_) { toast("复制失败，请用导出文件"); }
   }
 
-  async function readTextFile(path) {
-    if (!hasZero()) throw new Error("no bridge");
-    const b64 = await window.zero.invoke("goban.readTextFile", { path: path });
-    const bin = atob(typeof b64 === "string" ? b64 : String(b64));
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return new TextDecoder().decode(bytes);
-  }
+  async function readTextFile(path) { return Host.readTextFile(path); }
 
   async function importSgfFromText(text, label) {
     const parsed = SgfMod.parseSgf(text);
-    if (parsed.error || !parsed.history.length) {
-      toast(parsed.error || "导入失败");
+    if (parsed.error || !parsed.history || !parsed.history.length) {
+      toast(parsed.error || "导入失败：无法解析棋谱");
       return false;
     }
     if (history.length) {
-      const ok = await confirmNative("导入棋谱将替换当前对局，是否继续？", "导入 SGF", { ok: "导入", cancel: "取消" });
+      const ok = await confirmNative(
+        "导入棋谱将替换当前对局（仅复盘，不会自动让电脑续下）。是否继续？",
+        "导入 SGF",
+        { ok: "导入", cancel: "取消" }
+      );
       if (!ok) return false;
     }
-    gameGen += 1;
-    history = parsed.history;
-    viewIndex = history.length;
-    board = Core.boardAfter(history, history.length);
-    result = "play";
-    winLine = null;
-    const last = history[history.length - 1];
-    const lastColor = (history.length - 1) % 2 === 0 ? "b" : "w";
-    const line = Core.findWin(board, last.r, last.c, lastColor);
-    if (line) {
-      result = lastColor;
-      winLine = line;
-    } else if (Core.boardFull(board)) {
-      result = "draw";
+    const applied = GameState.sessionFromHistory(parsed.history, {
+      mode: mode,
+      difficulty: difficulty,
+      humanColor: humanColor,
+      soundOn: soundOn,
+      themeId: themeId,
+      gameGen: gameGen,
+    });
+    if (!applied.ok) {
+      toast(applied.error || "导入失败");
+      return false;
     }
-    turn = history.length % 2 === 0 ? "b" : "w";
-    elapsedBaseMs = 0;
-    startedAt = Date.now();
-    originalStartedAt = Date.now();
+    const s = applied.session;
+    history = s.history;
+    viewIndex = s.viewIndex;
+    board = s.board;
+    result = s.result;
+    winLine = s.winLine;
+    turn = s.turn;
+    elapsedBaseMs = s.elapsedBaseMs;
+    startedAt = s.startedAt;
+    originalStartedAt = s.originalStartedAt;
     aiThinking = false;
+    gameGen = s.gameGen;
     placeAnim = null;
+    // Review-only: never maybeAiTurn after import.
     if (result === "b" || result === "w") triggerWinFlash();
     sync();
     saveGame();
-    toast("已导入 " + history.length + " 手" + (label ? " · " + label : ""));
-    if (mode === "ai" && result === "play") maybeAiTurn();
+    const tag = label ? " · " + label : "";
+    const end =
+      result === "b" ? "（黑胜）" : result === "w" ? "（白胜）" : result === "draw" ? "（满盘）" : "（可复盘）";
+    toast("已导入 " + history.length + " 手" + end + tag + " · 不自动续下");
     return true;
   }
 
   async function importSgfFromPath(path) {
+    if (!path) {
+      toast("无效的文件路径");
+      return;
+    }
     try {
       const text = await readTextFile(path);
-      const base = path.split(/[/\\]/).pop() || "sgf";
+      if (!text || !String(text).trim()) {
+        toast("文件为空");
+        return;
+      }
+      const base = String(path).split(/[/\\]/).pop() || "sgf";
       await importSgfFromText(text, base);
     } catch (e) {
-      toast("读取文件失败");
+      const msg = (e && e.message) || "";
+      toast(msg && msg.length < 48 ? "读取失败：" + msg : "读取文件失败（权限或路径无效）");
     }
   }
 
   async function pickAndImportSgf() {
-    if (!hasZero() || !window.zero.dialogs || !window.zero.dialogs.openFile) {
+    if (!Host.hasZero()) {
       toast("当前环境不支持打开文件");
       return;
     }
     try {
-      const files = await window.zero.dialogs.openFile({
+      const files = await Host.openFileDialog({
         title: "导入 SGF",
         allowMultiple: false,
       });
-      if (!files || !files.length) { toast("已取消导入"); return; }
-      await importSgfFromPath(files[0]);
+      const paths = Host.normalizePaths(files);
+      if (!paths.length) {
+        toast("已取消导入");
+        return;
+      }
+      await importSgfFromPath(paths[0]);
     } catch (e) {
       toast("打开文件失败");
     }
@@ -181,24 +176,6 @@
     }, 450);
   }
 
-  function loadGroupFold() {
-    try {
-      const raw = localStorage.getItem(GROUPS_KEY);
-      if (!raw) return;
-      const g = JSON.parse(raw);
-      document.querySelectorAll("details.group[data-group]").forEach((el) => {
-        const id = el.getAttribute("data-group");
-        if (g && typeof g[id] === "boolean") el.open = g[id];
-      });
-    } catch (_) {}
-  }
-  function saveGroupFold() {
-    const g = {};
-    document.querySelectorAll("details.group[data-group]").forEach((el) => {
-      g[el.getAttribute("data-group")] = el.open;
-    });
-    try { localStorage.setItem(GROUPS_KEY, JSON.stringify(g)); } catch (_) {}
-  }
 
 
   /** @type {(''| 'b' | 'w')[][]} */
@@ -234,9 +211,7 @@
   let placeAnim = null;
   let rafId = 0;
 
-  function hasZero() {
-    return typeof window.zero === "object" && window.zero != null;
-  }
+  function hasZero() { return Host.hasZero(); }
 
   let confirmResolver = null;
 
@@ -425,7 +400,7 @@
 
   function loadSettings() {
     try {
-      const raw = localStorage.getItem(SETTINGS_KEY);
+      const raw = Host.storageGet(SETTINGS_KEY);
       if (!raw) return;
       const s = JSON.parse(raw);
       if (s.mode === "ai" || s.mode === "pvp") mode = s.mode;
@@ -437,9 +412,10 @@
   }
 
   function saveSettings() {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-      mode, difficulty, humanColor, soundOn, themeId,
-    }));
+    Host.storageSet(
+      SETTINGS_KEY,
+      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId })
+    );
   }
 
   function playMoveSound(color) {
@@ -510,21 +486,21 @@
 
   function saveGame() {
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(serialize()));
+      Host.storageSet(SAVE_KEY, JSON.stringify(serialize()));
       const hint = document.getElementById("save-hint");
       if (hint) hint.textContent = "已存 " + formatTime(Date.now());
     } catch (_) {}
   }
 
   function clearSave() {
-    localStorage.removeItem(SAVE_KEY);
+    Host.storageRemove(SAVE_KEY);
     const hint = document.getElementById("save-hint");
     if (hint) hint.textContent = "无存档";
   }
 
   function tryLoadSave() {
     try {
-      const raw = localStorage.getItem(SAVE_KEY) || localStorage.getItem("goban.v11.save");
+      const raw = Host.storageGet(SAVE_KEY) || Host.storageGet("goban.v11.save");
       if (!raw) return false;
       const s = JSON.parse(raw);
       if (!s || (s.v !== 1 && s.v !== 2)) return false;
@@ -555,7 +531,7 @@
   function setPanelOpen(open) {
     appEl.classList.toggle("panel-open", open);
     appEl.classList.toggle("scrim-on", open && window.innerWidth < 900);
-    localStorage.setItem(PANEL_KEY, open ? "1" : "0");
+    Host.storageSet(PANEL_KEY, open ? "1" : "0");
     requestAnimationFrame(() => { resizeCanvas(); draw(); });
     setTimeout(() => { resizeCanvas(); draw(); }, 220);
   }
@@ -1266,7 +1242,7 @@
   // boot
   loadSettings();
   document.documentElement.setAttribute("data-theme", themeId);
-  const savedPanel = localStorage.getItem(PANEL_KEY);
+  const savedPanel = Host.storageGet(PANEL_KEY);
   setPanelOpen(savedPanel === "1");
 
   const resumed = tryLoadSave();
@@ -1286,23 +1262,14 @@
   maybeAiTurn();
 
 
-  // group fold memory
-  loadGroupFold();
-  document.querySelectorAll("details.group[data-group]").forEach((el) => {
-    el.addEventListener("toggle", saveGroupFold);
-  });
   const sgfImport = document.getElementById("sgf-import");
   if (sgfImport) sgfImport.onclick = () => { pickAndImportSgf(); };
-  if (hasZero() && typeof window.zero.on === "function") {
-    try {
-      window.zero.on("drop:files", (detail) => {
-        const paths = (detail && detail.paths) || [];
-        const sgfPath = paths.find((p) => /\.sgf$/i.test(p));
-        if (sgfPath) importSgfFromPath(sgfPath);
-      });
-    } catch (_) {}
-  }
-
-  clockTimer = setInterval(updateClock, 500);
+  Host.onDropFiles((detail) => {
+    const paths = Host.normalizePaths((detail && detail.paths) || detail);
+    const sgfPath = paths.find((p) => /\.sgf$/i.test(p));
+    if (sgfPath) importSgfFromPath(sgfPath);
+    else if (paths.length) toast("请拖入 .sgf 棋谱文件");
+  });
+clockTimer = setInterval(updateClock, 500);
 
 })();
