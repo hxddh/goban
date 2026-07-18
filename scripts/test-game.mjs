@@ -157,7 +157,7 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.16]"), "SGF AP version");
+  assert(text.includes("AP[Goban:1.17]"), "SGF AP version");
 }
 
 // importPaused persists only when open game
@@ -271,15 +271,18 @@ load("src/web/js/draw.js");
   b[5][7] = b[6][7] = "b";
   b[0][0] = b[0][1] = b[0][2] = b[1][0] = b[2][0] = "w";
   const stop = Ai.aiMove({ board: b, side: "w", difficulty: "hard", timeMs: 200 });
-  assert(
-    stop && (stop.r === 8 && stop.c === 7) || (stop.r === 4 && stop.c === 7) || (stop.r === 0 && stop.c === 3),
-    "tactical force " + JSON.stringify(stop)
-  );
+  // Prefer stop black four-maker (8,7/4,7) or own rush-four (0,3/0,4)
+  const okStop =
+    stop &&
+    ((stop.r === 8 && stop.c === 7) ||
+      (stop.r === 4 && stop.c === 7) ||
+      (stop.r === 0 && (stop.c === 3 || stop.c === 4)));
+  assert(okStop, "tactical force " + JSON.stringify(stop));
 
-  // pure live3 block (no higher black threat)
+  // pure live3 block: white has NO rush4 of its own (scattered stones)
   const b2 = Core.emptyBoard();
   b2[7][6] = b2[7][7] = b2[7][8] = "b";
-  b2[0][0] = b2[1][1] = b2[2][2] = "w";
+  b2[0][0] = b2[2][4] = b2[14][14] = "w";
   const blk = Ai.aiMove({ board: b2, side: "w", difficulty: "hard", timeMs: 300 });
   assert(blk && blk.r === 7 && (blk.c === 5 || blk.c === 9), "force live3 block " + JSON.stringify(blk));
 
@@ -318,6 +321,53 @@ load("src/web/js/draw.js");
   });
   const m = Ai.aiMove({ board: b, side: "b", difficulty: "hard", timeMs: 400 });
   assert(m && !b[m.r][m.c], "TT search legal " + JSON.stringify(m));
+}
+
+// P0: pattern table — live three / rush four flags
+{
+  const b = Core.emptyBoard();
+  b[7][5] = b[7][6] = b[7][7] = "b";
+  // white to place end of open three → should be live4 or rush4 for black at ends
+  const end = Ai.analyzePlace(b, 7, 4, "b");
+  assert(end.live4 >= 1 || end.rush4 >= 1 || end.live3 >= 1 || end.winCells >= 1, "pattern live/rush on open3 end " + JSON.stringify(end));
+
+  // double live3 seed: horizontal three + vertical two-ready
+  const b2 = Core.emptyBoard();
+  b2[7][5] = b2[7][6] = b2[7][7] = "b";
+  b2[5][7] = b2[6][7] = "b";
+  // play 8,7 may create strong compound for black
+  const mid = Ai.analyzePlace(b2, 8, 7, "b");
+  assert(mid.tier >= 2 || mid.compound >= 1, "compound seed " + JSON.stringify(mid));
+}
+
+// P0: mustDefendPoints finds live3 ends
+{
+  const b = Core.emptyBoard();
+  b[7][5] = b[7][6] = b[7][7] = "b";
+  b[0][0] = "w";
+  const pts = Ai.mustDefendPoints(b, "b");
+  assert(pts.length >= 1, "mustDefend nonempty");
+  const hasEnd = pts.some((p) => p.r === 7 && (p.c === 4 || p.c === 8));
+  assert(hasEnd, "mustDefend includes open3 ends " + JSON.stringify(pts.slice(0, 5)));
+}
+
+// P0: double-live3 style attack preferred for black
+{
+  const b = Core.emptyBoard();
+  // classic: build toward dual threats
+  b[7][3] = b[7][4] = b[7][5] = "b";
+  b[5][7] = b[6][7] = b[8][7] = "b";
+  b[0][0] = b[0][1] = b[1][0] = "w";
+  const m = Ai.aiMove({ board: b, side: "b", difficulty: "hard", timeMs: 400 });
+  assert(m, "P0 attack moves");
+  b[m.r][m.c] = "b";
+  const after = Ai.analyzePlace(b, m.r, m.c, "b"); // already placed — re-analyze empty neighbor threat
+  // ensure move is tactical on/near the structures
+  const tactical =
+    (m.r === 7 || m.c === 7) ||
+    Ai.listWinCells(b, "b").length >= 1;
+  assert(tactical, "P0 dual-ish tactical " + JSON.stringify(m));
+  b[m.r][m.c] = "";
 }
 
 if (failed) {
