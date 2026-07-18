@@ -3,7 +3,7 @@
     .name = "goban",
     .display_name = "五子棋",
     .description = "Gomoku (五子棋) for macOS — real board UI.",
-    .version = "1.15.0",
+    .version = "1.16.0",
     .icons = .{"assets/icon.png"},
     .platforms = .{"macos"},
     .permissions = .{},

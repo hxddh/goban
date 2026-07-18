@@ -1,5 +1,5 @@
 /**
- * Web Worker: C1.b AI off the UI thread.
+ * Web Worker: C1.c threat-first AI.
  */
 /* global GobanAi */
 try {
@@ -21,8 +21,8 @@ self.onmessage = function (ev) {
     let timeMs = data.timeMs;
     if (typeof timeMs !== "number") {
       if (difficulty === "hard") {
-        timeMs = think === "fast" ? 400 : think === "deep" ? 1200 : 700;
-      } else if (difficulty === "normal") timeMs = 120;
+        timeMs = think === "fast" ? 800 : think === "deep" ? 3500 : 2000;
+      } else if (difficulty === "normal") timeMs = 250;
       else timeMs = 30;
     }
     const move = self.GobanAi.aiMove({

@@ -157,7 +157,7 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.15]"), "SGF AP version");
+  assert(text.includes("AP[Goban:1.16]"), "SGF AP version");
 }
 
 // importPaused persists only when open game
@@ -252,15 +252,43 @@ load("src/web/js/draw.js");
   assert(typeof Ai.findVCF === "function" && typeof Ai.findVCT === "function", "C1 exports VCF/VCT");
 }
 
-// C1.b: profile budgets
+// C1.c: profile budgets (longer hard thinks)
 {
   const pFast = Ai.profileFor("hard", { think: "fast" });
   const pDeep = Ai.profileFor("hard", { think: "deep" });
   const pNorm = Ai.profileFor("hard", { think: "normal" });
-  assert(pFast.budgetMs === 400, "fast budget");
-  assert(pDeep.budgetMs === 1200, "deep budget");
-  assert(pNorm.budgetMs === 700, "normal hard budget");
-  assert(pDeep.abDepth >= pNorm.abDepth && pNorm.vctDepth >= 8, "hard depths");
+  assert(pFast.budgetMs === 800, "fast budget " + pFast.budgetMs);
+  assert(pDeep.budgetMs === 3500, "deep budget " + pDeep.budgetMs);
+  assert(pNorm.budgetMs === 2000, "normal hard budget " + pNorm.budgetMs);
+  assert(pNorm.vctDepth >= 10 && pNorm.abDepth >= 7, "hard depths");
+}
+
+// C1.c: forced hierarchy
+{
+  // Black vertical will make four at 8,7 — white must stop that (tier ≥ four)
+  const b = Core.emptyBoard();
+  b[7][6] = b[7][7] = b[7][8] = "b";
+  b[5][7] = b[6][7] = "b";
+  b[0][0] = b[0][1] = b[0][2] = b[1][0] = b[2][0] = "w";
+  const stop = Ai.aiMove({ board: b, side: "w", difficulty: "hard", timeMs: 200 });
+  assert(
+    stop && (stop.r === 8 && stop.c === 7) || (stop.r === 4 && stop.c === 7) || (stop.r === 0 && stop.c === 3),
+    "tactical force " + JSON.stringify(stop)
+  );
+
+  // pure live3 block (no higher black threat)
+  const b2 = Core.emptyBoard();
+  b2[7][6] = b2[7][7] = b2[7][8] = "b";
+  b2[0][0] = b2[1][1] = b2[2][2] = "w";
+  const blk = Ai.aiMove({ board: b2, side: "w", difficulty: "hard", timeMs: 300 });
+  assert(blk && blk.r === 7 && (blk.c === 5 || blk.c === 9), "force live3 block " + JSON.stringify(blk));
+
+  // white own rush-four when black has only a weak shape
+  const b3 = Core.emptyBoard();
+  b3[0][0] = b3[0][1] = b3[0][2] = "w";
+  b3[10][10] = "b";
+  const rf = Ai.aiMove({ board: b3, side: "w", difficulty: "hard", timeMs: 150 });
+  assert(rf && rf.r === 0 && (rf.c === 3 || rf.c === 4), "own rush4 " + JSON.stringify(rf));
 }
 
 // C1.b: block live three ends (white to move)

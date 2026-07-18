@@ -28,14 +28,14 @@
   let thinkLevel = "normal";
 
   function hardTimeMs() {
-    if (thinkLevel === "fast") return 400;
-    if (thinkLevel === "deep") return 1200;
-    return 700;
+    if (thinkLevel === "fast") return 800;
+    if (thinkLevel === "deep") return 3500;
+    return 2000;
   }
 
   function budgetForDiff(diff) {
     if (diff === "hard") return hardTimeMs();
-    if (diff === "normal") return 120;
+    if (diff === "normal") return 250;
     return 30;
   }
 
@@ -135,15 +135,15 @@
           finish(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs, think: think })));
           return;
         }
-        // safety: budget + margin for TT search
+        // safety: budget + margin for deep C1.c search
         setTimeout(() => {
           if (settled) return;
           finish(
             aiMoveSync(
-              Object.assign({}, payload, { timeMs: Math.min(120, timeMs), think: think })
+              Object.assign({}, payload, { timeMs: Math.min(200, timeMs), think: think })
             )
           );
-        }, timeMs + 900);
+        }, timeMs + 2000);
       });
     }
     return new Promise((resolve) => {
@@ -1155,7 +1155,7 @@
       syncSettingsUI();
       toast(
         "思考：" +
-          ({ fast: "快 ~0.4s", normal: "标准 ~0.7s", deep: "深 ~1.2s" })[id]
+          ({ fast: "快 ~0.8s", normal: "标准 ~2s", deep: "深 ~3.5s" })[id]
       );
     };
   }

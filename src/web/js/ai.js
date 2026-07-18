@@ -1,11 +1,12 @@
 /**
- * C1.b engine: patterns + VCF/VCT + TT + killers + iterative α-β.
- * Freestyle 15×15. Only mutates board copies / search state.
+ * C1.c — threat-first freestyle gomoku engine.
+ * Priority: win > block win > dual > rush4 > block rush4/live4 >
+ *           live3 attack/block > VCF/VCT > α-β (threat moves deep).
  * @module ai
  */
 (function (global) {
   const Core = global.GobanCore;
-  const N = () => Core.SIZE;
+  const SZ = 15;
   const DIRS = [
     [0, 1],
     [1, 0],
@@ -13,219 +14,260 @@
     [1, -1],
   ];
 
-  // --- Zobrist / TT --------------------------------------------------------
-  const Z_CELLS = 15 * 15;
-  const zobrist = new Uint32Array(Z_CELLS * 2 + 1);
-  (function initZ() {
-    let s = 0xC1B5C1B5 >>> 0;
+  // Zobrist + TT
+  const ZN = SZ * SZ;
+  const zobrist = new Uint32Array(ZN * 2 + 1);
+  (function () {
+    let s = 0xA15C1C1c >>> 0;
     for (let i = 0; i < zobrist.length; i++) {
       s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
       zobrist[i] = s;
     }
   })();
-  const Z_SIDE = Z_CELLS * 2;
+  const Z_SIDE = ZN * 2;
+  const TT_N = 1 << 19;
+  const ttKey = new Int32Array(TT_N);
+  const ttDep = new Int8Array(TT_N);
+  const ttFlg = new Int8Array(TT_N);
+  const ttSc = new Float64Array(TT_N);
+  const ttMv = new Int16Array(TT_N);
+  let ttGen = 1;
+  const ttGenA = new Int32Array(TT_N);
+  const EX = 0,
+    LO = 1,
+    UP = 2;
 
-  const TT_EXACT = 0;
-  const TT_LOWER = 1;
-  const TT_UPPER = 2;
-  const TT_SIZE = 1 << 18; // 262k entries
-  const ttKey = new Int32Array(TT_SIZE);
-  const ttDepth = new Int8Array(TT_SIZE);
-  const ttFlag = new Int8Array(TT_SIZE);
-  const ttScore = new Float64Array(TT_SIZE);
-  const ttMove = new Int16Array(TT_SIZE); // r*16+c or -1
-  let ttEpoch = 1;
-  const ttEpochArr = new Int32Array(TT_SIZE);
-
-  function ttClear() {
-    ttEpoch = (ttEpoch + 1) | 0;
-    if (ttEpoch > 1e9) {
-      ttEpoch = 1;
-      ttEpochArr.fill(0);
+  function ttReset() {
+    ttGen++;
+    if (ttGen > 1e9) {
+      ttGen = 1;
+      ttGenA.fill(0);
     }
   }
-
-  function ttIndex(hash) {
-    return (hash >>> 0) & (TT_SIZE - 1);
+  function ttI(h) {
+    return (h >>> 0) & (TT_N - 1);
+  }
+  function ttGet(h, d, a, b) {
+    const i = ttI(h);
+    if (ttGenA[i] !== ttGen || ttKey[i] !== (h | 0)) return null;
+    const mv = ttMv[i];
+    if (ttDep[i] < d) return { mv: mv };
+    const sc = ttSc[i],
+      f = ttFlg[i];
+    if (f === EX) return { sc: sc, mv: mv };
+    if (f === LO && sc >= b) return { sc: sc, mv: mv };
+    if (f === UP && sc <= a) return { sc: sc, mv: mv };
+    return { mv: mv };
+  }
+  function ttPut(h, d, f, sc, mv) {
+    const i = ttI(h);
+    if (ttGenA[i] === ttGen && ttDep[i] > d) return;
+    ttGenA[i] = ttGen;
+    ttKey[i] = h | 0;
+    ttDep[i] = d;
+    ttFlg[i] = f;
+    ttSc[i] = sc;
+    ttMv[i] = mv == null ? -1 : mv;
   }
 
-  function ttProbe(hash, depth, alpha, beta) {
-    const i = ttIndex(hash);
-    if (ttEpochArr[i] !== ttEpoch || ttKey[i] !== (hash | 0)) return null;
-    if (ttDepth[i] < depth) return { move: ttMove[i], onlyMove: true };
-    const sc = ttScore[i];
-    const fl = ttFlag[i];
-    if (fl === TT_EXACT) return { score: sc, move: ttMove[i] };
-    if (fl === TT_LOWER && sc >= beta) return { score: sc, move: ttMove[i] };
-    if (fl === TT_UPPER && sc <= alpha) return { score: sc, move: ttMove[i] };
-    return { move: ttMove[i], onlyMove: true };
-  }
-
-  function ttStore(hash, depth, flag, score, moveRC) {
-    const i = ttIndex(hash);
-    // replace if empty epoch or deeper/equal
-    if (ttEpochArr[i] === ttEpoch && ttDepth[i] > depth) return;
-    ttEpochArr[i] = ttEpoch;
-    ttKey[i] = hash | 0;
-    ttDepth[i] = depth;
-    ttFlag[i] = flag;
-    ttScore[i] = score;
-    ttMove[i] = moveRC == null ? -1 : moveRC;
-  }
-
-  function packMove(r, c) {
+  function pack(r, c) {
     return (r << 4) | c;
   }
-  function unpackR(m) {
+  function unR(m) {
     return m >> 4;
   }
-  function unpackC(m) {
+  function unC(m) {
     return m & 15;
   }
 
   function hashBoard(board, side) {
     let h = 0;
-    const n = N();
-    for (let r = 0; r < n; r++) {
-      for (let c = 0; c < n; c++) {
+    for (let r = 0; r < SZ; r++)
+      for (let c = 0; c < SZ; c++) {
         const s = board[r][c];
         if (!s) continue;
-        const base = s === "b" ? 0 : Z_CELLS;
-        h ^= zobrist[base + r * 15 + c];
+        h ^= zobrist[(s === "b" ? 0 : ZN) + r * SZ + c];
       }
-    }
     if (side === "w") h ^= zobrist[Z_SIDE];
     return h >>> 0;
   }
-
-  function hashXorPlace(h, r, c, color) {
-    const base = color === "b" ? 0 : Z_CELLS;
-    return (h ^ zobrist[base + r * 15 + c]) >>> 0;
+  function xorPlace(h, r, c, color) {
+    return (h ^ zobrist[(color === "b" ? 0 : ZN) + r * SZ + c]) >>> 0;
   }
 
-  // --- utils ---------------------------------------------------------------
   function cloneBoard(board) {
-    const n = N();
-    const out = new Array(n);
-    for (let r = 0; r < n; r++) out[r] = board[r].slice();
-    return out;
+    const o = new Array(SZ);
+    for (let r = 0; r < SZ; r++) o[r] = board[r].slice();
+    return o;
   }
-
   function nowMs() {
-    return typeof performance !== "undefined" && performance.now
-      ? performance.now()
-      : Date.now();
+    return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
   }
-
   function timedOut(ctx) {
-    return ctx && ctx.deadline > 0 && nowMs() >= ctx.deadline;
+    return ctx && ctx.t1 > 0 && nowMs() >= ctx.t1;
   }
 
-  function nearStone(board, r, c, dist) {
-    const d = dist || 2;
-    const n = N();
-    for (let dr = -d; dr <= d; dr++) {
+  function near(board, r, c, d) {
+    d = d || 2;
+    for (let dr = -d; dr <= d; dr++)
       for (let dc = -d; dc <= d; dc++) {
         if (!dr && !dc) continue;
         const rr = r + dr,
           cc = c + dc;
-        if (rr >= 0 && rr < n && cc >= 0 && cc < n && board[rr][cc]) return true;
+        if (rr >= 0 && rr < SZ && cc >= 0 && cc < SZ && board[rr][cc]) return true;
       }
-    }
     return false;
   }
 
-  function hasAny(board) {
-    const n = N();
-    for (let r = 0; r < n; r++)
-      for (let c = 0; c < n; c++) if (board[r][c]) return true;
+  function hasStone(board) {
+    for (let r = 0; r < SZ; r++)
+      for (let c = 0; c < SZ; c++) if (board[r][c]) return true;
     return false;
   }
 
-  /** Win cells — only near stones (five-in-row cannot appear in empty region). */
-  function listWinCells(board, color) {
-    const n = N();
+  function emptiesNear(board, d) {
+    if (!hasStone(board)) return [{ r: 7, c: 7 }];
     const list = [];
-    for (let r = 0; r < n; r++) {
-      for (let c = 0; c < n; c++) {
+    for (let r = 0; r < SZ; r++)
+      for (let c = 0; c < SZ; c++) {
         if (board[r][c]) continue;
-        if (!nearStone(board, r, c, 1)) continue;
-        if (Core.wouldWin(board, r, c, color)) list.push({ r: r, c: c });
+        if (!near(board, r, c, d || 2)) continue;
+        list.push({ r: r, c: c });
       }
+    if (!list.length) {
+      for (let r = 0; r < SZ; r++)
+        for (let c = 0; c < SZ; c++) if (!board[r][c]) list.push({ r: r, c: c });
     }
     return list;
   }
 
-  function lineRun(board, r, c, dr, dc, color) {
-    const n = N();
-    let cnt = 1;
-    let rr = r + dr,
-      cc = c + dc;
-    while (rr >= 0 && rr < n && cc >= 0 && cc < n && board[rr][cc] === color) {
-      cnt++;
-      rr += dr;
-      cc += dc;
+  function listWins(board, color) {
+    const list = [];
+    const cells = emptiesNear(board, 1);
+    for (let i = 0; i < cells.length; i++) {
+      const m = cells[i];
+      if (Core.wouldWin(board, m.r, m.c, color)) list.push(m);
     }
-    const end1Open = rr >= 0 && rr < n && cc >= 0 && cc < n && !board[rr][cc] ? 1 : 0;
-    rr = r - dr;
-    cc = c - dc;
-    while (rr >= 0 && rr < n && cc >= 0 && cc < n && board[rr][cc] === color) {
-      cnt++;
-      rr -= dr;
-      cc -= dc;
-    }
-    const end2Open = rr >= 0 && rr < n && cc >= 0 && cc < n && !board[rr][cc] ? 1 : 0;
-    return { cnt: cnt, open: end1Open + end2Open };
+    return list;
   }
 
-  function shapeAt(board, r, c, color) {
-    if (board[r][c]) {
-      return { score: -1e15, wins: 0, live4: 0, rush4: 0, live3: 0, sleep3: 0, live2: 0 };
+  /** Line pattern through (r,c) for color already placed or to place. */
+  function scanDir(board, r, c, dr, dc, color) {
+    // Build string of 9 cells centered: 0 empty, 1 me, 2 opp, 3 wall
+    const cells = [];
+    for (let k = -4; k <= 4; k++) {
+      const rr = r + dr * k,
+        cc = c + dc * k;
+      if (rr < 0 || rr >= SZ || cc < 0 || cc >= SZ) cells.push(3);
+      else if (board[rr][cc] === color) cells.push(1);
+      else if (!board[rr][cc]) cells.push(0);
+      else cells.push(2);
     }
+    // Force center as me
+    cells[4] = 1;
+    return cells;
+  }
+
+  /**
+   * Pattern score for placing color at (r,c). Uses window matching.
+   * Returns {score, tier} tier: 5=win, 4=live4, 3=rush4, 2=live3, 1=sleep3/live2
+   */
+  function patternPlace(board, r, c, color) {
+    if (board[r][c]) return { score: -1e15, tier: 0, wins: 0, live4: 0, rush4: 0, live3: 0 };
     if (Core.wouldWin(board, r, c, color)) {
-      return { score: 1e12, wins: 1, live4: 0, rush4: 0, live3: 0, sleep3: 0, live2: 0 };
+      return { score: 1e9, tier: 5, wins: 1, live4: 0, rush4: 0, live3: 0 };
     }
     board[r][c] = color;
-    let score = 0;
-    let live4 = 0,
+    let score = 0,
+      live4 = 0,
       rush4 = 0,
       live3 = 0,
       sleep3 = 0,
       live2 = 0;
-    for (let d = 0; d < 4; d++) {
-      const dr = DIRS[d][0],
-        dc = DIRS[d][1];
-      const { cnt, open } = lineRun(board, r, c, dr, dc, color);
-      if (cnt >= 5) score += 1e12;
+    // consecutive metric (fast)
+    for (let di = 0; di < 4; di++) {
+      const dr = DIRS[di][0],
+        dc = DIRS[di][1];
+      let cnt = 1,
+        o1 = 0,
+        o2 = 0;
+      let rr = r + dr,
+        cc = c + dc;
+      while (rr >= 0 && rr < SZ && cc >= 0 && cc < SZ && board[rr][cc] === color) {
+        cnt++;
+        rr += dr;
+        cc += dc;
+      }
+      if (rr >= 0 && rr < SZ && cc >= 0 && cc < SZ && !board[rr][cc]) o1 = 1;
+      rr = r - dr;
+      cc = c - dc;
+      while (rr >= 0 && rr < SZ && cc >= 0 && cc < SZ && board[rr][cc] === color) {
+        cnt++;
+        rr -= dr;
+        cc -= dc;
+      }
+      if (rr >= 0 && rr < SZ && cc >= 0 && cc < SZ && !board[rr][cc]) o2 = 1;
+      const open = o1 + o2;
+      if (cnt >= 5) score += 1e9;
       else if (cnt === 4 && open === 2) {
         live4++;
-        score += 520000;
+        score += 600000;
       } else if (cnt === 4 && open === 1) {
         rush4++;
-        score += 90000;
+        score += 100000;
       } else if (cnt === 3 && open === 2) {
         live3++;
-        score += 14000;
+        score += 20000;
       } else if (cnt === 3 && open === 1) {
         sleep3++;
-        score += 900;
+        score += 1200;
       } else if (cnt === 2 && open === 2) {
         live2++;
-        score += 480;
-      } else if (cnt === 2 && open === 1) score += 45;
-      else score += cnt * 6;
-    }
-    if (live4 >= 1 || rush4 >= 2) score += 420000;
-    if (live3 >= 2) score += 220000;
-    if (live3 >= 1 && rush4 >= 1) score += 280000;
-    if (live3 >= 1 && live4 >= 1) score += 350000;
+        score += 600;
+      } else if (cnt === 2 && open === 1) score += 50;
+      else score += cnt * 8;
 
-    const wins = listWinCells(board, color).length;
+      // jump patterns: ●●_● / ●_●●  (broken three → often live3-like)
+      const win = scanDir(board, r, c, dr, dc, color);
+      const str = win.join("");
+      // 011010 / 010110 with empties — jump live three
+      if (
+        str.indexOf("011010") >= 0 ||
+        str.indexOf("010110") >= 0 ||
+        str.indexOf("01110") >= 0
+      ) {
+        // already counted consecutive; boost jump
+        if (str.indexOf("011010") >= 0 || str.indexOf("010110") >= 0) {
+          live3++;
+          score += 15000;
+        }
+      }
+      // jump four ●●_●●
+      if (str.indexOf("0110110") >= 0 || str.indexOf("11011") >= 0) {
+        rush4++;
+        score += 80000;
+      }
+    }
+    if (live4 >= 1 || rush4 >= 2) score += 500000;
+    if (live3 >= 2) score += 350000;
+    if (live3 >= 1 && (rush4 >= 1 || live4 >= 1)) score += 400000;
+
+    const wins = listWins(board, color).length;
     board[r][c] = "";
-    score += wins * 160000;
-    score += (14 - (Math.abs(r - 7) + Math.abs(c - 7))) * 3;
+    score += wins * 200000;
+    score += (14 - (Math.abs(r - 7) + Math.abs(c - 7))) * 4;
+
+    let tier = 0;
+    if (wins >= 1 || live4 >= 1) tier = 4;
+    else if (rush4 >= 1 || wins >= 1) tier = 3;
+    else if (live3 >= 1) tier = 2;
+    else if (sleep3 || live2) tier = 1;
+    if (wins >= 2 || live4 >= 1 || (rush4 >= 1 && live3 >= 1) || live3 >= 2) tier = Math.max(tier, 4);
+    if (Core.wouldWin(board, r, c, color)) tier = 5;
+
     return {
       score: score,
+      tier: tier,
       wins: wins,
       live4: live4,
       rush4: rush4,
@@ -235,69 +277,24 @@
     };
   }
 
-  function candidateList(board, nearDist) {
-    const n = N();
-    if (!hasAny(board)) return [{ r: 7, c: 7 }];
-    const list = [];
-    const d = nearDist || 2;
-    for (let r = 0; r < n; r++) {
-      for (let c = 0; c < n; c++) {
-        if (board[r][c]) continue;
-        if (!nearStone(board, r, c, d)) continue;
-        list.push({ r: r, c: c });
-      }
-    }
-    if (!list.length) {
-      for (let r = 0; r < n; r++)
-        for (let c = 0; c < n; c++) if (!board[r][c]) list.push({ r: r, c: c });
-    }
-    return list;
-  }
-
-  function rankedCandidates(board, me, maxN, ctx, killers, history, ply) {
+  function evalStatic(board, me) {
     const them = Core.opp(me);
-    const raw = candidateList(board, 2);
-    const scored = [];
-    for (let i = 0; i < raw.length; i++) {
-      if (timedOut(ctx)) break;
-      const m = raw[i];
-      const off = shapeAt(board, m.r, m.c, me);
-      const def = shapeAt(board, m.r, m.c, them);
-      let s = off.score + def.score * 0.96;
-      if (Core.wouldWin(board, m.r, m.c, me)) s = 1e14;
-      else if (Core.wouldWin(board, m.r, m.c, them)) s = 1e13 + def.score;
-      // history / killers
-      const code = packMove(m.r, m.c);
-      if (killers && ply != null) {
-        if (killers[0][ply] === code) s += 50000;
-        else if (killers[1][ply] === code) s += 30000;
-      }
-      if (history) s += history[code] || 0;
-      scored.push({ r: m.r, c: m.c, s: s, off: off, def: def });
-    }
-    scored.sort((a, b) => b.s - a.s);
-    return scored.slice(0, maxN || scored.length);
-  }
-
-  function evaluateBoard(board, me) {
-    const them = Core.opp(me);
-    const n = N();
-    let score = 0;
-    for (let r = 0; r < n; r++) {
-      for (let c = 0; c < n; c++) {
+    let sc = 0;
+    for (let r = 0; r < SZ; r++)
+      for (let c = 0; c < SZ; c++) {
         if (!board[r][c]) continue;
-        const color = board[r][c];
-        const sign = color === me ? 1 : -1.18;
+        const col = board[r][c];
+        const sign = col === me ? 1 : -1.2;
         for (let di = 0; di < 4; di++) {
           const dr = DIRS[di][0],
             dc = DIRS[di][1];
           const pr = r - dr,
             pc = c - dc;
-          if (pr >= 0 && pr < n && pc >= 0 && pc < n && board[pr][pc] === color) continue;
-          let cnt = 0;
-          let rr = r,
+          if (pr >= 0 && pr < SZ && pc >= 0 && pc < SZ && board[pr][pc] === col) continue;
+          let cnt = 0,
+            rr = r,
             cc = c;
-          while (rr >= 0 && rr < n && cc >= 0 && cc < n && board[rr][cc] === color) {
+          while (rr >= 0 && rr < SZ && cc >= 0 && cc < SZ && board[rr][cc] === col) {
             cnt++;
             rr += dr;
             cc += dc;
@@ -305,353 +302,511 @@
           let open = 0;
           const br = r - dr,
             bc = c - dc;
-          if (br < 0 || br >= n || bc < 0 || bc >= n || !board[br][bc]) open++;
-          if (rr < 0 || rr >= n || cc < 0 || cc >= n || !board[rr][cc]) open++;
+          if (br < 0 || br >= SZ || bc < 0 || bc >= SZ || !board[br][bc]) open++;
+          if (rr < 0 || rr >= SZ || cc < 0 || cc >= SZ || !board[rr][cc]) open++;
           let v = 0;
           if (cnt >= 5) v = 1e6;
-          else if (cnt === 4 && open === 2) v = 220000;
-          else if (cnt === 4 && open === 1) v = 45000;
-          else if (cnt === 3 && open === 2) v = 9000;
-          else if (cnt === 3 && open === 1) v = 550;
-          else if (cnt === 2 && open === 2) v = 220;
-          else if (cnt === 2 && open === 1) v = 22;
-          else v = cnt * 4;
-          score += sign * v;
+          else if (cnt === 4 && open === 2) v = 300000;
+          else if (cnt === 4 && open === 1) v = 50000;
+          else if (cnt === 3 && open === 2) v = 12000;
+          else if (cnt === 3 && open === 1) v = 700;
+          else if (cnt === 2 && open === 2) v = 300;
+          else v = cnt * 5;
+          sc += sign * v;
         }
-        score += sign * (14 - (Math.abs(r - 7) + Math.abs(c - 7))) * 0.35;
+        sc += sign * (14 - (Math.abs(r - 7) + Math.abs(c - 7))) * 0.4;
+      }
+    // side-to-move threats bonus for me already reflected by caller
+    return sc;
+  }
+
+  /**
+   * Ranked moves. offense + deny opponent patterns.
+   */
+  function rankMoves(board, me, maxN, ctx) {
+    const them = Core.opp(me);
+    const raw = emptiesNear(board, 2);
+    const out = [];
+    for (let i = 0; i < raw.length; i++) {
+      if (timedOut(ctx)) break;
+      const m = raw[i];
+      const off = patternPlace(board, m.r, m.c, me);
+      const def = patternPlace(board, m.r, m.c, them);
+      let s = off.score + def.score * 1.05; // defend slightly more
+      if (off.tier >= 5) s = 1e12;
+      else if (def.tier >= 5) s = 1e11 + def.score;
+      else if (off.tier >= 4) s = 1e10 + off.score;
+      else if (def.tier >= 4) s = 5e9 + def.score;
+      else if (off.tier >= 3) s = 1e9 + off.score;
+      else if (def.tier >= 3) s = 5e8 + def.score;
+      out.push({ r: m.r, c: m.c, s: s, off: off, def: def });
+    }
+    out.sort((a, b) => b.s - a.s);
+    return out.slice(0, maxN || out.length);
+  }
+
+  /** Only tactical / threat-related moves for deep search. */
+  function threatMoves(board, me, maxN, ctx) {
+    const all = rankMoves(board, me, 40, ctx);
+    const t = [];
+    for (let i = 0; i < all.length; i++) {
+      const m = all[i];
+      if (
+        m.off.tier >= 2 ||
+        m.def.tier >= 2 ||
+        m.off.live3 ||
+        m.def.live3 ||
+        m.off.rush4 ||
+        m.def.rush4 ||
+        m.off.live4 ||
+        m.def.live4 ||
+        m.off.wins ||
+        m.def.wins
+      ) {
+        t.push(m);
       }
     }
-    return score;
+    if (t.length < 6) return all.slice(0, maxN || 16);
+    return t.slice(0, maxN || 20);
   }
 
-  // --- VCF -----------------------------------------------------------------
-  function findVCF(board, me, maxDepth, ctx) {
-    return vcfRec(board, me, 0, maxDepth, ctx, 0);
-  }
-
-  function vcfRec(board, me, depth, maxDepth, ctx, hash) {
-    if (timedOut(ctx) || depth > maxDepth) return null;
+  /**
+   * Forced / high-priority root move. Returns move or null.
+   */
+  function forcedMove(board, me, ctx) {
     const them = Core.opp(me);
-    const cands = candidateList(board, 2);
+    const cells = emptiesNear(board, 2);
 
-    for (let i = 0; i < cands.length; i++) {
-      const m = cands[i];
-      if (Core.wouldWin(board, m.r, m.c, me)) return m;
+    // 1 win
+    for (let i = 0; i < cells.length; i++) {
+      if (Core.wouldWin(board, cells[i].r, cells[i].c, me)) return cells[i];
+    }
+    // 2 block win
+    for (let i = 0; i < cells.length; i++) {
+      if (Core.wouldWin(board, cells[i].r, cells[i].c, them)) return cells[i];
     }
 
-    const attacks = [];
-    for (let i = 0; i < cands.length; i++) {
+    // Classify each empty
+    const myDual = [];
+    const myFour = []; // creates ≥1 win cell
+    const myLive3 = [];
+    const theirDual = [];
+    const theirFour = [];
+    const theirLive3 = [];
+
+    for (let i = 0; i < cells.length; i++) {
       if (timedOut(ctx)) break;
-      const m = cands[i];
+      const m = cells[i];
+      // my place
+      board[m.r][m.c] = me;
+      const mw = listWins(board, me).length;
+      board[m.r][m.c] = "";
+      const mo = patternPlace(board, m.r, m.c, me);
+      if (mw >= 2 || mo.live4 >= 1 || (mo.rush4 >= 1 && mo.live3 >= 1) || mo.live3 >= 2) {
+        myDual.push({ m: m, s: mo.score + mw * 1e6 });
+      } else if (mw >= 1 || mo.rush4 >= 1 || mo.live4 >= 1) {
+        myFour.push({ m: m, s: mo.score });
+      } else if (mo.live3 >= 1) {
+        myLive3.push({ m: m, s: mo.score });
+      }
+
+      board[m.r][m.c] = them;
+      const tw = listWins(board, them).length;
+      board[m.r][m.c] = "";
+      const to = patternPlace(board, m.r, m.c, them);
+      if (tw >= 2 || to.live4 >= 1 || (to.rush4 >= 1 && to.live3 >= 1) || to.live3 >= 2) {
+        theirDual.push({ m: m, s: to.score + tw * 1e6 });
+      } else if (tw >= 1 || to.rush4 >= 1 || to.live4 >= 1) {
+        theirFour.push({ m: m, s: to.score });
+      } else if (to.live3 >= 1) {
+        theirLive3.push({ m: m, s: to.score });
+      }
+    }
+
+    const best = (arr) => {
+      if (!arr.length) return null;
+      arr.sort((a, b) => b.s - a.s);
+      return arr[0].m;
+    };
+
+    // 3 my dual / live4 fork
+    if (myDual.length) return best(myDual);
+    // 4 block their dual
+    if (theirDual.length) return best(theirDual);
+    // 5 my rush four (force)
+    if (myFour.length) return best(myFour);
+    // 6 block their rush four / four-makers
+    if (theirFour.length) return best(theirFour);
+    // 7 my live3 (if they don't have equal — already no four)
+    // Prefer live3 that also defends
+    if (myLive3.length && !theirLive3.length) return best(myLive3);
+    // 8 block their live3 (mandatory when we have no four)
+    if (theirLive3.length) {
+      // If we can counter with live3 that also hits their threat, prefer
+      if (myLive3.length) {
+        // intersection: moves in myLive3 that are also theirLive3 cells
+        const set = {};
+        for (let i = 0; i < theirLive3.length; i++) {
+          set[theirLive3[i].m.r + "," + theirLive3[i].m.c] = true;
+        }
+        for (let i = 0; i < myLive3.length; i++) {
+          const k = myLive3[i].m.r + "," + myLive3[i].m.c;
+          if (set[k]) return myLive3[i].m;
+        }
+        // both attack: play strongest live3 if dual-ish
+        myLive3.sort((a, b) => b.s - a.s);
+        theirLive3.sort((a, b) => b.s - a.s);
+        // if my live3 is dual-type already handled; else block theirs
+      }
+      return best(theirLive3);
+    }
+    if (myLive3.length) return best(myLive3);
+    return null;
+  }
+
+  // VCF
+  function findVCF(board, me, maxD, ctx) {
+    return vcf(board, me, 0, maxD, ctx);
+  }
+  function vcf(board, me, d, maxD, ctx) {
+    if (timedOut(ctx) || d > maxD) return null;
+    const them = Core.opp(me);
+    const cells = emptiesNear(board, 2);
+    for (let i = 0; i < cells.length; i++) {
+      if (Core.wouldWin(board, cells[i].r, cells[i].c, me)) return cells[i];
+    }
+    const attacks = [];
+    for (let i = 0; i < cells.length; i++) {
+      if (timedOut(ctx)) break;
+      const m = cells[i];
       board[m.r][m.c] = me;
       if (Core.findWin(board, m.r, m.c, me)) {
         board[m.r][m.c] = "";
         return m;
       }
-      const myWins = listWinCells(board, me);
-      const oppWins = listWinCells(board, them);
+      const mw = listWins(board, me);
+      const ow = listWins(board, them);
       board[m.r][m.c] = "";
-      if (oppWins.length) continue;
-      if (myWins.length >= 2) return m;
-      if (myWins.length === 1) attacks.push({ m: m, block: myWins[0] });
+      if (ow.length) continue;
+      if (mw.length >= 2) return m;
+      if (mw.length === 1) attacks.push({ m: m, b: mw[0] });
     }
-
-    attacks.sort((a, b) => {
-      const da = Math.abs(a.m.r - 7) + Math.abs(a.m.c - 7);
-      const db = Math.abs(b.m.r - 7) + Math.abs(b.m.c - 7);
-      return da - db;
-    });
-
-    const cap = Math.min(attacks.length, depth === 0 ? 20 : 14);
+    const cap = Math.min(attacks.length, d === 0 ? 24 : 16);
     for (let i = 0; i < cap; i++) {
       if (timedOut(ctx)) break;
-      const { m, block } = attacks[i];
+      const { m, b } = attacks[i];
       board[m.r][m.c] = me;
-      board[block.r][block.c] = them;
-      const cont = vcfRec(board, me, depth + 1, maxDepth, ctx, hash);
-      board[block.r][block.c] = "";
+      board[b.r][b.c] = them;
+      const ok = vcf(board, me, d + 1, maxD, ctx);
+      board[b.r][b.c] = "";
       board[m.r][m.c] = "";
-      if (cont) return m;
+      if (ok) return m;
     }
     return null;
   }
 
-  // --- VCT -----------------------------------------------------------------
-  function findVCT(board, me, maxDepth, ctx) {
-    return vctRec(board, me, 0, maxDepth, ctx);
+  // VCT with live3
+  function findVCT(board, me, maxD, ctx) {
+    return vct(board, me, 0, maxD, ctx);
   }
-
-  function vctRec(board, me, depth, maxDepth, ctx) {
-    if (timedOut(ctx) || depth > maxDepth) return null;
+  function vct(board, me, d, maxD, ctx) {
+    if (timedOut(ctx) || d > maxD) return null;
     const them = Core.opp(me);
+    const f = findVCF(board, me, maxD - d + 8, ctx);
+    if (f) return f;
 
-    const vcf = findVCF(board, me, maxDepth - depth + 6, ctx);
-    if (vcf) return vcf;
-
-    const ranked = rankedCandidates(board, me, depth === 0 ? 32 : 22, ctx, null, null, 0);
-    for (let i = 0; i < ranked.length; i++) {
-      if (Core.wouldWin(board, ranked[i].r, ranked[i].c, me)) return ranked[i];
+    const moves = threatMoves(board, me, d === 0 ? 18 : 12, ctx);
+    for (let i = 0; i < moves.length; i++) {
+      if (Core.wouldWin(board, moves[i].r, moves[i].c, me)) return moves[i];
     }
-
-    const attacks = [];
-    for (let i = 0; i < ranked.length; i++) {
+    for (let i = 0; i < moves.length; i++) {
       if (timedOut(ctx)) break;
-      const m = ranked[i];
-      const sh = m.off || shapeAt(board, m.r, m.c, me);
-      let prio = 0;
-      if (sh.wins >= 2 || sh.live4 >= 1) prio = 1e9 + sh.score;
-      else if (sh.wins >= 1) prio = 1e8 + sh.score;
-      else if (sh.rush4 >= 1 && sh.live3 >= 1) prio = 5e7 + sh.score;
-      else if (sh.live3 >= 2) prio = 4e7 + sh.score;
-      else if (sh.rush4 >= 1 || sh.live3 >= 1) prio = sh.score;
-      else continue;
-      attacks.push({ m: m, prio: prio });
-    }
-    attacks.sort((a, b) => b.prio - a.prio);
-    const limit = Math.min(attacks.length, depth === 0 ? 16 : depth <= 2 ? 12 : 8);
-
-    for (let i = 0; i < limit; i++) {
-      if (timedOut(ctx)) break;
-      const m = attacks[i].m;
+      const m = moves[i];
+      if (m.off.tier < 2 && m.off.live3 < 1 && m.off.rush4 < 1) continue;
       board[m.r][m.c] = me;
       if (Core.findWin(board, m.r, m.c, me)) {
         board[m.r][m.c] = "";
         return m;
       }
-      const oppWins = listWinCells(board, them);
-      if (oppWins.length) {
+      if (listWins(board, them).length) {
         board[m.r][m.c] = "";
         continue;
       }
-      const myWins = listWinCells(board, me);
-      if (myWins.length >= 2) {
+      const mw = listWins(board, me);
+      if (mw.length >= 2) {
         board[m.r][m.c] = "";
         return m;
       }
-
       let replies;
-      if (myWins.length === 1) {
-        replies = [myWins[0]];
-      } else {
-        // defensive replies against live3 — top opponent shapes
-        const defs = rankedCandidates(board, them, 5, ctx, null, null, 0);
-        replies = defs.map((d) => ({ r: d.r, c: d.c }));
+      if (mw.length === 1) replies = [mw[0]];
+      else {
+        // block our live3 points: their best defenses
+        const def = threatMoves(board, them, 4, ctx);
+        replies = def.map((x) => ({ r: x.r, c: x.c }));
+        if (!replies.length) {
+          board[m.r][m.c] = "";
+          continue;
+        }
       }
-
-      let allGood = replies.length > 0;
+      let good = true;
       for (let j = 0; j < replies.length; j++) {
-        if (timedOut(ctx)) {
-          allGood = false;
+        const r = replies[j];
+        if (board[r.r][r.c]) continue;
+        board[r.r][r.c] = them;
+        if (Core.findWin(board, r.r, r.c, them)) {
+          good = false;
+          board[r.r][r.c] = "";
           break;
         }
-        const d = replies[j];
-        if (board[d.r][d.c]) continue;
-        board[d.r][d.c] = them;
-        if (Core.findWin(board, d.r, d.c, them)) {
-          allGood = false;
-          board[d.r][d.c] = "";
-          break;
-        }
-        // after defense, also check if we still have VCF short-circuit
-        const cont =
-          findVCF(board, me, 8, ctx) || vctRec(board, me, depth + 1, maxDepth, ctx);
-        board[d.r][d.c] = "";
+        const cont = findVCF(board, me, 10, ctx) || vct(board, me, d + 1, maxD, ctx);
+        board[r.r][r.c] = "";
         if (!cont) {
-          allGood = false;
+          good = false;
           break;
         }
       }
       board[m.r][m.c] = "";
-      if (allGood) return m;
+      if (good && replies.length) return m;
     }
     return null;
   }
 
-  // --- α-β with TT ---------------------------------------------------------
-  function negamax(board, depth, alpha, beta, side, root, ctx, ply, hash, killers, history) {
-    if (timedOut(ctx)) return evaluateBoard(board, root);
+  function negamax(board, depth, alpha, beta, side, root, ctx, ply, h, killers, hist, threatOnly) {
+    if (timedOut(ctx)) return evalStatic(board, root);
+    const a0 = alpha;
+    let ttMv = -1;
+    const hit = ttGet(h, depth, alpha, beta);
+    if (hit) {
+      if (hit.sc != null) return hit.sc;
+      if (hit.mv >= 0) ttMv = hit.mv;
+    }
+    if (depth <= 0) {
+      // quiescence: one ply of threats
+      return quiesce(board, alpha, beta, side, root, ctx, ply, h, 2);
+    }
 
-    const alphaOrig = alpha;
-    let ttMoveCode = -1;
-    if (depth > 0) {
-      const hit = ttProbe(hash, depth, alpha, beta);
-      if (hit) {
-        if (hit.score != null && !hit.onlyMove) return hit.score;
-        if (hit.move >= 0) ttMoveCode = hit.move;
+    // terminal tactics
+    const cells0 = emptiesNear(board, 2);
+    for (let i = 0; i < cells0.length; i++) {
+      if (Core.wouldWin(board, cells0[i].r, cells0[i].c, side)) {
+        return 8e6 - ply;
       }
     }
 
-    if (depth === 0) return evaluateBoard(board, root);
+    let moves =
+      threatOnly || depth >= 3
+        ? threatMoves(board, side, depth >= 5 ? 12 : 16, ctx)
+        : rankMoves(board, side, depth >= 4 ? 14 : 20, ctx);
 
-    const ranked = rankedCandidates(
-      board,
-      side,
-      depth >= 4 ? 12 : depth >= 2 ? 16 : 20,
-      ctx,
-      killers,
-      history,
-      ply
-    );
-    // TT move first
-    if (ttMoveCode >= 0) {
-      const tr = unpackR(ttMoveCode),
-        tc = unpackC(ttMoveCode);
-      const idx = ranked.findIndex((m) => m.r === tr && m.c === tc);
-      if (idx > 0) {
-        const tmp = ranked[idx];
-        ranked.splice(idx, 1);
-        ranked.unshift(tmp);
-      } else if (idx < 0 && !board[tr][tc]) {
-        ranked.unshift({ r: tr, c: tc, s: 1e15 });
+    if (ttMv >= 0) {
+      const tr = unR(ttMv),
+        tc = unC(ttMv);
+      const ix = moves.findIndex((m) => m.r === tr && m.c === tc);
+      if (ix > 0) {
+        const t = moves[ix];
+        moves.splice(ix, 1);
+        moves.unshift(t);
+      } else if (ix < 0 && !board[tr][tc]) moves.unshift({ r: tr, c: tc, s: 1e15, off: {}, def: {} });
+    }
+    // killers
+    if (killers && ply < 64) {
+      for (let k = 0; k < 2; k++) {
+        const code = killers[k][ply];
+        if (code < 0) continue;
+        const tr = unR(code),
+          tc = unC(code);
+        const ix = moves.findIndex((m) => m.r === tr && m.c === tc);
+        if (ix > 0) {
+          const t = moves[ix];
+          moves.splice(ix, 1);
+          moves.unshift(t);
+        }
       }
     }
 
-    if (!ranked.length) return 0;
-
-    let best = -Infinity;
-    let bestCode = -1;
-    for (let i = 0; i < ranked.length; i++) {
+    if (!moves.length) return 0;
+    let best = -Infinity,
+      bestC = -1;
+    for (let i = 0; i < moves.length; i++) {
       if (timedOut(ctx)) break;
-      const m = ranked[i];
+      const m = moves[i];
       if (board[m.r][m.c]) continue;
-      if (Core.wouldWin(board, m.r, m.c, side)) {
-        const sc = 9000000 - ply;
-        ttStore(hash, depth, TT_EXACT, sc, packMove(m.r, m.c));
-        return sc;
-      }
+      // must block opponent win
+      const them = Core.opp(side);
+      // If opponent has win-in-1 and this move isn't block or our win, skip
+      // (cheap check once per node via first move ordering — full check:)
       board[m.r][m.c] = side;
-      const h2 = hashXorPlace(hash, m.r, m.c, side) ^ zobrist[Z_SIDE];
       let val;
       if (Core.findWin(board, m.r, m.c, side)) {
-        val = 9000000 - ply;
+        val = 8e6 - ply;
       } else {
-        // PVS-ish: first full window, rest null window
-        if (i === 0 || depth < 3) {
-          val = -negamax(
-            board,
-            depth - 1,
-            -beta,
-            -alpha,
-            Core.opp(side),
-            root,
-            ctx,
-            ply + 1,
-            h2,
-            killers,
-            history
-          );
+        // opponent immediate win left?
+        const ow = listWins(board, them);
+        if (ow.length) {
+          val = -8e6 + ply;
         } else {
-          val = -negamax(
-            board,
-            depth - 1,
-            -alpha - 1,
-            -alpha,
-            Core.opp(side),
-            root,
-            ctx,
-            ply + 1,
-            h2,
-            killers,
-            history
-          );
-          if (val > alpha && val < beta) {
+          const h2 = xorPlace(h, m.r, m.c, side) ^ zobrist[Z_SIDE];
+          const ext =
+            (m.off && (m.off.tier >= 3 || m.off.live3 >= 1)) ||
+            (m.def && m.def.tier >= 3)
+              ? 1
+              : 0;
+          const nd = depth - 1 + (ext && depth < 6 ? 0 : 0);
+          if (i === 0 || depth < 3) {
             val = -negamax(
               board,
-              depth - 1,
+              nd,
               -beta,
               -alpha,
-              Core.opp(side),
+              them,
               root,
               ctx,
               ply + 1,
               h2,
               killers,
-              history
+              hist,
+              depth >= 3
             );
+          } else {
+            val = -negamax(
+              board,
+              nd,
+              -alpha - 1,
+              -alpha,
+              them,
+              root,
+              ctx,
+              ply + 1,
+              h2,
+              killers,
+              hist,
+              true
+            );
+            if (val > alpha && val < beta) {
+              val = -negamax(
+                board,
+                nd,
+                -beta,
+                -alpha,
+                them,
+                root,
+                ctx,
+                ply + 1,
+                h2,
+                killers,
+                hist,
+                depth >= 3
+              );
+            }
           }
         }
       }
       board[m.r][m.c] = "";
       if (val > best) {
         best = val;
-        bestCode = packMove(m.r, m.c);
+        bestC = pack(m.r, m.c);
       }
       if (val > alpha) alpha = val;
       if (alpha >= beta) {
-        // killer / history
-        if (killers && ply < killers[0].length) {
-          if (killers[0][ply] !== bestCode) {
+        if (killers && ply < 64 && bestC >= 0) {
+          if (killers[0][ply] !== bestC) {
             killers[1][ply] = killers[0][ply];
-            killers[0][ply] = bestCode;
+            killers[0][ply] = bestC;
           }
         }
-        if (history && bestCode >= 0) history[bestCode] = (history[bestCode] || 0) + depth * depth;
+        if (hist && bestC >= 0) hist[bestC] = (hist[bestC] || 0) + depth * depth;
         break;
       }
     }
-
-    let flag = TT_EXACT;
-    if (best <= alphaOrig) flag = TT_UPPER;
-    else if (best >= beta) flag = TT_LOWER;
-    ttStore(hash, depth, flag, best, bestCode);
+    let fl = EX;
+    if (best <= a0) fl = UP;
+    else if (best >= beta) fl = LO;
+    ttPut(h, depth, fl, best, bestC);
     return best;
   }
 
-  function searchRoot(board, me, maxDepth, ctx) {
+  function quiesce(board, alpha, beta, side, root, ctx, ply, h, qdepth) {
+    const stand = evalStatic(board, root);
+    if (qdepth <= 0 || timedOut(ctx)) return stand;
+    if (stand >= beta) return stand;
+    if (stand > alpha) alpha = stand;
+    const them = Core.opp(side);
+    // only captures of threats
+    const moves = threatMoves(board, side, 10, ctx);
+    for (let i = 0; i < moves.length; i++) {
+      if (timedOut(ctx)) break;
+      const m = moves[i];
+      if (!m.off || m.off.tier < 2) {
+        if (!m.def || m.def.tier < 3) continue;
+      }
+      if (Core.wouldWin(board, m.r, m.c, side)) return 8e6 - ply;
+      board[m.r][m.c] = side;
+      if (listWins(board, them).length) {
+        board[m.r][m.c] = "";
+        continue;
+      }
+      const h2 = xorPlace(h, m.r, m.c, side) ^ zobrist[Z_SIDE];
+      const val = -quiesce(board, -beta, -alpha, them, root, ctx, ply + 1, h2, qdepth - 1);
+      board[m.r][m.c] = "";
+      if (val >= beta) return val;
+      if (val > alpha) alpha = val;
+    }
+    return alpha;
+  }
+
+  function searchRoot(board, me, maxD, ctx) {
     const them = Core.opp(me);
     const killers = [new Int16Array(64).fill(-1), new Int16Array(64).fill(-1)];
-    const history = new Int32Array(16 * 16);
-    let hash = hashBoard(board, me);
-    const ranked = rankedCandidates(board, me, 24, ctx, killers, history, 0);
-    let bestMove = ranked[0] ? { r: ranked[0].r, c: ranked[0].c } : null;
-    let bestVal = -Infinity;
+    const hist = new Int32Array(256);
+    const h0 = hashBoard(board, me);
+    let moves = rankMoves(board, me, 28, ctx);
+    let best = moves[0] ? { r: moves[0].r, c: moves[0].c } : null;
+    let bestV = -Infinity;
 
-    for (let depth = 1; depth <= maxDepth; depth++) {
+    for (let depth = 1; depth <= maxD; depth++) {
       if (timedOut(ctx)) break;
-      // aspiration around previous score
-      let alpha = -Infinity,
-        beta = Infinity;
-      if (depth >= 3 && bestVal > -1e8 && bestVal < 1e8) {
-        const window = 800 + depth * 200;
-        alpha = bestVal - window;
-        beta = bestVal + window;
-      }
-      let iterBest = bestMove;
-      let iterVal = -Infinity;
-      // bring previous best to front
-      if (bestMove) {
-        const bi = ranked.findIndex((m) => m.r === bestMove.r && m.c === bestMove.c);
+      if (best) {
+        const bi = moves.findIndex((m) => m.r === best.r && m.c === best.c);
         if (bi > 0) {
-          const t = ranked[bi];
-          ranked.splice(bi, 1);
-          ranked.unshift(t);
+          const t = moves[bi];
+          moves.splice(bi, 1);
+          moves.unshift(t);
         }
       }
-      for (let i = 0; i < ranked.length; i++) {
+      let a = -Infinity,
+        b = Infinity;
+      if (depth >= 3 && Math.abs(bestV) < 1e6) {
+        const w = 2000 + depth * 400;
+        a = bestV - w;
+        b = bestV + w;
+      }
+      let iBest = best,
+        iVal = -Infinity;
+      for (let i = 0; i < moves.length; i++) {
         if (timedOut(ctx)) break;
-        const m = ranked[i];
+        const m = moves[i];
         if (Core.wouldWin(board, m.r, m.c, me)) return { r: m.r, c: m.c };
         board[m.r][m.c] = me;
-        const h2 = hashXorPlace(hash, m.r, m.c, me) ^ zobrist[Z_SIDE];
         let val;
-        if (Core.findWin(board, m.r, m.c, me)) {
-          val = 9000000;
-        } else {
+        if (Core.findWin(board, m.r, m.c, me)) val = 8e6;
+        else if (listWins(board, them).length) val = -8e6;
+        else {
+          const h2 = xorPlace(h0, m.r, m.c, me) ^ zobrist[Z_SIDE];
           val = -negamax(
             board,
             depth - 1,
-            -beta,
-            -alpha,
+            -b,
+            -a,
             them,
             me,
             ctx,
             1,
             h2,
             killers,
-            history
+            hist,
+            depth >= 3
           );
-          // aspiration fail — re-search full window
-          if ((val <= alpha || val >= beta) && !timedOut(ctx)) {
+          if ((val <= a || val >= b) && !timedOut(ctx)) {
             val = -negamax(
               board,
               depth - 1,
@@ -663,55 +818,45 @@
               1,
               h2,
               killers,
-              history
+              hist,
+              depth >= 3
             );
           }
         }
         board[m.r][m.c] = "";
-        if (val > iterVal) {
-          iterVal = val;
-          iterBest = { r: m.r, c: m.c };
+        if (val > iVal) {
+          iVal = val;
+          iBest = { r: m.r, c: m.c };
         }
-        if (val > alpha) alpha = val;
+        if (val > a) a = val;
       }
-      if (iterBest) {
-        bestMove = iterBest;
-        bestVal = iterVal;
+      if (iBest) {
+        best = iBest;
+        bestV = iVal;
       }
-      if (bestVal > 1000000) break;
+      if (bestV > 1e6) break;
     }
-    return bestMove;
+    return best;
   }
 
-  function randomPick(arr) {
-    if (!arr || !arr.length) return null;
-    return arr[Math.floor(Math.random() * arr.length)];
+  function randomPick(a) {
+    return a && a.length ? a[(Math.random() * a.length) | 0] : null;
   }
 
-  /**
-   * timeMs budgets (defaults):
-   *   easy: 0 | normal: 120 | hard: 700
-   *   hard can pass timeMs 400/700/1200 via UI “思考”
-   */
   function profileFor(difficulty, opts) {
     const hard = difficulty === "hard";
     const normal = difficulty === "normal";
     let budget;
-    if (typeof opts.timeMs === "number") {
-      budget = opts.timeMs;
-    } else if (hard) {
-      budget = opts.think === "fast" ? 400 : opts.think === "deep" ? 1200 : 700;
-    } else if (normal) {
-      budget = 120;
-    } else {
-      budget = 0;
-    }
+    if (typeof opts.timeMs === "number") budget = opts.timeMs;
+    else if (hard) {
+      budget = opts.think === "fast" ? 800 : opts.think === "deep" ? 3500 : 2000;
+    } else if (normal) budget = 250;
+    else budget = 0;
     return {
-      difficulty: difficulty,
       budgetMs: budget,
-      vcfDepth: hard ? 18 : normal ? 10 : 0,
-      vctDepth: hard ? 10 : normal ? 4 : 0,
-      abDepth: hard ? 7 : normal ? 4 : 1,
+      vcfDepth: hard ? 22 : normal ? 12 : 0,
+      vctDepth: hard ? 12 : normal ? 5 : 0,
+      abDepth: hard ? 8 : normal ? 5 : 1,
       useVct: hard || normal,
     };
   }
@@ -725,11 +870,10 @@
         : Core.opp(opts.humanColor || "b");
     const them = Core.opp(me);
     const prof = profileFor(difficulty, opts || {});
-    const t0 = nowMs();
-    const ctx = { deadline: prof.budgetMs > 0 ? t0 + prof.budgetMs : 0 };
-    ttClear();
+    const ctx = { t1: prof.budgetMs > 0 ? nowMs() + prof.budgetMs : 0 };
+    ttReset();
 
-    if (!hasAny(board)) {
+    if (!hasStone(board)) {
       if (difficulty === "easy") {
         return randomPick([
           { r: 7, c: 7 },
@@ -737,100 +881,73 @@
           { r: 6, c: 8 },
           { r: 8, c: 6 },
           { r: 8, c: 8 },
-          { r: 7, c: 6 },
-          { r: 7, c: 8 },
         ]);
       }
       return { r: 7, c: 7 };
     }
 
-    const cands = candidateList(board, 2);
-
-    // 1) Win
-    for (let i = 0; i < cands.length; i++) {
-      if (Core.wouldWin(board, cands[i].r, cands[i].c, me)) return cands[i];
-    }
-    // 2) Block win
-    for (let i = 0; i < cands.length; i++) {
-      if (Core.wouldWin(board, cands[i].r, cands[i].c, them)) return cands[i];
+    // —— Absolute forced hierarchy ——
+    const force = forcedMove(board, me, ctx);
+    // forcedMove includes win/block/dual/four/live3 — always trust for hard/normal
+    if (force && difficulty !== "easy") {
+      // Still allow VCF if force is only live3 and VCF exists elsewhere? 
+      // For four+ always return force
+      const fo = patternPlace(board, force.r, force.c, me);
+      const fd = patternPlace(board, force.r, force.c, them);
+      if (fo.tier >= 3 || fd.tier >= 3 || fo.tier >= 5 || fd.tier >= 5) return force;
+      // live3 force: check own VCF first
+      if (prof.vcfDepth > 0) {
+        const vcfM = findVCF(board, me, prof.vcfDepth, ctx);
+        if (vcfM) return vcfM;
+      }
+      return force;
     }
 
     if (difficulty === "easy") {
-      const ranked = rankedCandidates(board, me, 10, null, null, null, 0);
-      const pool = ranked.slice(0, Math.min(6, ranked.length));
-      if (Math.random() < 0.5 && pool.length > 1) return randomPick(pool.slice(1)) || pool[0];
-      return randomPick(pool.slice(0, 3)) || pool[0] || cands[0];
+      const ranked = rankMoves(board, me, 8, null);
+      const pool = ranked.slice(0, 5);
+      if (Math.random() < 0.55 && pool.length > 1) return randomPick(pool.slice(1)) || pool[0];
+      return randomPick(pool.slice(0, 2)) || pool[0];
     }
 
-    // 3) Own VCF
+    // VCF
     if (prof.vcfDepth > 0) {
-      const vcf = findVCF(board, me, prof.vcfDepth, ctx);
-      if (vcf) return vcf;
+      const v = findVCF(board, me, prof.vcfDepth, ctx);
+      if (v) return v;
     }
-
-    // 4) Deny opponent VCF
+    // Deny opponent VCF
     if (prof.vcfDepth > 0 && !timedOut(ctx)) {
-      const theirVcf = findVCF(board, them, Math.min(14, prof.vcfDepth), ctx);
-      if (theirVcf) {
-        const defenses = rankedCandidates(board, me, 24, ctx, null, null, 0);
-        let fallback = { r: theirVcf.r, c: theirVcf.c };
-        for (let i = 0; i < defenses.length; i++) {
+      const ov = findVCF(board, them, Math.min(16, prof.vcfDepth), ctx);
+      if (ov) {
+        const defs = rankMoves(board, me, 26, ctx);
+        for (let i = 0; i < defs.length; i++) {
           if (timedOut(ctx)) break;
-          const d = defenses[i];
-          if (Core.wouldWin(board, d.r, d.c, me)) return { r: d.r, c: d.c };
+          const d = defs[i];
+          if (Core.wouldWin(board, d.r, d.c, me)) return d;
           board[d.r][d.c] = me;
-          if (Core.findWin(board, d.r, d.c, me)) {
-            board[d.r][d.c] = "";
-            return { r: d.r, c: d.c };
-          }
-          const ow = listWinCells(board, them);
+          const ow = listWins(board, them);
           let still = null;
-          if (!ow.length) still = findVCF(board, them, Math.min(12, prof.vcfDepth), ctx);
+          if (!ow.length) still = findVCF(board, them, Math.min(14, prof.vcfDepth), ctx);
           board[d.r][d.c] = "";
-          if (!ow.length && !still) return { r: d.r, c: d.c };
+          if (!ow.length && !still) return d;
         }
-        if (!board[fallback.r][fallback.c]) return fallback;
+        if (!board[ov.r][ov.c]) return ov;
       }
     }
 
-    // 5) Block one-move dual threat
-    {
-      const rankedDef = rankedCandidates(board, them, 20, ctx, null, null, 0);
-      for (let i = 0; i < rankedDef.length; i++) {
-        if (timedOut(ctx)) break;
-        const m = rankedDef[i];
-        board[m.r][m.c] = them;
-        const w = listWinCells(board, them).length;
-        board[m.r][m.c] = "";
-        if (w >= 2) return { r: m.r, c: m.c };
-      }
-    }
-
-    // 6) VCT
+    // VCT
     if (prof.useVct && prof.vctDepth > 0 && !timedOut(ctx)) {
-      const vct = findVCT(board, me, prof.vctDepth, ctx);
-      if (vct) return vct;
+      const vt = findVCT(board, me, prof.vctDepth, ctx);
+      if (vt) return vt;
     }
 
-    // 7) Create dual threat
-    {
-      const ranked = rankedCandidates(board, me, 28, ctx, null, null, 0);
-      for (let i = 0; i < ranked.length; i++) {
-        if (timedOut(ctx)) break;
-        const m = ranked[i];
-        board[m.r][m.c] = me;
-        const w = listWinCells(board, me).length;
-        board[m.r][m.c] = "";
-        if (w >= 2) return { r: m.r, c: m.c };
-      }
-    }
+    // If forced live3 was deferred and still pending
+    if (force) return force;
 
-    // 8) Iterative α-β + TT
-    const move = searchRoot(board, me, prof.abDepth, ctx);
-    if (move) return move;
-
-    const fallback = rankedCandidates(board, me, 5, null, null, null, 0);
-    return fallback[0] ? { r: fallback[0].r, c: fallback[0].c } : cands[0] || null;
+    const mv = searchRoot(board, me, prof.abDepth, ctx);
+    if (mv) return mv;
+    const fb = rankMoves(board, me, 3, null);
+    return fb[0] ? { r: fb[0].r, c: fb[0].c } : emptiesNear(board, 2)[0];
   }
 
   function hintMove(opts) {
@@ -838,29 +955,32 @@
       board: opts.board,
       side: opts.side,
       humanColor: opts.humanColor,
-      difficulty: opts.difficulty === "easy" ? "normal" : opts.difficulty || "hard",
-      timeMs: typeof opts.timeMs === "number" ? opts.timeMs : 500,
-      think: opts.think,
+      difficulty: opts.difficulty === "easy" ? "hard" : opts.difficulty || "hard",
+      timeMs: typeof opts.timeMs === "number" ? opts.timeMs : 1500,
+      think: opts.think || "normal",
     });
   }
 
   function candidateMoves(board, maxN, nearDist, sideToMove) {
-    const me = sideToMove || "b";
-    const ranked = rankedCandidates(board, me, maxN || 40, null, null, null, 0);
-    return ranked.map((m) => ({ r: m.r, c: m.c }));
+    return rankMoves(board, sideToMove || "b", maxN || 40, null).map((m) => ({
+      r: m.r,
+      c: m.c,
+    }));
   }
 
   global.GobanAi = {
     aiMove: aiMove,
     hintMove: hintMove,
     candidateMoves: candidateMoves,
-    evaluateBoard: evaluateBoard,
+    evaluateBoard: evalStatic,
     cloneBoard: cloneBoard,
-    listWinCells: listWinCells,
+    listWinCells: listWins,
     findVCF: findVCF,
     findVCT: findVCT,
-    shapeAt: shapeAt,
-    /** think: 'fast' | 'normal' | 'deep' maps hard budgets */
+    shapeAt: patternPlace,
     profileFor: profileFor,
+    forcedMove: function (b, me) {
+      return forcedMove(cloneBoard(b), me, { t1: nowMs() + 200 });
+    },
   };
 })(typeof window !== "undefined" ? window : globalThis);
