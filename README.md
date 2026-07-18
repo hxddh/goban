@@ -1,47 +1,48 @@
 # 五子棋 Goban
 
-macOS 五子棋 — **真正的棋盘 UI**（木色盘、网格线、圆子、星位、中文）。
+macOS 五子棋 — 木色棋盘、网格线、圆子、星位、中文界面。
 
-用 [Native SDK](https://github.com/vercel-labs/native) 包一层系统 WebView，棋盘用 Canvas 绘制。
+窗口用 [Native SDK](https://github.com/vercel-labs/native) + 系统 WebView，棋盘用 Canvas 绘制。
 
-## 打开
+## 下载
+
+见 [Releases](https://github.com/hxddh/goban/releases) 中的 **Goban-macOS-arm64.zip**（Apple Silicon）。
+
+```bash
+# 解压后拖到「应用程序」，或：
+unzip Goban-macOS-arm64.zip
+open Goban.app
+```
+
+> adhoc 签名，本机使用即可。若 Gatekeeper 拦截：右键 → 打开。
+
+## 本地已安装
 
 ```bash
 open ~/Applications/Goban.app
-```
-
-或开发：
-
-```bash
-cd ~/goban
-native dev
 ```
 
 ## 怎么玩
 
 | 操作 | 说明 |
 |------|------|
-| 点棋盘交叉点 | 落子（黑先） |
-| 人机对战 | 你执黑，电脑执白 |
-| 双人对战 | 本机两人轮流 |
-| 悔棋 | 按钮或 **Z** |
-| 新局 | 按钮或 **N** |
+| 点交叉点 | 落子（黑先） |
+| 人机 / 双人 | 侧栏切换（**Tab** / **☰** 收起侧栏） |
+| 悔棋 | **Z** 或按钮 |
+| 新局 | **N** 或按钮 |
 
-先连成五子者胜。
+先连成五子者胜。沉浸模式：收起侧栏后棋盘铺满窗口。
 
-## 工程
-
-```text
-app.zon                 # Native 窗口 + WebView
-frontend/dist/index.html  # 完整棋盘与规则（Canvas）
-assets/icon.png
-```
+## 开发
 
 ```bash
-native build
-native package --target macos --signing adhoc --output dist/Goban.app
-ditto dist/Goban.app ~/Applications/Goban.app
+cd ~/goban
+# 需要 Zig 0.16（native 工具链）
+zig build -Doptimize=ReleaseFast
+native package --target macos --signing adhoc --output dist/Goban.app --binary zig-out/bin/goban
 ```
+
+主界面源码：`src/board.html`（嵌入到二进制）。
 
 ## 许可
 
