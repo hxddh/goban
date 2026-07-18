@@ -2,8 +2,7 @@
  * Canvas board rendering (themes + paint).
  * Model via attach(canvas, ctx, modelFn):
  *   board, history, viewIndex, themeId, placeAnim, winLine, winFlashUntil,
- *   clearPlaceAnim, hover {r,c,color}|null, moveNumbers "off"|"last"|"all",
- *   hint {r,c}|null
+ *   clearPlaceAnim, hover {r,c,color}|null, hint {r,c}|null
  */
 (function (global) {
   const SIZE = (global.GobanCore && global.GobanCore.SIZE) || 15;
@@ -384,37 +383,6 @@
       ctx.strokeStyle = board[last.r][last.c] === "b" ? th.lastB : th.lastW;
       ctx.lineWidth = Math.max(1.05, step * 0.032);
       ctx.stroke();
-    }
-
-    // Move numbers: off | last (current tip only) | all (1..viewIndex)
-    const nums = m.moveNumbers || "off";
-    if (nums !== "off" && viewIndex > 0 && history.length) {
-      const fontPx = Math.max(9, Math.min(15, step * 0.38));
-      ctx.save();
-      ctx.font = "600 " + fontPx + "px -apple-system, system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      const startI = nums === "last" ? viewIndex - 1 : 0;
-      for (let i = startI; i < viewIndex; i++) {
-        const p = history[i];
-        if (!p) continue;
-        const x = pad + p.c * step;
-        const y = pad + p.r * step;
-        const color = i % 2 === 0 ? "b" : "w";
-        if (th.style === "pencil") {
-          ctx.fillStyle = color === "b" ? (th.pencilB || th.pencil) : (th.pencilW || th.pencil);
-        } else {
-          ctx.fillStyle = color === "b" ? "rgba(255,255,255,0.92)" : "rgba(20,18,16,0.88)";
-        }
-        // slight outline for readability on busy boards
-        if (th.style !== "pencil") {
-          ctx.lineWidth = Math.max(2, fontPx * 0.18);
-          ctx.strokeStyle = color === "b" ? "rgba(0,0,0,0.35)" : "rgba(255,255,255,0.55)";
-          ctx.strokeText(String(i + 1), x, y + 0.5);
-        }
-        ctx.fillText(String(i + 1), x, y + 0.5);
-      }
-      ctx.restore();
     }
 
     // Hint marker (suggested move, not placed)

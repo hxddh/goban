@@ -83,20 +83,35 @@
     const useWorker = payload.difficulty === "hard";
     const w = useWorker ? getAiWorker() : null;
     if (w) {
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         const id = ++aiReqId;
-        aiPending.set(id, { resolve, reject });
+        let settled = false;
+        const finish = (move) => {
+          if (settled) return;
+          settled = true;
+          aiPending.delete(id);
+          resolve(move);
+        };
+        aiPending.set(id, {
+          resolve: (move) => finish(move),
+          reject: () => finish(aiMoveSync(payload)),
+        });
         try {
-          w.postMessage({ id: id, board: payload.board, humanColor: payload.humanColor, side: payload.side, difficulty: payload.difficulty });
+          w.postMessage({
+            id: id,
+            board: payload.board,
+            humanColor: payload.humanColor,
+            side: payload.side,
+            difficulty: payload.difficulty,
+          });
         } catch (e) {
-          aiPending.delete(id);
-          setTimeout(() => resolve(aiMoveSync(payload)), 0);
+          finish(aiMoveSync(payload));
+          return;
         }
-        // safety timeout
+        // safety timeout → main-thread fallback
         setTimeout(() => {
-          if (!aiPending.has(id)) return;
-          aiPending.delete(id);
-          resolve(aiMoveSync(payload));
+          if (settled) return;
+          finish(aiMoveSync(payload));
         }, 8000);
       });
     }
@@ -324,8 +339,6 @@
   let winFlashUntil = 0;
   /** @type {{r:number,c:number,color:string}|null} */
   let hoverCell = null;
-  /** @type {'off' | 'last' | 'all'} */
-  let moveNumbers = "last";
   /** @type {{r:number,c:number}|null} */
   let hintCell = null;
   let hintBusy = false;
@@ -472,8 +485,9 @@
         side: side,
         difficulty: difficulty === "easy" ? "normal" : difficulty,
       });
-      if (gen !== gameGen) return;
-      if (!m) {
+      if (gen !== gameGen) {
+        // discarded late result
+      } else if (!m) {
         toast("没有可用提示");
         hintCell = null;
       } else {
@@ -481,11 +495,13 @@
         toast("提示：" + (side === "b" ? "黑" : "白") + " · 虚线十字");
       }
     } catch (_) {
-      toast("提示失败");
-      hintCell = null;
+      if (gen === gameGen) {
+        toast("提示失败");
+        hintCell = null;
+      }
     } finally {
       hintBusy = false;
-      sync();
+      if (gen === gameGen) sync();
     }
   }
 
@@ -538,16 +554,14 @@
       if (s.humanColor === "b" || s.humanColor === "w") humanColor = s.humanColor;
       if (typeof s.soundOn === "boolean") soundOn = s.soundOn;
       if (s.themeId && THEMES[s.themeId]) themeId = s.themeId;
-      if (s.moveNumbers === "off" || s.moveNumbers === "last" || s.moveNumbers === "all") {
-        moveNumbers = s.moveNumbers;
-      }
+      // moveNumbers removed in 1.13.1 — ignore legacy setting
     } catch (_) {}
   }
 
   function saveSettings() {
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, moveNumbers })
+      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId })
     );
   }
 
@@ -675,6 +689,7 @@
 
   function clearSave() {
     Host.storageRemove(SAVE_KEY);
+    Host.storageRemove("goban.v11.save");
     const hint = document.getElementById("save-hint");
     if (hint) hint.textContent = "无存档";
   }
@@ -688,25 +703,41 @@
       // Resume only with a move list — board-only snapshots cannot place safely.
       const loadedHistory = Array.isArray(s.history) ? s.history : [];
       if (!loadedHistory.length) return false;
+      // Validate move coords
+      for (let i = 0; i < loadedHistory.length; i++) {
+        const p = loadedHistory[i];
+        if (!p || p.r < 0 || p.r >= SIZE || p.c < 0 || p.c >= SIZE) return false;
+      }
       history = loadedHistory;
-      turn = s.turn === "w" ? "w" : "b";
-      result = s.result || "play";
       mode = s.mode === "pvp" ? "pvp" : "ai";
       difficulty = s.difficulty || "normal";
       humanColor = s.humanColor === "w" ? "w" : "b";
-      winLine = s.winLine || null;
       viewIndex = history.length;
       board = boardAfter(history.length);
-      if (result === "play") turn = history.length % 2 === 0 ? "b" : "w";
+      // Recompute result / win line from history (do not trust stale save fields)
+      turn = history.length % 2 === 0 ? "b" : "w";
+      result = "play";
+      winLine = null;
+      if (history.length) {
+        const last = history[history.length - 1];
+        const lastColor = (history.length - 1) % 2 === 0 ? "b" : "w";
+        const line = Core.findWin(board, last.r, last.c, lastColor);
+        if (line) {
+          result = lastColor;
+          winLine = line;
+        } else if (Core.boardFull(board)) {
+          result = "draw";
+        }
+      }
       elapsedBaseMs = typeof s.elapsedBaseMs === "number" ? s.elapsedBaseMs : 0;
       originalStartedAt = typeof s.originalStartedAt === "number"
         ? s.originalStartedAt
         : (Date.now() - elapsedBaseMs);
       startedAt = Date.now();
       // v3+: restore import pause so AI does not auto-continue after import-only save.
-      // Older saves: treat as live (importPaused false).
       importPaused = s.v >= 3 && !!s.importPaused && result === "play";
       hoverCell = null;
+      clearHint();
       return true;
     } catch (_) {
       return false;
@@ -734,7 +765,6 @@
     winLine: winLine,
     winFlashUntil: winFlashUntil,
     hover: hoverCell,
-    moveNumbers: moveNumbers,
     hint: hintCell,
     clearPlaceAnim: () => { placeAnim = null; },
   }));
@@ -835,7 +865,7 @@
   }
 
   function undo() {
-    if (!history.length || aiThinking) return;
+    if (!history.length || aiThinking || hintBusy) return;
     // Always return to the live tip before undoing moves.
     if (!isLive()) {
       goLive();
@@ -853,10 +883,14 @@
     winLine = null;
     placeAnim = null;
     clearHint();
+    hoverCell = null;
+    importPaused = false;
     viewIndex = history.length;
     board = boardAfter(history.length);
     sync();
     saveGame();
+    // e.g. human plays white: undo to empty → black (AI) must move
+    maybeAiTurn();
   }
 
   function reset(opts) {
@@ -902,9 +936,6 @@
     document.querySelectorAll("#theme-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.theme === themeId);
     });
-    document.querySelectorAll("#nums-seg button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.nums === moveNumbers);
-    });
     const aiOnly = mode === "ai";
     const diffField = document.getElementById("diff-field");
     const colorField = document.getElementById("color-field");
@@ -925,7 +956,6 @@
     const whiteTurn = document.getElementById("white-turn");
     const undoBtns = [document.getElementById("undo"), document.getElementById("undo2")].filter(Boolean);
     const live = isLive();
-    const nextColor = viewIndex % 2 === 0 ? "b" : "w";
 
     moves.textContent = viewIndex + "/" + history.length;
     document.getElementById("info-moves").textContent =
@@ -934,7 +964,7 @@
     updateClock();
 
     undoBtns.forEach((b) => {
-      if (b) b.disabled = history.length === 0 || aiThinking || !live;
+      if (b) b.disabled = history.length === 0 || aiThinking || hintBusy || !live;
     });
     document.getElementById("rep-start").disabled = viewIndex <= 0;
     document.getElementById("rep-prev").disabled = viewIndex <= 0;
@@ -1073,21 +1103,6 @@
     const names = { wood: "木盘", night: "夜盘", day: "日间", notebook: "练习本" };
     toast("主题：" + (names[themeId] || themeId));
   };
-  const numsSeg = document.getElementById("nums-seg");
-  if (numsSeg) {
-    numsSeg.onclick = (ev) => {
-      const b = ev.target.closest("button[data-nums]");
-      if (!b) return;
-      const id = b.dataset.nums;
-      if (id !== "off" && id !== "last" && id !== "all") return;
-      if (moveNumbers === id) return;
-      moveNumbers = id;
-      saveSettings();
-      syncSettingsUI();
-      draw();
-      toast("手数：" + ({ off: "关闭", last: "仅最新一手", all: "全部" })[id]);
-    };
-  }
   document.getElementById("opt-sound").onclick = () => {
     soundOn = !soundOn;
     saveSettings();
@@ -1131,6 +1146,11 @@
     }
     if (confirmModal.classList.contains("show")) {
       if (ev.key === "Enter") { ev.preventDefault(); finishConfirm(true); }
+      return;
+    }
+    // Ignore game shortcuts while help is open (Esc closes it above)
+    if (helpModal.classList.contains("show")) {
+      if (ev.key === "?" || (ev.shiftKey && k === "/")) { closeHelp(); return; }
       return;
     }
     if (ev.key === "?" || (ev.shiftKey && k === "/")) { openHelp(); return; }
