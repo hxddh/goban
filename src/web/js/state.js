@@ -8,12 +8,13 @@
   function createSession() {
     const s = Core.createInitialState();
     s.panelOpen = false;
+    s.importPaused = false;
     return s;
   }
 
   /**
    * Apply a move list as a loaded/imported game (replay snapshot).
-   * Does not start AI — caller decides.
+   * Does not start AI — caller decides. Sets importPaused so UI can offer「续下」.
    * @returns {{ ok: true, session: object } | { ok: false, error: string }}
    */
   function sessionFromHistory(history, base) {
@@ -28,6 +29,7 @@
     session.winLine = null;
     session.aiThinking = false;
     session.gameGen = (session.gameGen || 0) + 1;
+    session.importPaused = true;
 
     const last = history[history.length - 1];
     const lastColor = (history.length - 1) % 2 === 0 ? "b" : "w";
@@ -35,8 +37,10 @@
     if (line) {
       session.result = lastColor;
       session.winLine = line;
+      session.importPaused = false; // finished game: only review
     } else if (Core.boardFull(session.board)) {
       session.result = "draw";
+      session.importPaused = false;
     }
     session.turn = history.length % 2 === 0 ? "b" : "w";
     session.elapsedBaseMs = 0;
@@ -54,10 +58,39 @@
     return session.turn === session.humanColor;
   }
 
+  /** Import can resume play (not finished, still paused for AI/human resume). */
+  function canContinuePlay(session) {
+    return !!(
+      session &&
+      session.importPaused &&
+      session.result === "play" &&
+      session.history &&
+      session.history.length
+    );
+  }
+
+  /**
+   * Clear import pause so play / AI may proceed.
+   * Mutates and returns session for chaining.
+   */
+  function resumeFromImport(session) {
+    if (!session) return session;
+    session.importPaused = false;
+    session.viewIndex = session.history ? session.history.length : 0;
+    if (session.result === "play" && session.history) {
+      session.turn = session.history.length % 2 === 0 ? "b" : "w";
+      session.board = Core.boardAfter(session.history, session.history.length);
+      session.winLine = null;
+    }
+    return session;
+  }
+
   global.GobanState = {
     createSession,
     sessionFromHistory,
     isLive,
     isHumanTurn,
+    canContinuePlay,
+    resumeFromImport,
   };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -72,6 +72,17 @@
     }
   }
 
+  async function readClipboard() {
+    if (hasZero() && global.zero.clipboard && global.zero.clipboard.readText) {
+      const t = await global.zero.clipboard.readText();
+      return t == null ? "" : String(t);
+    }
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      return await navigator.clipboard.readText();
+    }
+    throw new Error("clipboard read unavailable");
+  }
+
   function storageGet(key) {
     try {
       return localStorage.getItem(key);
@@ -139,6 +150,7 @@
     openFileDialog,
     revealPath,
     writeClipboard,
+    readClipboard,
     storageGet,
     storageSet,
     storageRemove,

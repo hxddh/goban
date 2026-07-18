@@ -90,7 +90,7 @@ function assert(cond, msg) {
   assert(Sgf.parseSgf("(;SZ[19];B[dd])").error.includes("19"), "size mismatch");
 }
 
-// state import helper does not imply AI
+// state import helper does not imply AI; sets importPaused for continue
 {
   const hist = [
     { r: 7, c: 7 },
@@ -102,6 +102,48 @@ function assert(cond, msg) {
   assert(r.session.aiThinking === false, "no ai thinking");
   assert(r.session.gameGen === 4, "gameGen bump");
   assert(r.session.turn === "b", "next turn black");
+  assert(r.session.importPaused === true, "importPaused after open game");
+  assert(State.canContinuePlay(r.session), "canContinuePlay");
+  State.resumeFromImport(r.session);
+  assert(r.session.importPaused === false, "resume clears pause");
+  assert(!State.canContinuePlay(r.session), "no continue after resume");
+}
+
+// finished import: no continue
+{
+  const hist = [];
+  for (let c = 0; c < 5; c++) {
+    hist.push({ r: 7, c }); // black
+    if (c < 4) hist.push({ r: 0, c }); // white filler
+  }
+  // black wins on last move: B at 7,0 7,1 7,2 7,3 7,4 interleaved
+  const winHist = [
+    { r: 7, c: 0 }, { r: 0, c: 0 },
+    { r: 7, c: 1 }, { r: 0, c: 1 },
+    { r: 7, c: 2 }, { r: 0, c: 2 },
+    { r: 7, c: 3 }, { r: 0, c: 3 },
+    { r: 7, c: 4 },
+  ];
+  const r = State.sessionFromHistory(winHist, { mode: "ai", humanColor: "b" });
+  assert(r.ok, "win import ok");
+  assert(r.session.result === "b", "import detects black win");
+  assert(r.session.importPaused === false, "finished: no pause");
+  assert(!State.canContinuePlay(r.session), "no continue on finished");
+}
+
+// empty history rejected
+{
+  const r = State.sessionFromHistory([], {});
+  assert(!r.ok && r.error, "empty history rejected");
+}
+
+// draw module loads (no canvas needed for THEMES)
+load("src/web/js/draw.js");
+{
+  const Draw = ctx.GobanDraw;
+  assert(Draw && Draw.THEMES && Draw.THEMES.wood, "GobanDraw.THEMES");
+  assert(Draw.THEMES.notebook && Draw.THEMES.notebook.pencilB, "notebook ink");
+  assert(typeof Draw.attach === "function" && typeof Draw.draw === "function", "draw API");
 }
 
 if (failed) {

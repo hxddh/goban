@@ -5,6 +5,7 @@
   const Ai = window.GobanAi;
   const Host = window.GobanHost;
   const GameState = window.GobanState;
+  const Draw = window.GobanDraw;
   const SIZE = Core.SIZE;
   const WIN = Core.WIN;
   const SAVE_KEY = "goban.v12.save";
@@ -14,6 +15,7 @@
   const canvas = document.getElementById("board");
   const ctx = canvas.getContext("2d");
   const appEl = document.getElementById("app");
+  const THEMES = Draw.THEMES;
 
   function emptyBoard() { return Core.emptyBoard(); }
   function opp(t) { return Core.opp(t); }
@@ -116,15 +118,44 @@
     aiThinking = false;
     gameGen = s.gameGen;
     placeAnim = null;
-    // Review-only: never maybeAiTurn after import.
+    importPaused = !!s.importPaused;
+    // Review-only: never maybeAiTurn after import until「续下」.
     if (result === "b" || result === "w") triggerWinFlash();
     sync();
     saveGame();
     const tag = label ? " · " + label : "";
     const end =
       result === "b" ? "（黑胜）" : result === "w" ? "（白胜）" : result === "draw" ? "（满盘）" : "（可复盘）";
-    toast("已导入 " + history.length + " 手" + end + tag + " · 不自动续下");
+    const hint = importPaused ? " · 点「续下」可继续" : " · 仅复盘";
+    toast("已导入 " + history.length + " 手" + end + tag + hint);
     return true;
+  }
+
+  /** After import: resume live play (and AI if needed). */
+  function continueFromImport() {
+    if (!importPaused || result !== "play" || !history.length) {
+      toast(result !== "play" ? "这局已结束，仅可复盘" : "当前无需续下");
+      return;
+    }
+    importPaused = false;
+    goLive();
+    toast(mode === "ai" && !isHumanTurn() ? "续下：电脑行棋" : "续下：可落子");
+    maybeAiTurn();
+  }
+
+  async function pasteSgfFromClipboard() {
+    let text = "";
+    try {
+      text = await Host.readClipboard();
+    } catch (_) {
+      toast("无法读取剪贴板");
+      return;
+    }
+    if (!text || !String(text).trim()) {
+      toast("剪贴板为空");
+      return;
+    }
+    await importSgfFromText(String(text), "剪贴板");
   }
 
   async function importSgfFromPath(path) {
@@ -209,7 +240,9 @@
   let themeId = "wood";
   /** @type {{r:number,c:number,t0:number}|null} */
   let placeAnim = null;
-  let rafId = 0;
+  /** After SGF import: no auto-AI until「续下」or human places. */
+  let importPaused = false;
+  let winFlashUntil = 0;
 
   function hasZero() { return Host.hasZero(); }
 
@@ -276,49 +309,6 @@
     toast("新局已开始");
   }
 
-  const THEMES = {
-    wood: {
-      boardTop: "#e8c49a", boardMid: "#d4a574", boardBot: "#c28b52",
-      grain: true, line: "#3d2914", star: "#3d2914",
-      style: "stone",
-      // Soft last-move ring (low contrast — not saturated red/gold)
-      lastB: "rgba(255,255,255,0.4)",
-      lastW: "rgba(30,22,14,0.32)",
-      win: "rgba(160, 70, 50, 0.55)",
-    },
-    night: {
-      boardTop: "#1e332c", boardMid: "#172822", boardBot: "#101c18",
-      grain: false, line: "#5a7a6c", star: "#7dcea0",
-      style: "stone",
-      lastB: "rgba(220,230,225,0.38)",
-      lastW: "rgba(10,16,14,0.4)",
-      win: "rgba(125, 206, 160, 0.55)",
-    },
-    day: {
-      boardTop: "#f6ead4", boardMid: "#ecd9b5", boardBot: "#e2cba0",
-      grain: true, line: "#6b5344", star: "#6b5344",
-      style: "stone",
-      lastB: "rgba(255,255,255,0.45)",
-      lastW: "rgba(40,35,28,0.3)",
-      win: "rgba(140, 90, 50, 0.5)",
-    },
-    notebook: {
-      paper: "#fffcf5",
-      grid: "#c5d4e8",
-      gridStrong: "#9db4d0",
-      margin: "#e8a0a0",
-      line: "#5a6a80",
-      pencil: "#2a3140", // grid marks / stars
-      // Distinct pen colors: △ black vs ○ white
-      pencilB: "#1e3a5f", // deep blue-ink triangle
-      pencilW: "#9a3412", // warm rust-ink circle
-      style: "pencil",
-      lastB: "rgba(30,58,95,0.45)",
-      lastW: "rgba(154,52,18,0.4)",
-      win: "rgba(120, 60, 55, 0.5)",
-    },
-  };
-
   function applyTheme(id) {
     if (!THEMES[id]) id = "wood";
     themeId = id;
@@ -327,14 +317,6 @@
     syncSettingsUI();
     draw();
   }
-
-  const STARS = [
-    [3, 3], [3, 7], [3, 11],
-    [7, 3], [7, 7], [7, 11],
-    [11, 3], [11, 7], [11, 11],
-  ];
-
-
 
   function isLive() {
     return viewIndex === history.length;
@@ -543,320 +525,21 @@
     setPanelOpen(!appEl.classList.contains("panel-open"));
   }
 
-  function geometry() {
-    const w = canvas.width;
-    const pad = w * 0.045;
-    const span = w - pad * 2;
-    const step = span / (SIZE - 1);
-    return { pad, step, w };
-  }
+  Draw.attach(canvas, ctx, () => ({
+    board: board,
+    history: history,
+    viewIndex: viewIndex,
+    themeId: themeId,
+    placeAnim: placeAnim,
+    winLine: winLine,
+    winFlashUntil: winFlashUntil,
+    clearPlaceAnim: () => { placeAnim = null; },
+  }));
 
-  function resizeCanvas() {
-    const wrap = document.getElementById("board-wrap");
-    const rect = wrap.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const css = Math.max(200, Math.floor(Math.min(rect.width, rect.height)));
-    const px = Math.floor(css * dpr);
-    if (canvas.width !== px) {
-      canvas.width = px;
-      canvas.height = px;
-    }
-  }
-
-  function cellAt(x, y) {
-    const { pad, step } = geometry();
-    const c = Math.round((x - pad) / step);
-    const r = Math.round((y - pad) / step);
-    if (r < 0 || r >= SIZE || c < 0 || c >= SIZE) return null;
-    const px = pad + c * step;
-    const py = pad + r * step;
-    if (Math.hypot(x - px, y - py) > step * 0.52) return null;
-    return { r, c };
-  }
-
-  function drawOutlineTriangle(x, y, size, color, lineW) {
-    const h = size * 0.92;
-    const half = size * 0.82;
-    ctx.beginPath();
-    ctx.moveTo(x, y - h * 0.62);
-    ctx.lineTo(x - half * 0.58, y + h * 0.42);
-    ctx.lineTo(x + half * 0.58, y + h * 0.42);
-    ctx.closePath();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lineW;
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    ctx.stroke();
-  }
-
-  function drawOutlineCircle(x, y, radius, color, lineW) {
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lineW;
-    ctx.lineCap = "round";
-    ctx.stroke();
-  }
-
-  function easeOutBack(t) {
-    const c = 1.2;
-    const t1 = t - 1;
-    return 1 + c * t1 * t1 * t1 + t1 * t1;
-  }
-
-  function stoneScale(r, c) {
-    if (!placeAnim || placeAnim.r !== r || placeAnim.c !== c) return 1;
-    const t = Math.min(1, (performance.now() - placeAnim.t0) / 120);
-    if (t >= 1) return 1;
-    return 0.78 + 0.22 * easeOutBack(t);
-  }
-
-  function ensureAnimLoop() {
-    if (rafId) return;
-    const tick = () => {
-      rafId = 0;
-      let need = false;
-      if (placeAnim) {
-        if (performance.now() - placeAnim.t0 < 140) need = true;
-        else placeAnim = null;
-      }
-      if (performance.now() < winFlashUntil) need = true;
-      draw();
-      if (need) rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
-  }
-
-  function draw() {
-    const { pad, step, w } = geometry();
-    const th = THEMES[themeId] || THEMES.wood;
-    ctx.clearRect(0, 0, w, w);
-
-    if (th.style === "pencil") {
-      // exercise-book paper
-      ctx.fillStyle = th.paper;
-      ctx.fillRect(0, 0, w, w);
-      // faint horizontal ruling across whole page (like workbook)
-      ctx.strokeStyle = th.grid;
-      ctx.lineWidth = Math.max(1, w / 900);
-      const rule = step;
-      for (let y = pad; y <= pad + step * (SIZE - 1) + 0.1; y += rule / 1) {
-        // grid drawn with intersection lines below
-      }
-      // graph paper aligned to intersections
-      ctx.strokeStyle = th.grid;
-      ctx.lineWidth = Math.max(1, w / 700);
-      for (let i = 0; i < SIZE; i++) {
-        const p = pad + i * step;
-        const strong = i % 5 === 0;
-        ctx.strokeStyle = strong ? th.gridStrong : th.grid;
-        ctx.lineWidth = strong ? Math.max(1.2, w / 500) : Math.max(1, w / 700);
-        ctx.beginPath();
-        ctx.moveTo(pad, p);
-        ctx.lineTo(pad + step * (SIZE - 1), p);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(p, pad);
-        ctx.lineTo(p, pad + step * (SIZE - 1));
-        ctx.stroke();
-      }
-      // red margin line (notebook vibe)
-      ctx.strokeStyle = th.margin;
-      ctx.lineWidth = Math.max(1.5, w / 400);
-      const marginX = pad - step * 0.15;
-      if (marginX > 4) {
-        ctx.beginPath();
-        ctx.moveTo(marginX, pad - step * 0.1);
-        ctx.lineTo(marginX, pad + step * (SIZE - 1) + step * 0.1);
-        ctx.stroke();
-      }
-      // outer frame
-      ctx.strokeStyle = th.line;
-      ctx.lineWidth = Math.max(1.5, w / 350);
-      ctx.strokeRect(pad - 1, pad - 1, step * (SIZE - 1) + 2, step * (SIZE - 1) + 2);
-      // stars as small pencil ×
-      ctx.strokeStyle = th.pencil;
-      ctx.lineWidth = Math.max(1.2, w / 450);
-      for (const [r, c] of STARS) {
-        const x = pad + c * step;
-        const y = pad + r * step;
-        const s = Math.max(3, step * 0.12);
-        ctx.beginPath();
-        ctx.moveTo(x - s, y - s);
-        ctx.lineTo(x + s, y + s);
-        ctx.moveTo(x + s, y - s);
-        ctx.lineTo(x - s, y + s);
-        ctx.stroke();
-      }
-      // pencil marks: outline triangle / circle with distinct ink colors
-      const markR = step * 0.36;
-      const lw = Math.max(1.8, step * 0.08);
-      const inkB = th.pencilB || th.pencil;
-      const inkW = th.pencilW || th.pencil;
-      for (let r = 0; r < SIZE; r++) {
-        for (let c = 0; c < SIZE; c++) {
-          const s = board[r][c];
-          if (!s) continue;
-          const x = pad + c * step;
-          const y = pad + r * step;
-          const sc = stoneScale(r, c);
-          ctx.save();
-          ctx.translate(x, y);
-          ctx.scale(sc, sc);
-          ctx.translate(-x, -y);
-          if (s === "b") drawOutlineTriangle(x, y, step * 0.78, inkB, lw);
-          else drawOutlineCircle(x, y, markR, inkW, lw);
-          ctx.restore();
-        }
-      }
-    } else {
-      const g = ctx.createLinearGradient(0, 0, w, w);
-      g.addColorStop(0, th.boardTop);
-      g.addColorStop(0.5, th.boardMid);
-      g.addColorStop(1, th.boardBot);
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, w);
-
-      if (th.grain) {
-        ctx.save();
-        ctx.globalAlpha = themeId === "day" ? 0.035 : 0.04;
-        for (let i = 0; i < 48; i++) {
-          ctx.strokeStyle = i % 2 ? "#000" : "#fff";
-          ctx.beginPath();
-          ctx.moveTo(0, (i / 48) * w);
-          ctx.lineTo(w, (i / 48) * w + 10);
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-
-      ctx.strokeStyle = th.line;
-      ctx.lineWidth = Math.max(1, w / 500);
-      ctx.lineCap = "square";
-      for (let i = 0; i < SIZE; i++) {
-        const p = pad + i * step;
-        ctx.beginPath();
-        ctx.moveTo(pad, p);
-        ctx.lineTo(pad + step * (SIZE - 1), p);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(p, pad);
-        ctx.lineTo(p, pad + step * (SIZE - 1));
-        ctx.stroke();
-      }
-      ctx.lineWidth = Math.max(2, w / 280);
-      ctx.strokeRect(pad - 1, pad - 1, step * (SIZE - 1) + 2, step * (SIZE - 1) + 2);
-
-      ctx.fillStyle = th.star;
-      for (const [r, c] of STARS) {
-        const x = pad + c * step;
-        const y = pad + r * step;
-        ctx.beginPath();
-        ctx.arc(x, y, Math.max(2.5, step * 0.09), 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      const radius = step * 0.43;
-      for (let r = 0; r < SIZE; r++) {
-        for (let c = 0; c < SIZE; c++) {
-          const s = board[r][c];
-          if (!s) continue;
-          const x = pad + c * step;
-          const y = pad + r * step;
-          const sc = stoneScale(r, c);
-          const rr = radius * sc;
-          ctx.beginPath();
-          ctx.arc(x + 1.2 * sc, y + 1.8 * sc, rr, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(0,0,0,0.18)";
-          ctx.fill();
-          const sg = ctx.createRadialGradient(
-            x - rr * 0.38, y - rr * 0.42, rr * 0.08, x, y, rr
-          );
-          if (s === "b") {
-            if (themeId === "night") {
-              sg.addColorStop(0, "#4a4a4a");
-              sg.addColorStop(0.35, "#1c1c1c");
-              sg.addColorStop(1, "#050505");
-            } else {
-              sg.addColorStop(0, "#6a6a6a");
-              sg.addColorStop(0.4, "#242424");
-              sg.addColorStop(1, "#050505");
-            }
-          } else {
-            sg.addColorStop(0, "#ffffff");
-            sg.addColorStop(0.5, "#f2f2f2");
-            sg.addColorStop(1, themeId === "day" ? "#c8c8c8" : "#bcbcbc");
-          }
-          ctx.beginPath();
-          ctx.arc(x, y, rr, 0, Math.PI * 2);
-          ctx.fillStyle = sg;
-          ctx.fill();
-          if (s === "w") {
-            ctx.strokeStyle = themeId === "day" ? "rgba(0,0,0,0.26)" : "rgba(0,0,0,0.18)";
-            ctx.lineWidth = themeId === "day" ? 1.35 : 1;
-            ctx.stroke();
-          } else if (themeId === "night") {
-            ctx.strokeStyle = "rgba(255,255,255,0.06)";
-            ctx.lineWidth = 1;
-            ctx.stroke();
-          }
-        }
-      }
-    }
-
-    if (viewIndex > 0 && history[viewIndex - 1]) {
-      const last = history[viewIndex - 1];
-      const x = pad + last.c * step;
-      const y = pad + last.r * step;
-      // Scheme A: smaller, thinner last-move ring — findable, not loud
-      const markR = Math.max(2.2, step * 0.105);
-      ctx.beginPath();
-      ctx.arc(x, y, markR, 0, Math.PI * 2);
-      ctx.strokeStyle = board[last.r][last.c] === "b" ? th.lastB : th.lastW;
-      ctx.lineWidth = Math.max(1.05, step * 0.032);
-      ctx.stroke();
-    }
-
-    if (winLine && winLine.length) {
-      ctx.save();
-      ctx.globalAlpha = th.style === "pencil" ? 0.72 : 0.62;
-      ctx.strokeStyle = th.win;
-      ctx.lineWidth = Math.max(2, step * 0.09);
-      ctx.lineCap = "round";
-      if (th.style === "pencil") {
-        ctx.setLineDash([Math.max(4, step * 0.15), Math.max(3, step * 0.1)]);
-      }
-      ctx.beginPath();
-      for (let i = 0; i < winLine.length; i++) {
-        const p = winLine[i];
-        const x = pad + p.c * step;
-        const y = pad + p.r * step;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-    }
-  }
-
-
-
-
-
-  /** Pattern score for one color as if evaluating the whole board. */
-
-
-
-
-
-
-  /**
-   * Negamax alpha-beta. `me` is the AI root color.
-   * Returns evaluation from the perspective of the side to move at this node
-   * when using classic negamax: we pass side and flip score.
-   */
-
+  function resizeCanvas() { Draw.resizeCanvas(); }
+  function cellAt(x, y) { return Draw.cellAt(x, y); }
+  function draw() { Draw.draw(); }
+  function ensureAnimLoop() { Draw.ensureAnimLoop(); }
 
   function isHumanTurn() {
     if (mode === "pvp") return true;
@@ -864,6 +547,7 @@
   }
 
   function maybeAiTurn() {
+    if (importPaused) return;
     if (mode !== "ai" || result !== "play" || isHumanTurn() || aiThinking) return;
     aiThinking = true;
     const gen = gameGen;
@@ -896,6 +580,8 @@
     turn = history.length % 2 === 0 ? "b" : "w";
     if (board[r][c]) return;
     if (!fromAi && !isHumanTurn()) return;
+    // Human/AI place ends import pause
+    if (importPaused) importPaused = false;
 
     board[r][c] = turn;
     history.push({ r, c });
@@ -969,6 +655,7 @@
     originalStartedAt = startedAt;
     aiThinking = false;
     placeAnim = null;
+    importPaused = false;
     saveSettings();
     sync();
     saveGame();
@@ -1034,6 +721,12 @@
     document.getElementById("rep-live").disabled = live;
     document.getElementById("sgf-copy").disabled = history.length === 0;
     document.getElementById("sgf-download").disabled = history.length === 0;
+    const contBtn = document.getElementById("sgf-continue");
+    if (contBtn) {
+      const showCont = importPaused && result === "play" && history.length > 0;
+      contBtn.hidden = !showCont;
+      contBtn.disabled = !showCont || aiThinking;
+    }
 
     if (mode === "ai") {
       document.getElementById("black-role").textContent = humanColor === "b" ? "你" : "电脑";
@@ -1056,6 +749,7 @@
     } else if (result === "b") status.textContent = "黑棋胜";
     else if (result === "w") status.textContent = "白棋胜";
     else if (result === "draw") status.textContent = "平局";
+    else if (importPaused) status.textContent = "导入复盘 · 可续下";
     else if (aiThinking) status.textContent = "电脑思考中…";
     else status.textContent = turn === "b" ? "黑棋落子" : "白棋落子";
 
@@ -1103,6 +797,10 @@
   };
   document.getElementById("sgf-copy").onclick = () => { copySgf(); };
   document.getElementById("sgf-download").onclick = () => { downloadSgf(); };
+  const contEl = document.getElementById("sgf-continue");
+  if (contEl) contEl.onclick = () => { continueFromImport(); };
+  const pasteEl = document.getElementById("sgf-paste");
+  if (pasteEl) pasteEl.onclick = () => { pasteSgfFromClipboard(); };
 
   document.getElementById("mode-seg").onclick = async (ev) => {
     const b = ev.target.closest("button[data-mode]");
@@ -1229,6 +927,8 @@
     else if (id === "goban.undo") undo();
     else if (id === "goban.sgf-copy") copySgf();
     else if (id === "goban.sgf-export") downloadSgf();
+    else if (id === "goban.sgf-paste") pasteSgfFromClipboard();
+    else if (id === "goban.sgf-continue") continueFromImport();
     else if (id === "goban.toggle-panel") togglePanel();
     else if (id === "goban.fullscreen") toggleFullscreen(); // hint only; real FS is system menu
   }

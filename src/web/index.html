@@ -132,8 +132,10 @@
           <button type="button" class="text-link" id="sgf-copy">复制</button>
           <button type="button" class="text-link" id="sgf-download">导出</button>
           <button type="button" class="text-link" id="sgf-import">导入</button>
+          <button type="button" class="text-link" id="sgf-paste" title="从剪贴板粘贴 SGF">粘贴</button>
         </div>
-        <p class="hint">拖入 .sgf 也可导入</p>
+        <button type="button" class="continue-btn" id="sgf-continue" hidden title="从导入局面继续对局">续下</button>
+        <p class="hint">拖入 .sgf 或粘贴棋谱 · 导入后不自动续下</p>
       </section>
 
       <div class="side-foot">
@@ -188,6 +190,7 @@
   <script src="js/ai.js"></script>
   <script src="js/host.js"></script>
   <script src="js/state.js"></script>
+  <script src="js/draw.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
