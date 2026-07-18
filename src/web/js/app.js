@@ -1021,9 +1021,10 @@
     if (diffField) diffField.hidden = !aiOnly;
     if (colorField) colorField.hidden = !aiOnly;
     const sbOn = document.getElementById("opt-sound");
-    const sbOff = document.getElementById("opt-sound-off");
-    if (sbOn) sbOn.classList.toggle("active", soundOn);
-    if (sbOff) sbOff.classList.toggle("active", !soundOn);
+    if (sbOn) {
+      sbOn.classList.toggle("active", soundOn);
+      sbOn.setAttribute("aria-pressed", soundOn ? "true" : "false");
+    }
   }
 
   function sync() {
@@ -1032,7 +1033,7 @@
     const moves = document.getElementById("moves");
     const blackTurn = document.getElementById("black-turn");
     const whiteTurn = document.getElementById("white-turn");
-    const undoBtns = [document.getElementById("undo"), document.getElementById("undo2")];
+    const undoBtns = [document.getElementById("undo"), document.getElementById("undo2")].filter(Boolean);
     const live = isLive();
     const nextColor = viewIndex % 2 === 0 ? "b" : "w";
 
@@ -1096,9 +1097,11 @@
   });
 
   document.getElementById("undo").onclick = undo;
-  document.getElementById("undo2").onclick = undo;
+  const undo2 = document.getElementById("undo2");
+  if (undo2) undo2.onclick = undo;
   document.getElementById("btn-new").onclick = () => { requestNewGame(); };
-  document.getElementById("reset2").onclick = () => { requestNewGame(); };
+  const reset2 = document.getElementById("reset2");
+  if (reset2) reset2.onclick = () => { requestNewGame(); };
   document.getElementById("clear-save").onclick = async () => {
     if (!(await confirmNative("清除自动存档并开始新局？", "清除存档", { ok: "清除", cancel: "取消" }))) return;
     clearSave();
@@ -1146,19 +1149,11 @@
     toast("主题：" + (names[themeId] || themeId));
   };
   document.getElementById("opt-sound").onclick = () => {
-    if (soundOn) return;
-    soundOn = true;
+    soundOn = !soundOn;
     saveSettings();
     syncSettingsUI();
-    playMoveSound("b");
-    toast("音效已开");
-  };
-  document.getElementById("opt-sound-off").onclick = () => {
-    if (!soundOn) return;
-    soundOn = false;
-    saveSettings();
-    syncSettingsUI();
-    toast("音效已关");
+    if (soundOn) playMoveSound("b");
+    toast(soundOn ? "音效已开" : "音效已关");
   };
   document.getElementById("color-seg").onclick = async (ev) => {
     const b = ev.target.closest("button[data-human]");

@@ -31,123 +31,114 @@
     </div>
 
     <aside class="side" id="side" aria-label="对局面板">
-      <details class="group" open data-group="match">
-        <summary>本局</summary>
-        <div class="group-body">
-          <div class="players">
-            <div class="player">
-              <span class="stone black" aria-hidden="true"></span>
-              <div class="grow">
-                <div class="player-title">
-                  黑棋
-                  <span class="badge" id="black-turn" hidden>行棋</span>
-                </div>
-                <div class="muted" id="black-role">你</div>
+      <!-- 本局摘要：无折叠、无重复主按钮（顶栏已有悔棋/新局） -->
+      <section class="side-head">
+        <div class="vs">
+          <div class="vs-side">
+            <span class="stone black" aria-hidden="true"></span>
+            <div>
+              <div class="vs-name">
+                黑
+                <span class="badge" id="black-turn" hidden>行</span>
               </div>
-            </div>
-            <div class="player">
-              <span class="stone white" aria-hidden="true"></span>
-              <div class="grow">
-                <div class="player-title">
-                  白棋
-                  <span class="badge" id="white-turn" hidden>行棋</span>
-                </div>
-                <div class="muted" id="white-role">电脑</div>
-              </div>
+              <div class="vs-role muted" id="black-role">你</div>
             </div>
           </div>
-          <div class="meta-line">
-            <strong class="num" id="info-moves">0</strong>&nbsp;手
-            <span class="dot">·</span>
-            <strong class="num" id="info-time">00:00</strong>
-            <span class="dot">·</span>
-            <span id="save-hint">自动存档</span>
-          </div>
-          <div class="btns inline">
-            <button type="button" class="block" id="undo2" disabled>悔棋</button>
-            <button type="button" class="block primary" id="reset2">新局</button>
+          <div class="vs-mid muted">对</div>
+          <div class="vs-side vs-right">
+            <div>
+              <div class="vs-name">
+                <span class="badge" id="white-turn" hidden>行</span>
+                白
+              </div>
+              <div class="vs-role muted" id="white-role">电脑</div>
+            </div>
+            <span class="stone white" aria-hidden="true"></span>
           </div>
         </div>
-      </details>
+        <div class="side-meta">
+          <span><strong class="num" id="info-moves">0</strong> 手</span>
+          <span class="sep"></span>
+          <span class="num" id="info-time">00:00</span>
+          <span class="sep"></span>
+          <span id="save-hint" class="save-hint">自动存档</span>
+        </div>
+      </section>
 
-      <details class="group" open data-group="setup">
-        <summary>对局设置</summary>
-        <div class="group-body">
-          <div class="field">
-            <span class="field-label">模式</span>
-            <div class="seg" id="mode-seg">
+      <section class="side-section">
+        <h2 class="side-h">对局</h2>
+        <div class="setting-list">
+          <div class="setting-row">
+            <span class="setting-k">模式</span>
+            <div class="pill" id="mode-seg" role="group" aria-label="模式">
               <button type="button" data-mode="ai" class="active">人机</button>
               <button type="button" data-mode="pvp">双人</button>
             </div>
           </div>
-          <div class="field" id="diff-field">
-            <span class="field-label">难度</span>
-            <div class="seg" id="diff-seg">
-              <button type="button" data-diff="easy">简单</button>
-              <button type="button" data-diff="normal" class="active">普通</button>
-              <button type="button" data-diff="hard">困难</button>
+          <div class="setting-row" id="diff-field">
+            <span class="setting-k">难度</span>
+            <div class="pill" id="diff-seg" role="group" aria-label="难度">
+              <button type="button" data-diff="easy">简</button>
+              <button type="button" data-diff="normal" class="active">普</button>
+              <button type="button" data-diff="hard">难</button>
             </div>
           </div>
-          <div class="field" id="color-field">
-            <span class="field-label">执子</span>
-            <div class="seg" id="color-seg">
-              <button type="button" data-human="b" class="active">执黑</button>
-              <button type="button" data-human="w">执白</button>
+          <div class="setting-row" id="color-field">
+            <span class="setting-k">执子</span>
+            <div class="pill" id="color-seg" role="group" aria-label="执子">
+              <button type="button" data-human="b" class="active">黑</button>
+              <button type="button" data-human="w">白</button>
             </div>
           </div>
         </div>
-      </details>
+      </section>
 
-      <details class="group" data-group="look">
-        <summary>外观</summary>
-        <div class="group-body">
-          <div class="field stack">
-            <span class="field-label">主题</span>
-            <div class="seg theme-grid" id="theme-seg">
-              <button type="button" data-theme="wood" class="active">木盘</button>
-              <button type="button" data-theme="night">夜盘</button>
-              <button type="button" data-theme="day">日间</button>
-              <button type="button" data-theme="notebook">本子</button>
+      <section class="side-section">
+        <h2 class="side-h">外观</h2>
+        <div class="setting-list">
+          <div class="setting-row stack">
+            <span class="setting-k">主题</span>
+            <div class="theme-row" id="theme-seg" role="group" aria-label="主题">
+              <button type="button" data-theme="wood" class="active" title="木盘">木</button>
+              <button type="button" data-theme="night" title="夜盘">夜</button>
+              <button type="button" data-theme="day" title="日间">日</button>
+              <button type="button" data-theme="notebook" title="练习本">本</button>
             </div>
           </div>
-          <div class="field">
-            <span class="field-label">音效</span>
-            <div class="seg" id="sound-seg">
-              <button type="button" id="opt-sound" class="active" title="落子音效">开</button>
-              <button type="button" id="opt-sound-off" title="关闭音效">关</button>
-            </div>
+          <div class="setting-row">
+            <span class="setting-k">音效</span>
+            <button type="button" class="switch" id="opt-sound" aria-pressed="true" title="落子音效">
+              <span class="switch-knob"></span>
+            </button>
+            <!-- keep id for app.js off-path; hidden -->
+            <button type="button" id="opt-sound-off" hidden tabindex="-1" aria-hidden="true"></button>
           </div>
         </div>
-      </details>
+      </section>
 
-      <details class="group" data-group="sgf">
-        <summary>棋谱</summary>
-        <div class="group-body">
-          <div class="meta-line">
-            进度&nbsp;<strong class="num" id="replay-pos">0 / 0</strong>
-          </div>
-          <div class="seg" id="replay-seg">
-            <button type="button" id="rep-start" title="开局 (Home)">|&lt;</button>
-            <button type="button" id="rep-prev" title="上一手 (←)">&lt;</button>
-            <button type="button" id="rep-next" title="下一手 (→)">&gt;</button>
-            <button type="button" id="rep-end" title="终局 (End)">&gt;|</button>
-          </div>
-          <div class="btns">
-            <button type="button" class="block" id="rep-live" disabled>回到最新一手</button>
-            <div class="btns inline">
-              <button type="button" class="block" id="sgf-copy">复制</button>
-              <button type="button" class="block" id="sgf-download">导出</button>
-            </div>
-            <button type="button" class="block" id="sgf-import">导入 SGF…</button>
-            <div class="muted" style="font-size:11px;line-height:1.4">也可将 .sgf 拖入窗口</div>
-          </div>
+      <section class="side-section grow-sec">
+        <div class="side-h-row">
+          <h2 class="side-h">棋谱</h2>
+          <span class="side-h-meta num" id="replay-pos">0 / 0</span>
         </div>
-      </details>
+        <div class="replay-bar" id="replay-seg">
+          <button type="button" id="rep-start" title="开局 (Home)">«</button>
+          <button type="button" id="rep-prev" title="上一手 (←)">‹</button>
+          <button type="button" id="rep-live" disabled title="回到最新">●</button>
+          <button type="button" id="rep-next" title="下一手 (→)">›</button>
+          <button type="button" id="rep-end" title="终局 (End)">»</button>
+        </div>
+        <div class="link-row">
+          <button type="button" class="text-link" id="sgf-copy">复制</button>
+          <button type="button" class="text-link" id="sgf-download">导出</button>
+          <button type="button" class="text-link" id="sgf-import">导入</button>
+        </div>
+        <p class="hint">拖入 .sgf 也可导入</p>
+      </section>
 
       <div class="side-foot">
-        <button type="button" class="block" id="collapse">收起侧栏</button>
-        <button type="button" class="block ghost" id="clear-save">清除存档并新局</button>
-        <div class="footer">Tab 侧栏 · ? 快捷键</div>
+        <button type="button" class="text-link danger" id="clear-save">清除存档</button>
+        <button type="button" class="text-link" id="collapse">收起</button>
       </div>
     </aside>
 
