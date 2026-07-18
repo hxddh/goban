@@ -444,7 +444,7 @@
       <span class="spacer"></span>
       <div class="chrome-actions">
         <button type="button" class="tool-btn" id="undo" disabled title="悔棋 (Z)">悔棋</button>
-        <button type="button" class="tool-btn primary" id="reset" title="新局 (N)">新局</button>
+        <button type="button" class="tool-btn primary" id="btn-new" title="新局 (N)">新局</button>
         <button type="button" class="icon-btn" id="help-btn" title="快捷键 (?)">?</button>
         <button type="button" class="icon-btn" id="toggle-panel" title="侧栏 (Tab)" aria-label="侧栏">☰</button>
       </div>
@@ -578,6 +578,17 @@
 
     <div class="toast" id="toast"></div>
 
+    <div class="modal-bg" id="confirm-modal" role="dialog" aria-label="确认">
+      <div class="modal">
+        <h3 id="confirm-title">确认</h3>
+        <p id="confirm-message" class="muted" style="margin:0 0 16px;font-size:14px;line-height:1.5;color:var(--text)"></p>
+        <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" class="tool-btn" id="confirm-cancel">取消</button>
+          <button type="button" class="tool-btn primary" id="confirm-ok">确定</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="help-modal" role="dialog" aria-label="快捷键">
       <div class="modal">
         <h3>快捷键</h3>
@@ -652,21 +663,67 @@
     return typeof window.zero === "object" && window.zero != null;
   }
 
-  /** @returns {Promise<boolean>} */
-  async function confirmNative(message, title) {
-    if (hasZero() && window.zero.dialogs && window.zero.dialogs.showMessage) {
+  let confirmResolver = null;
+
+  /**
+   * In-app confirm (reliable in WKWebView). Avoids native dialog bridge
+   * quirks that made 「新局」 look like a no-op when history was non-empty.
+   * @param {string} message
+   * @param {string} [title]
+   * @param {{ ok?: string, cancel?: string }} [buttons]
+   * @returns {Promise<boolean>}
+   */
+  function confirmNative(message, title, buttons) {
+    const okLabel = (buttons && buttons.ok) || "确定";
+    const cancelLabel = (buttons && buttons.cancel) || "取消";
+    const modal = document.getElementById("confirm-modal");
+    const titleEl = document.getElementById("confirm-title");
+    const msgEl = document.getElementById("confirm-message");
+    const okBtn = document.getElementById("confirm-ok");
+    const cancelBtn = document.getElementById("confirm-cancel");
+    if (!modal || !okBtn || !cancelBtn) {
       try {
-        const r = await window.zero.dialogs.showMessage({
-          style: "warning",
-          title: title || "确认",
-          message: message,
-          primaryButton: "继续",
-          secondaryButton: "取消",
-        });
-        return r === "primary";
-      } catch (_) {}
+        return Promise.resolve(!!window.confirm(message));
+      } catch (_) {
+        return Promise.resolve(true);
+      }
     }
-    return window.confirm(message);
+    if (confirmResolver) {
+      confirmResolver(false);
+      confirmResolver = null;
+    }
+    titleEl.textContent = title || "确认";
+    msgEl.textContent = message;
+    okBtn.textContent = okLabel;
+    cancelBtn.textContent = cancelLabel;
+    modal.classList.add("show");
+    return new Promise((resolve) => {
+      confirmResolver = resolve;
+    });
+  }
+
+  function finishConfirm(value) {
+    const modal = document.getElementById("confirm-modal");
+    if (modal) modal.classList.remove("show");
+    if (confirmResolver) {
+      const r = confirmResolver;
+      confirmResolver = null;
+      r(!!value);
+    }
+  }
+
+  async function requestNewGame() {
+    if (history.length) {
+      const ok = await confirmNative(
+        "开始新局？当前进度会写入存档为新局。",
+        "新局",
+        { ok: "新局", cancel: "取消" }
+      );
+      if (!ok) return;
+    }
+    // reset() bumps gameGen so any in-flight AI timeout cannot place.
+    reset();
+    toast("新局已开始");
   }
 
   const THEMES = {
@@ -1715,6 +1772,10 @@
 
   function undo() {
     if (!history.length || aiThinking) return;
+    // Always return to the live tip before undoing moves.
+    if (!isLive()) {
+      goLive();
+    }
     if (mode === "ai") {
       // Pop until it is the human's turn again (undo AI reply + human move).
       do {
@@ -1726,6 +1787,7 @@
     turn = history.length % 2 === 0 ? "b" : "w";
     result = "play";
     winLine = null;
+    placeAnim = null;
     viewIndex = history.length;
     board = boardAfter(history.length);
     sync();
@@ -1854,14 +1916,10 @@
 
   document.getElementById("undo").onclick = undo;
   document.getElementById("undo2").onclick = undo;
-  document.getElementById("reset").onclick = async () => {
-    if (history.length && !(await confirmNative("开始新局？当前进度会写入存档为新局。", "新局"))) return;
-    reset();
-    toast("新局已开始");
-  };
-  document.getElementById("reset2").onclick = () => document.getElementById("reset").click();
+  document.getElementById("btn-new").onclick = () => { requestNewGame(); };
+  document.getElementById("reset2").onclick = () => { requestNewGame(); };
   document.getElementById("clear-save").onclick = async () => {
-    if (!(await confirmNative("清除自动存档并开始新局？", "清除存档"))) return;
+    if (!(await confirmNative("清除自动存档并开始新局？", "清除存档", { ok: "清除", cancel: "取消" }))) return;
     clearSave();
     reset();
     toast("存档已清除");
@@ -1885,7 +1943,7 @@
     const b = ev.target.closest("button[data-mode]");
     if (!b) return;
     if (b.dataset.mode === mode) return;
-    if (history.length && !(await confirmNative("切换模式将开始新局，是否继续？", "切换模式"))) return;
+    if (history.length && !(await confirmNative("切换模式将开始新局，是否继续？", "切换模式", { ok: "切换", cancel: "取消" }))) return;
     mode = b.dataset.mode;
     saveSettings();
     reset({ keepSettings: true });
@@ -1925,7 +1983,7 @@
     const b = ev.target.closest("button[data-human]");
     if (!b) return;
     if (b.dataset.human === humanColor) return;
-    if (mode === "ai" && history.length && !(await confirmNative("更换执子将开始新局，是否继续？", "更换执子"))) return;
+    if (mode === "ai" && history.length && !(await confirmNative("更换执子将开始新局，是否继续？", "更换执子", { ok: "更换", cancel: "取消" }))) return;
     humanColor = b.dataset.human;
     saveSettings();
     if (mode === "ai") {
@@ -1937,17 +1995,26 @@
   };
 
   const helpModal = document.getElementById("help-modal");
+  const confirmModal = document.getElementById("confirm-modal");
   function openHelp() { helpModal.classList.add("show"); }
   function closeHelp() { helpModal.classList.remove("show"); }
   document.getElementById("help-btn").onclick = openHelp;
   document.getElementById("help-close").onclick = closeHelp;
   helpModal.onclick = (ev) => { if (ev.target === helpModal) closeHelp(); };
+  document.getElementById("confirm-ok").onclick = () => finishConfirm(true);
+  document.getElementById("confirm-cancel").onclick = () => finishConfirm(false);
+  confirmModal.onclick = (ev) => { if (ev.target === confirmModal) finishConfirm(false); };
 
   window.addEventListener("keydown", (ev) => {
     const k = ev.key.toLowerCase();
     if (ev.key === "Escape") {
+      if (confirmModal.classList.contains("show")) { finishConfirm(false); return; }
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
       if (appEl.classList.contains("panel-open")) setPanelOpen(false);
+      return;
+    }
+    if (confirmModal.classList.contains("show")) {
+      if (ev.key === "Enter") { ev.preventDefault(); finishConfirm(true); }
       return;
     }
     if (ev.key === "?" || (ev.shiftKey && k === "/")) { openHelp(); return; }
@@ -1957,12 +2024,12 @@
     if (ev.key === "Home") { ev.preventDefault(); setViewIndex(0); return; }
     if (ev.key === "End") { ev.preventDefault(); setViewIndex(history.length); return; }
     if ((ev.metaKey || ev.ctrlKey) && k === "z") { ev.preventDefault(); undo(); }
-    else if ((ev.metaKey || ev.ctrlKey) && k === "n") { ev.preventDefault(); document.getElementById("reset").click(); }
+    else if ((ev.metaKey || ev.ctrlKey) && k === "n") { ev.preventDefault(); requestNewGame(); }
     else if ((ev.metaKey || ev.ctrlKey) && k === "1") {
       ev.preventDefault();
       if (mode === "pvp") return;
       (async () => {
-        if (history.length && !(await confirmNative("切换到双人对战将开始新局，是否继续？", "切换模式"))) return;
+        if (history.length && !(await confirmNative("切换到双人对战将开始新局，是否继续？", "切换模式", { ok: "切换", cancel: "取消" }))) return;
         mode = "pvp";
         saveSettings();
         reset({ keepSettings: true });
@@ -1972,14 +2039,14 @@
       ev.preventDefault();
       if (mode === "ai") return;
       (async () => {
-        if (history.length && !(await confirmNative("切换到人机对战将开始新局，是否继续？", "切换模式"))) return;
+        if (history.length && !(await confirmNative("切换到人机对战将开始新局，是否继续？", "切换模式", { ok: "切换", cancel: "取消" }))) return;
         mode = "ai";
         saveSettings();
         reset({ keepSettings: true });
         toast("人机对战");
       })();
     } else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
-    else if (k === "n" && !ev.metaKey && !ev.ctrlKey) document.getElementById("reset").click();
+    else if (k === "n" && !ev.metaKey && !ev.ctrlKey) requestNewGame();
     else if (k === "[") setPanelOpen(false);
     else if (k === "]") setPanelOpen(true);
     else if (k === "f" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
@@ -2001,7 +2068,7 @@
 
   function handleNativeCommand(id) {
     if (!id) return;
-    if (id === "goban.new") document.getElementById("reset").click();
+    if (id === "goban.new") requestNewGame();
     else if (id === "goban.undo") undo();
     else if (id === "goban.sgf-copy") copySgf();
     else if (id === "goban.sgf-export") downloadSgf();
