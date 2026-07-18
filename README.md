@@ -1,77 +1,48 @@
-# Goban
+# 五子棋 Goban
 
-macOS 五子棋（Gomoku）— personal daily driver, built with [Native SDK](https://github.com/vercel-labs/native).
+macOS 五子棋 — **真正的棋盘 UI**（木色盘、网格线、圆子、星位、中文）。
 
-## Features
+用 [Native SDK](https://github.com/vercel-labs/native) 包一层系统 WebView，棋盘用 Canvas 绘制。
 
-- 15×15 board, Black first, five in a row
-- **2 players** or **vs computer** (you Black, AI White)
-- Place / Undo / New game
-- Last-move + winning-line highlight
-- Heuristic AI with fork detection (blocks fours, open threes, double threats)
-- Menu bar + keyboard shortcuts
-- Packaged `.app` (adhoc signed)
+## 打开
 
-> UI copy is English/ASCII — the SDK bundled font does not cover CJK on the reference path.
+```bash
+open ~/Applications/Goban.app
+```
 
-## Personal use (fast path)
+或开发：
 
-```sh
+```bash
 cd ~/goban
-native build
-native package --target macos --signing adhoc --output dist/Goban.app
-open dist/Goban.app
+native dev
 ```
 
-Or from a previous package:
+## 怎么玩
 
-```sh
-open ~/goban/dist/Goban.app
-```
+| 操作 | 说明 |
+|------|------|
+| 点棋盘交叉点 | 落子（黑先） |
+| 人机对战 | 你执黑，电脑执白 |
+| 双人对战 | 本机两人轮流 |
+| 悔棋 | 按钮或 **Z** |
+| 新局 | 按钮或 **N** |
 
-Optional: drag `dist/Goban.app` into `/Applications` (or keep it in `~/goban/dist`).
+先连成五子者胜。
 
-### Shortcuts
-
-| Action | Shortcut |
-|--------|----------|
-| New game | **⌘N** |
-| Undo | **⌘Z** |
-| 2 players | **⌘1** |
-| vs computer | **⌘2** |
-
-Also under menu **Game** / **Mode**.
-
-In vs-computer mode, **⌘Z** undoes your last move *and* the AI reply.
-
-## Develop
-
-Requirements: macOS, Node 22.15+, `npm i -g @native-sdk/cli`.
-
-```sh
-native check    # core + markup + app.zon
-native dev      # window + markup hot reload
-native build    # zig-out/bin/goban
-```
-
-First build may download Zig 0.16 (`native build --yes`).
-
-Logic-only smoke:
-
-```sh
-printf '%s\n' '{"kind":"place","index":112}' '{"kind":"undo"}' | native dev --core
-```
-
-## Layout
+## 工程
 
 ```text
-app.zon           # identity, menus, shortcuts, window
-src/core.ts       # Model / Msg / update / AI / commandMsg
-src/app.native    # board UI
+app.zon                 # Native 窗口 + WebView
+frontend/dist/index.html  # 完整棋盘与规则（Canvas）
 assets/icon.png
-dist/Goban.app    # package output (gitignored)
 ```
 
-## License
+```bash
+native build
+native package --target macos --signing adhoc --output dist/Goban.app
+ditto dist/Goban.app ~/Applications/Goban.app
+```
+
+## 许可
 
 MIT

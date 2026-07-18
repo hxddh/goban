@@ -1,76 +1,35 @@
 .{
     .id = "dev.hxddh.goban",
     .name = "goban",
-    .display_name = "Goban",
-    .description = "Gomoku for macOS.",
-    .version = "0.3.0",
+    .display_name = "五子棋",
+    .description = "Gomoku (五子棋) for macOS — real board UI.",
+    .version = "0.4.0",
     .icons = .{"assets/icon.png"},
     .platforms = .{"macos"},
-    .permissions = .{ "view", "command" },
-    .capabilities = .{ "native_views", "gpu_surfaces", "shortcuts", "menus" },
-    .commands = .{
-        .{ .id = "goban.new-game", .title = "New Game" },
-        .{ .id = "goban.undo", .title = "Undo" },
-        .{ .id = "goban.mode-pvp", .title = "2 Players" },
-        .{ .id = "goban.mode-ai", .title = "vs Computer" },
-    },
-    .shortcuts = .{
-        .{ .id = "goban.new-game", .key = "n", .modifiers = .{"primary"} },
-        .{ .id = "goban.undo", .key = "z", .modifiers = .{"primary"} },
-        .{ .id = "goban.mode-pvp", .key = "1", .modifiers = .{"primary"} },
-        .{ .id = "goban.mode-ai", .key = "2", .modifiers = .{"primary"} },
-    },
-    .menus = .{
-        .{
-            .title = "Game",
-            .items = .{
-                .{ .label = "New Game", .command = "goban.new-game", .key = "n", .modifiers = .{"primary"} },
-                .{ .label = "Undo", .command = "goban.undo", .key = "z", .modifiers = .{"primary"} },
-            },
-        },
-        .{
-            .title = "Mode",
-            .items = .{
-                .{ .label = "2 Players", .command = "goban.mode-pvp", .key = "1", .modifiers = .{"primary"} },
-                .{ .label = "vs Computer", .command = "goban.mode-ai", .key = "2", .modifiers = .{"primary"} },
-            },
-        },
-    },
-    .shell = .{
-        .windows = .{
-            .{
-                .label = "main",
-                .title = "Goban",
-                .width = 820,
-                .height = 720,
-                .min_width = 720,
-                .min_height = 640,
-                .restore_state = false,
-                .restore_policy = "center_on_primary",
-                .views = .{
-                    .{
-                        .label = "main-canvas",
-                        .kind = "gpu_surface",
-                        .fill = true,
-                        .role = "Goban board",
-                        .accessibility_label = "Goban",
-                        .gpu_backend = "metal",
-                        .gpu_pixel_format = "bgra8_unorm",
-                        .gpu_present_mode = "timer",
-                        .gpu_alpha_mode = "opaque",
-                        .gpu_color_space = "srgb",
-                        .gpu_vsync = true,
-                    },
-                },
-            },
-        },
+    .permissions = .{},
+    .capabilities = .{"webview"},
+    .frontend = .{
+        .dist = "frontend/dist",
+        .entry = "index.html",
+        .spa_fallback = true,
     },
     .security = .{
         .navigation = .{
-            .allowed_origins = .{ "zero://app", "zero://inline" },
+            .allowed_origins = .{ "zero://app", "zero://inline", "http://127.0.0.1:5173" },
             .external_links = .{ .action = "deny" },
         },
     },
     .web_engine = "system",
     .cef = .{ .dir = "third_party/cef/macos", .auto_install = false },
+    .windows = .{
+        .{
+            .label = "main",
+            .title = "五子棋",
+            .width = 920,
+            .height = 720,
+            .min_width = 760,
+            .min_height = 600,
+            .restore_state = false,
+        },
+    },
 }

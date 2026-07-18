@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>五子棋 Goban</title>
+  <style>
+    :root {
+      --bg: #1a1410;
+      --panel: #2a211c;
+      --text: #f3e9dc;
+      --muted: #b8a48c;
+      --wood: #d4a574;
+      --wood-dark: #c4956a;
+      --line: #3d2914;
+      --accent: #e8c39e;
+      --btn: #3d322a;
+      --btn-hover: #4a3d33;
+      --win: #ffe08a;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+        system-ui, -apple-system, sans-serif;
+      user-select: none;
+      overflow: hidden;
+    }
+    #app {
+      display: grid;
+      grid-template-columns: 1fr 220px;
+      height: 100%;
+      min-height: 0;
+    }
+    .main {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 16px;
+      min-width: 0;
+    }
+    .title {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    .hint { color: var(--muted); font-size: 13px; }
+    #board-wrap {
+      padding: 18px;
+      border-radius: 14px;
+      background: linear-gradient(145deg, #e0b07a, #c9965c 45%, #b8864e);
+      box-shadow:
+        0 12px 40px rgba(0,0,0,.45),
+        inset 0 1px 0 rgba(255,255,255,.25);
+    }
+    canvas {
+      display: block;
+      width: min(68vh, 68vw, 560px);
+      height: min(68vh, 68vw, 560px);
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .side {
+      background: var(--panel);
+      border-left: 1px solid #3a2f28;
+      padding: 18px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .side h2 {
+      margin: 0;
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .card {
+      background: #342920;
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .stone {
+      width: 18px; height: 18px; border-radius: 50%;
+      box-shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+    .stone.black {
+      background: radial-gradient(circle at 35% 30%, #555, #111 60%, #000);
+    }
+    .stone.white {
+      background: radial-gradient(circle at 35% 30%, #fff, #ddd 55%, #bbb);
+    }
+    .grow { flex: 1; }
+    .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #2a1c10;
+      font-weight: 600;
+    }
+    .muted { color: var(--muted); font-size: 12px; }
+    .status {
+      font-size: 16px;
+      font-weight: 600;
+      min-height: 1.4em;
+    }
+    .status.win { color: var(--win); }
+    .btns { display: flex; flex-direction: column; gap: 8px; }
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font: inherit;
+      font-size: 14px;
+      background: var(--btn);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+    }
+    button:hover { background: var(--btn-hover); }
+    button.primary {
+      background: linear-gradient(180deg, #f0d2a8, #d4a574);
+      color: #2a1c10;
+      font-weight: 600;
+    }
+    button.primary:hover { filter: brightness(1.05); }
+    button.active {
+      outline: 2px solid var(--accent);
+      outline-offset: 0;
+    }
+    button:disabled { opacity: .45; cursor: default; }
+    .footer {
+      margin-top: auto;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    @media (max-width: 700px) {
+      #app { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+      .side { border-left: 0; border-top: 1px solid #3a2f28; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="main">
+      <div class="title">五子棋</div>
+      <div class="hint" id="subtitle">15 路 · 黑先 · 五子连珠</div>
+      <div id="board-wrap">
+        <canvas id="board" width="600" height="600" aria-label="棋盘"></canvas>
+      </div>
+      <div class="hint">点击交叉点落子</div>
+    </div>
+    <aside class="side">
+      <h2>对局</h2>
+      <div class="card">
+        <div class="row">
+          <span class="stone black"></span>
+          <span class="grow">黑棋</span>
+          <span class="badge" id="black-turn" hidden>行棋</span>
+        </div>
+        <div class="muted" id="black-role">你</div>
+      </div>
+      <div class="card">
+        <div class="row">
+          <span class="stone white"></span>
+          <span class="grow">白棋</span>
+          <span class="badge" id="white-turn" hidden>行棋</span>
+        </div>
+        <div class="muted" id="white-role">电脑</div>
+      </div>
+
+      <h2>模式</h2>
+      <div class="btns">
+        <button type="button" id="mode-ai" class="active">人机对战</button>
+        <button type="button" id="mode-pvp">双人对战</button>
+      </div>
+
+      <h2>状态</h2>
+      <div class="status" id="status">黑棋落子</div>
+      <div class="muted" id="moves">第 0 手</div>
+
+      <div class="btns">
+        <button type="button" id="undo" disabled>悔棋</button>
+        <button type="button" id="reset" class="primary">新局</button>
+      </div>
+
+      <div class="footer">
+        快捷键：Z 悔棋 · N 新局 · 1 双人 · 2 人机<br />
+        先连成五子者胜
+      </div>
+    </aside>
+  </div>
+  <script>
+(function () {
+  const SIZE = 15;
+  const WIN = 5;
+  const canvas = document.getElementById("board");
+  const ctx = canvas.getContext("2d");
+
+  /** @type {(''| 'b' | 'w')[][]} */
+  let board = emptyBoard();
+  /** @type {'b' | 'w'} */
+  let turn = "b";
+  /** @type {'play' | 'b' | 'w' | 'draw'} */
+  let result = "play";
+  /** @type {'ai' | 'pvp'} */
+  let mode = "ai";
+  /** @type {{r:number,c:number}[]} */
+  let history = [];
+  /** @type {{r:number,c:number}[] | null} */
+  let winLine = null;
+
+  const STARS = [
+    [3, 3], [3, 7], [3, 11],
+    [7, 3], [7, 7], [7, 11],
+    [11, 3], [11, 7], [11, 11],
+  ];
+
+  function emptyBoard() {
+    const b = [];
+    for (let r = 0; r < SIZE; r++) {
+      const row = [];
+      for (let c = 0; c < SIZE; c++) row.push("");
+      b.push(row);
+    }
+    return b;
+  }
+
+  function opp(t) { return t === "b" ? "w" : "b"; }
+
+  function geometry() {
+    const w = canvas.width;
+    const pad = w * 0.08;
+    const span = w - pad * 2;
+    const step = span / (SIZE - 1);
+    return { pad, step, w };
+  }
+
+  function cellAt(x, y) {
+    const { pad, step } = geometry();
+    const c = Math.round((x - pad) / step);
+    const r = Math.round((y - pad) / step);
+    if (r < 0 || r >= SIZE || c < 0 || c >= SIZE) return null;
+    const px = pad + c * step;
+    const py = pad + r * step;
+    const dist = Math.hypot(x - px, y - py);
+    if (dist > step * 0.45) return null;
+    return { r, c };
+  }
+
+  function draw() {
+    const { pad, step, w } = geometry();
+    ctx.clearRect(0, 0, w, w);
+
+    // board wood
+    const g = ctx.createLinearGradient(0, 0, w, w);
+    g.addColorStop(0, "#e8c49a");
+    g.addColorStop(0.5, "#d4a574");
+    g.addColorStop(1, "#c28b52");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, w);
+
+    // subtle grain
+    ctx.save();
+    ctx.globalAlpha = 0.04;
+    for (let i = 0; i < 40; i++) {
+      ctx.strokeStyle = i % 2 ? "#000" : "#fff";
+      ctx.beginPath();
+      ctx.moveTo(0, (i / 40) * w);
+      ctx.lineTo(w, (i / 40) * w + 8);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // grid
+    ctx.strokeStyle = "#3d2914";
+    ctx.lineWidth = 1.25;
+    ctx.lineCap = "square";
+    for (let i = 0; i < SIZE; i++) {
+      const p = pad + i * step;
+      ctx.beginPath();
+      ctx.moveTo(pad, p);
+      ctx.lineTo(pad + step * (SIZE - 1), p);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(p, pad);
+      ctx.lineTo(p, pad + step * (SIZE - 1));
+      ctx.stroke();
+    }
+
+    // outer border
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(pad - 1, pad - 1, step * (SIZE - 1) + 2, step * (SIZE - 1) + 2);
+
+    // star points
+    ctx.fillStyle = "#3d2914";
+    for (const [r, c] of STARS) {
+      const x = pad + c * step;
+      const y = pad + r * step;
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(2.5, step * 0.08), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // stones
+    const radius = step * 0.42;
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        const s = board[r][c];
+        if (!s) continue;
+        const x = pad + c * step;
+        const y = pad + r * step;
+        // shadow
+        ctx.beginPath();
+        ctx.arc(x + 1.5, y + 2, radius, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0,0,0,0.25)";
+        ctx.fill();
+        // body
+        const sg = ctx.createRadialGradient(x - radius * 0.35, y - radius * 0.4, radius * 0.1, x, y, radius);
+        if (s === "b") {
+          sg.addColorStop(0, "#666");
+          sg.addColorStop(0.45, "#222");
+          sg.addColorStop(1, "#000");
+        } else {
+          sg.addColorStop(0, "#fff");
+          sg.addColorStop(0.55, "#eee");
+          sg.addColorStop(1, "#c8c8c8");
+        }
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = sg;
+        ctx.fill();
+        if (s === "w") {
+          ctx.strokeStyle = "rgba(0,0,0,0.2)";
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+    }
+
+    // last move mark
+    if (history.length) {
+      const last = history[history.length - 1];
+      const x = pad + last.c * step;
+      const y = pad + last.r * step;
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(2, step * 0.1), 0, Math.PI * 2);
+      ctx.fillStyle = board[last.r][last.c] === "b" ? "#f5d76e" : "#c0392b";
+      ctx.fill();
+    }
+
+    // win line highlight
+    if (winLine && winLine.length) {
+      ctx.strokeStyle = "rgba(220, 40, 40, 0.85)";
+      ctx.lineWidth = Math.max(3, step * 0.12);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      for (let i = 0; i < winLine.length; i++) {
+        const p = winLine[i];
+        const x = pad + p.c * step;
+        const y = pad + p.r * step;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+  }
+
+  function countDir(r, c, dr, dc, color) {
+    let n = 0;
+    let rr = r + dr, cc = c + dc;
+    while (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && board[rr][cc] === color) {
+      n++; rr += dr; cc += dc;
+    }
+    return n;
+  }
+
+  function findWin(r, c, color) {
+    const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]];
+    for (const [dr, dc] of dirs) {
+      const a = countDir(r, c, dr, dc, color);
+      const b = countDir(r, c, -dr, -dc, color);
+      if (1 + a + b >= WIN) {
+        const line = [{ r, c }];
+        let rr = r + dr, cc = c + dc;
+        while (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && board[rr][cc] === color) {
+          line.push({ r: rr, c: cc }); rr += dr; cc += dc;
+        }
+        rr = r - dr; cc = c - dc;
+        while (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && board[rr][cc] === color) {
+          line.push({ r: rr, c: cc }); rr -= dr; cc -= dc;
+        }
+        return line;
+      }
+    }
+    return null;
+  }
+
+  function boardFull() {
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++)
+        if (!board[r][c]) return false;
+    return true;
+  }
+
+  function wouldWin(r, c, color) {
+    if (board[r][c]) return false;
+    board[r][c] = color;
+    const w = !!findWin(r, c, color);
+    board[r][c] = "";
+    return w;
+  }
+
+  function scorePlace(r, c, me) {
+    if (board[r][c]) return -1e9;
+    const them = opp(me);
+    if (wouldWin(r, c, me)) return 1e6;
+    if (wouldWin(r, c, them)) return 5e5;
+
+    let score = 0;
+    const dirs = [[0, 1], [1, 0], [1, 1], [1, -1]];
+    board[r][c] = me;
+    for (const [dr, dc] of dirs) {
+      const a = countDir(r, c, dr, dc, me);
+      const b = countDir(r, c, -dr, -dc, me);
+      const n = 1 + a + b;
+      // open ends rough
+      let open = 0;
+      let rr = r + dr * (a + 1), cc = c + dc * (a + 1);
+      if (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && !board[rr][cc]) open++;
+      rr = r - dr * (b + 1); cc = c - dc * (b + 1);
+      if (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && !board[rr][cc]) open++;
+      if (n >= 4 && open >= 1) score += 8000;
+      else if (n === 3 && open === 2) score += 2000;
+      else if (n === 3 && open === 1) score += 200;
+      else if (n === 2 && open === 2) score += 80;
+      else score += n * 5 + open;
+    }
+    board[r][c] = "";
+
+    board[r][c] = them;
+    for (const [dr, dc] of dirs) {
+      const a = countDir(r, c, dr, dc, them);
+      const b = countDir(r, c, -dr, -dc, them);
+      const n = 1 + a + b;
+      let open = 0;
+      let rr = r + dr * (a + 1), cc = c + dc * (a + 1);
+      if (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && !board[rr][cc]) open++;
+      rr = r - dr * (b + 1); cc = c - dc * (b + 1);
+      if (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && !board[rr][cc]) open++;
+      if (n >= 4 && open >= 1) score += 6000;
+      else if (n === 3 && open === 2) score += 1500;
+      else if (n === 3) score += 150;
+    }
+    board[r][c] = "";
+
+    const center = 7;
+    score += (14 - (Math.abs(r - center) + Math.abs(c - center))) * 2;
+    return score;
+  }
+
+  function nearStone(r, c) {
+    for (let dr = -2; dr <= 2; dr++)
+      for (let dc = -2; dc <= 2; dc++) {
+        if (!dr && !dc) continue;
+        const rr = r + dr, cc = c + dc;
+        if (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && board[rr][cc]) return true;
+      }
+    return false;
+  }
+
+  function aiMove() {
+    let best = null;
+    let bestScore = -1e12;
+    let any = false;
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++)
+        if (board[r][c]) any = true;
+
+    if (!any) return { r: 7, c: 7 };
+
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        if (board[r][c]) continue;
+        if (any && !nearStone(r, c)) continue;
+        const s = scorePlace(r, c, "w");
+        if (s > bestScore) {
+          bestScore = s;
+          best = { r, c };
+        }
+      }
+    }
+    if (!best) {
+      for (let r = 0; r < SIZE; r++)
+        for (let c = 0; c < SIZE; c++)
+          if (!board[r][c]) return { r, c };
+    }
+    return best;
+  }
+
+  function place(r, c) {
+    if (result !== "play") return;
+    if (board[r][c]) return;
+    board[r][c] = turn;
+    history.push({ r, c });
+    const line = findWin(r, c, turn);
+    if (line) {
+      result = turn;
+      winLine = line;
+      turn = opp(turn);
+      sync();
+      return;
+    }
+    if (boardFull()) {
+      result = "draw";
+      sync();
+      return;
+    }
+    turn = opp(turn);
+    sync();
+
+    if (mode === "ai" && result === "play" && turn === "w") {
+      const m = aiMove();
+      if (m) {
+        // slight delay so UI paints first
+        setTimeout(() => place(m.r, m.c), 80);
+      }
+    }
+  }
+
+  function undo() {
+    if (!history.length) return;
+    // In AI mode, undo white reply + black move when last is white
+    const last = history[history.length - 1];
+    const lastColor = board[last.r][last.c];
+    const popOne = () => {
+      const p = history.pop();
+      if (p) board[p.r][p.c] = "";
+    };
+    popOne();
+    if (mode === "ai" && lastColor === "w" && history.length) popOne();
+    result = "play";
+    winLine = null;
+    turn = history.length % 2 === 0 ? "b" : "w";
+    sync();
+  }
+
+  function reset() {
+    board = emptyBoard();
+    turn = "b";
+    result = "play";
+    history = [];
+    winLine = null;
+    sync();
+  }
+
+  function sync() {
+    draw();
+    const status = document.getElementById("status");
+    const moves = document.getElementById("moves");
+    const blackTurn = document.getElementById("black-turn");
+    const whiteTurn = document.getElementById("white-turn");
+    const undoBtn = document.getElementById("undo");
+    const blackRole = document.getElementById("black-role");
+    const whiteRole = document.getElementById("white-role");
+
+    moves.textContent = "第 " + history.length + " 手";
+    undoBtn.disabled = history.length === 0;
+
+    blackRole.textContent = mode === "ai" ? "你" : "玩家 1";
+    whiteRole.textContent = mode === "ai" ? "电脑" : "玩家 2";
+
+    blackTurn.hidden = !(result === "play" && turn === "b");
+    whiteTurn.hidden = !(result === "play" && turn === "w");
+
+    status.classList.remove("win");
+    if (result === "b") {
+      status.textContent = "黑棋胜";
+      status.classList.add("win");
+    } else if (result === "w") {
+      status.textContent = "白棋胜";
+      status.classList.add("win");
+    } else if (result === "draw") {
+      status.textContent = "平局";
+    } else {
+      status.textContent = turn === "b" ? "黑棋落子" : "白棋落子";
+    }
+
+    document.getElementById("mode-ai").classList.toggle("active", mode === "ai");
+    document.getElementById("mode-pvp").classList.toggle("active", mode === "pvp");
+  }
+
+  function canvasPoint(ev) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (ev.clientX - rect.left) * scaleX,
+      y: (ev.clientY - rect.top) * scaleY,
+    };
+  }
+
+  canvas.addEventListener("click", (ev) => {
+    const { x, y } = canvasPoint(ev);
+    const cell = cellAt(x, y);
+    if (!cell) return;
+    if (mode === "ai" && turn === "w") return; // wait for AI
+    place(cell.r, cell.c);
+  });
+
+  document.getElementById("undo").onclick = undo;
+  document.getElementById("reset").onclick = reset;
+  document.getElementById("mode-ai").onclick = () => { mode = "ai"; reset(); };
+  document.getElementById("mode-pvp").onclick = () => { mode = "pvp"; reset(); };
+
+  window.addEventListener("keydown", (ev) => {
+    const k = ev.key.toLowerCase();
+    if (k === "z" && (ev.metaKey || ev.ctrlKey || !ev.metaKey)) {
+      if (ev.metaKey || ev.ctrlKey || k === "z") {
+        if (ev.key.toLowerCase() === "z" && !ev.metaKey && !ev.ctrlKey) {
+          // plain z also undoes for convenience
+        }
+      }
+    }
+    if ((ev.metaKey || ev.ctrlKey) && k === "z") { ev.preventDefault(); undo(); }
+    else if ((ev.metaKey || ev.ctrlKey) && k === "n") { ev.preventDefault(); reset(); }
+    else if ((ev.metaKey || ev.ctrlKey) && k === "1") { mode = "pvp"; reset(); }
+    else if ((ev.metaKey || ev.ctrlKey) && k === "2") { mode = "ai"; reset(); }
+    else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
+    else if (k === "n" && !ev.metaKey && !ev.ctrlKey) reset();
+  });
+
+  sync();
+})();
+  </script>
+</body>
+</html>
