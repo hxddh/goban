@@ -100,6 +100,12 @@
   let workerInitPromise = null;
   let workerRestarts = 0;
   let degradeToastShown = false;
+  /** Blob URL cached so a busy worker can be rebuilt instantly. */
+  let workerBlobUrl = null;
+  /** Jobs posted to the worker and not yet answered (stale ones included). */
+  let workerJobs = 0;
+  /** Times a move had to come from the capped main-thread fallback. */
+  let syncFallbacks = 0;
 
   const WORKER_SRC = ["js/core.js", "js/ai.js", "js/ai2.js", "js/ai-worker.js"];
 
@@ -118,6 +124,70 @@
     aiWorker = null;
     if (permanent) workerState = "failed";
     rejectAllPending("worker unavailable");
+  }
+
+  let pongResolve = null;
+
+  function attachWorkerHandlers(w) {
+    w.onmessage = (ev) => {
+      const data = ev.data || {};
+      if (data.pong) {
+        if (pongResolve) {
+          const r = pongResolve;
+          pongResolve = null;
+          r(!!data.engines);
+        }
+        return;
+      }
+      if (data.type === "error" && !data.id) {
+        // bootstrap failure: reject waiters NOW instead of leaving them to
+        // the safety timeout (the old gap behind "stuck thinking")
+        dropWorker(true);
+        return;
+      }
+      if (workerJobs > 0) workerJobs--;
+      const pending = aiPending.get(data.id);
+      if (!pending) return;
+      aiPending.delete(data.id);
+      if (data.error) pending.reject(new Error(data.error));
+      else pending.resolve(data.move || null);
+    };
+    w.onerror = () => {
+      dropWorker(false);
+      workerState = "init";
+      workerJobs = 0;
+      // one rebuild for transient faults, then give up for the session
+      if (workerRestarts++ < 1) workerInitPromise = initAiWorker();
+      else workerState = "failed";
+    };
+  }
+
+  /**
+   * The worker runs jobs serially with no cancellation: a stale job (hint
+   * discarded by a placed stone, request abandoned on new game, safety
+   * timeout) would keep it busy for a full budget and every later move
+   * would drop to the capped fallback — the "gets dumber mid-game" spiral.
+   * Rebuilding from the cached Blob URL clears the backlog instantly.
+   */
+  function restartWorker() {
+    if (!workerBlobUrl || workerState !== "ready") return;
+    if (aiWorker) {
+      try { aiWorker.terminate(); } catch (_) {}
+    }
+    // stale pendings resolve null; caller-side gen/histLen guards discard them
+    const pend = Array.from(aiPending.values());
+    aiPending.clear();
+    workerJobs = 0;
+    pend.forEach((p) => {
+      try { p.resolve(null); } catch (_) {}
+    });
+    try {
+      aiWorker = new Worker(workerBlobUrl);
+      attachWorkerHandlers(aiWorker);
+    } catch (_) {
+      aiWorker = null;
+      workerState = "failed";
+    }
   }
 
   async function initAiWorker() {
@@ -147,37 +217,9 @@
         src = texts.join("\n;\n");
       }
       const blob = new Blob([src], { type: "text/javascript" });
-      const w = new Worker(URL.createObjectURL(blob));
-      let pongResolve = null;
-      w.onmessage = (ev) => {
-        const data = ev.data || {};
-        if (data.pong) {
-          if (pongResolve) {
-            const r = pongResolve;
-            pongResolve = null;
-            r(!!data.engines);
-          }
-          return;
-        }
-        if (data.type === "error" && !data.id) {
-          // bootstrap failure: reject waiters NOW instead of leaving them to
-          // the safety timeout (the old gap behind "stuck thinking")
-          dropWorker(true);
-          return;
-        }
-        const pending = aiPending.get(data.id);
-        if (!pending) return;
-        aiPending.delete(data.id);
-        if (data.error) pending.reject(new Error(data.error));
-        else pending.resolve(data.move || null);
-      };
-      w.onerror = () => {
-        dropWorker(false);
-        workerState = "init";
-        // one rebuild for transient faults, then give up for the session
-        if (workerRestarts++ < 1) workerInitPromise = initAiWorker();
-        else workerState = "failed";
-      };
+      workerBlobUrl = URL.createObjectURL(blob);
+      const w = new Worker(workerBlobUrl);
+      attachWorkerHandlers(w);
       const healthy = await new Promise((resolve) => {
         const t = setTimeout(() => resolve(false), 1500);
         pongResolve = (ok) => {
@@ -202,8 +244,9 @@
     }
   }
 
-  /** Diagnostic hook for bug reports: current worker pipeline state. */
-  window.__gobanWorker = () => workerState;
+  /** Diagnostic hook for bug reports: state:jobs:fallbacks:restarts. */
+  window.__gobanWorker = () =>
+    workerState + ":jobs=" + workerJobs + ":fallbacks=" + syncFallbacks + ":restarts=" + workerRestarts;
 
   /**
    * Run AI off-thread when the Blob worker is healthy; otherwise a DEGRADED
@@ -232,6 +275,9 @@
         ]);
       } catch (_) {}
     }
+    // a busy worker at this point only holds STALE jobs (app flow is serial
+    // per intent) — rebuild so this request starts immediately
+    if (useWorker && workerState === "ready" && workerJobs > 0) restartWorker();
     const w = useWorker && workerState === "ready" ? aiWorker : null;
     const cappedMs = Math.min(600, timeMs);
     if (w) {
@@ -262,13 +308,18 @@
             timeMs: timeMs,
             think: think,
           });
+          workerJobs++;
         } catch (e) {
+          syncFallbacks++;
           finish(aiMoveSyncSafe(Object.assign({}, payload, { timeMs: cappedMs, think: think })));
           return;
         }
-        // safety net: budget + margin
+        // safety net: budget + margin. If it fires the worker is wedged on
+        // this job — rebuild so the NEXT move is full-strength again.
         setTimeout(() => {
           if (settled) return;
+          syncFallbacks++;
+          restartWorker();
           finish(
             aiMoveSyncSafe(Object.assign({}, payload, { timeMs: cappedMs, think: think }))
           );
@@ -285,6 +336,7 @@
       degradeToastShown = true;
       toast("后台计算不可用，已降级速算");
     }
+    if (useWorker) syncFallbacks++;
     return new Promise((resolve) => {
       // small delay lets the 思考中 status paint before the sync compute
       setTimeout(
