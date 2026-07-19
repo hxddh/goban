@@ -68,6 +68,28 @@
   let aiWorker = null;
   let aiReqId = 0;
   const aiPending = new Map();
+
+  /**
+   * aiMoveSync that can never throw: an exception here previously left the
+   * caller's promise unsettled — aiThinking stayed true forever.
+   */
+  function aiMoveSyncSafe(opts) {
+    try {
+      return aiMoveSync(opts);
+    } catch (e) {
+      try {
+        return Ai.aiMove({
+          board: (opts && opts.board) || board,
+          humanColor: (opts && opts.humanColor) || humanColor,
+          side: opts && opts.side,
+          difficulty: "normal",
+          timeMs: 200,
+        });
+      } catch (_) {
+        return null;
+      }
+    }
+  }
   /**
    * 'init' | 'ready' | 'failed'. The packaged WKWebView cannot load classic
    * worker scripts through the zero:// custom-scheme handler (workers bypass
@@ -106,15 +128,25 @@
       return;
     }
     try {
-      const texts = await Promise.all(
-        WORKER_SRC.map((path) =>
-          fetch(path).then((r) => {
-            if (!r.ok) throw new Error("fetch " + path + ": " + r.status);
-            return r.text();
-          })
-        )
-      );
-      const blob = new Blob([texts.join("\n;\n")], { type: "text/javascript" });
+      // Embedded source is primary: the zero:// scheme handler returns bare
+      // NSURLResponse objects that <script> accepts but spec-strict fetch()
+      // rejects — so the packaged app cannot fetch its own assets. worker-src.js
+      // (generated at build time) carries the sources in via a script tag.
+      let src = typeof window.GOBAN_WORKER_SRC === "string" && window.GOBAN_WORKER_SRC
+        ? window.GOBAN_WORKER_SRC
+        : null;
+      if (!src) {
+        const texts = await Promise.all(
+          WORKER_SRC.map((path) =>
+            fetch(path).then((r) => {
+              if (!r.ok) throw new Error("fetch " + path + ": " + r.status);
+              return r.text();
+            })
+          )
+        );
+        src = texts.join("\n;\n");
+      }
+      const blob = new Blob([src], { type: "text/javascript" });
       const w = new Worker(URL.createObjectURL(blob));
       let pongResolve = null;
       w.onmessage = (ev) => {
@@ -191,7 +223,14 @@
       typeof (opts && opts.timeMs) === "number" ? opts.timeMs : budgetForDiff(payload.difficulty);
     const think = (opts && opts.think) || thinkLevel;
     if (useWorker && workerState === "init" && workerInitPromise) {
-      try { await workerInitPromise; } catch (_) {}
+      // bounded wait: a fetch that neither resolves nor rejects must not
+      // wedge the game — after 3s we proceed degraded
+      try {
+        await Promise.race([
+          workerInitPromise,
+          new Promise((r) => setTimeout(r, 3000)),
+        ]);
+      } catch (_) {}
     }
     const w = useWorker && workerState === "ready" ? aiWorker : null;
     const cappedMs = Math.min(600, timeMs);
@@ -210,7 +249,7 @@
           // worker died mid-request: capped main-thread fallback
           reject: () =>
             finish(
-              aiMoveSync(Object.assign({}, payload, { timeMs: cappedMs, think: think }))
+              aiMoveSyncSafe(Object.assign({}, payload, { timeMs: cappedMs, think: think }))
             ),
         });
         try {
@@ -224,14 +263,14 @@
             think: think,
           });
         } catch (e) {
-          finish(aiMoveSync(Object.assign({}, payload, { timeMs: cappedMs, think: think })));
+          finish(aiMoveSyncSafe(Object.assign({}, payload, { timeMs: cappedMs, think: think })));
           return;
         }
         // safety net: budget + margin
         setTimeout(() => {
           if (settled) return;
           finish(
-            aiMoveSync(Object.assign({}, payload, { timeMs: cappedMs, think: think }))
+            aiMoveSyncSafe(Object.assign({}, payload, { timeMs: cappedMs, think: think }))
           );
         }, timeMs + 2000);
       });
@@ -250,7 +289,7 @@
       // small delay lets the 思考中 status paint before the sync compute
       setTimeout(
         () =>
-          resolve(aiMoveSync(Object.assign({}, payload, { timeMs: cappedMs, think: think }))),
+          resolve(aiMoveSyncSafe(Object.assign({}, payload, { timeMs: cappedMs, think: think }))),
         30
       );
     });
