@@ -87,6 +87,40 @@ const C2HARD = { eng: Ai2, difficulty: "hard", nodeBudget: 80000 };
   );
 }
 
+// Monotonicity guard: MORE search must not make C2 weaker. A forcing-extension
+// bug once made deep search lose to shallow (1-5) — extreme played worse than
+// hard. Deep (120k) must win the match vs shallow (40k) across both colors.
+{
+  const OPEN = [[[7, 7], [6, 8]], [[7, 7], [7, 8], [8, 7]], [[7, 7], [8, 8], [6, 6]]];
+  const deep = { eng: Ai2, difficulty: "hard", nodeBudget: 120000 };
+  const shallow = { eng: Ai2, difficulty: "hard", nodeBudget: 40000 };
+  function playOpening(cfgB, cfgW, opening) {
+    const b = Core.emptyBoard();
+    let turn = "b";
+    for (const [r, c] of opening) { b[r][c] = turn; turn = Core.opp(turn); }
+    let moves = opening.length;
+    while (moves < 160) {
+      const cfg = turn === "b" ? cfgB : cfgW;
+      const m = cfg.eng.aiMove({ board: b, side: turn, difficulty: cfg.difficulty, nodeBudget: cfg.nodeBudget });
+      if (!m || b[m.r][m.c]) return "ERR";
+      b[m.r][m.c] = turn;
+      moves++;
+      if (Core.findWin(b, m.r, m.c, turn)) return turn;
+      if (Core.boardFull(b)) return "draw";
+      turn = Core.opp(turn);
+    }
+    return "none";
+  }
+  let deepW = 0, shallowW = 0;
+  for (const op of OPEN) {
+    const g1 = playOpening(deep, shallow, op);
+    if (g1 === "b") deepW++; else if (g1 === "w") shallowW++;
+    const g2 = playOpening(shallow, deep, op);
+    if (g2 === "w") deepW++; else if (g2 === "b") shallowW++;
+  }
+  assert(deepW >= shallowW, "MONOTONIC: deep(120k) not weaker than shallow(40k) — deep " + deepW + " shallow " + shallowW);
+}
+
 // easy is randomized: require a win within 2 attempts per side (app routing:
 // hard = C2).
 {
