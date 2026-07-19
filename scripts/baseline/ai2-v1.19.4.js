@@ -294,7 +294,7 @@
     const h = side === W ? (hash ^ zob[ZSIDE]) >>> 0 : hash;
     const ti = ttIdx(h);
     let ttMove = -1;
-    if (!ABL.noTT && ttGenA[ti] === ttGen && ttKey[ti] === (h | 0)) {
+    if (ttGenA[ti] === ttGen && ttKey[ti] === (h | 0)) {
       ttMove = ttMv[ti];
       if (ttDep[ti] >= depth) {
         const sc = ttSc[ti],
@@ -321,13 +321,7 @@
         val = WINV - ply;
       } else {
         // forcing extension: creating a four keeps the line alive one deeper
-        // Forcing extension REMOVED: extending +1 on four-making moves let the
-        // extended sub-depth be stored/probed inconsistently against the TT,
-        // so deeper search grafted inflated results and played four-spam that
-        // ceded initiative (deep LOST to shallow 1-5). Tactics are already
-        // handled by the C1 cascade before this search. ext is kept as a
-        // toggle only for the diagnostic ablation harness.
-        const ext = ABL.forceExt && extLeft > 0 && four[side] > f4Before ? 1 : 0;
+        const ext = extLeft > 0 && four[side] > f4Before ? 1 : 0;
         val = -negamax(depth - 1 + ext, -beta, -alpha, opp, ply + 1, extLeft - ext);
       }
       unmake(idx, side);
@@ -354,7 +348,7 @@
       let fl = EX;
       if (best <= a0) fl = UP;
       else if (best >= beta) fl = LO;
-      if (!ABL.noTT && !(ttGenA[ti] === ttGen && ttDep[ti] > depth)) {
+      if (!(ttGenA[ti] === ttGen && ttDep[ti] > depth)) {
         ttGenA[ti] = ttGen;
         ttKey[ti] = h | 0;
         ttDep[ti] = depth;
@@ -400,7 +394,7 @@
           unmake(idx, me);
           return idx; // immediate five
         }
-        const ext = ABL.forceExt && four[me] > f4Before ? 1 : 0;
+        const ext = four[me] > f4Before ? 1 : 0;
         val = -negamax(depth - 1 + ext, -Infinity, -alpha, opp, 1, 12 - ext);
         unmake(idx, me);
         if (hardStop) {
@@ -455,9 +449,6 @@
     return out;
   }
 
-  /** Diagnostic ablation toggles (Step-1 root-cause; default = no effect). */
-  const ABL = { cascadeEvals: 0, forceExt: false, noTT: false };
-
   let lastStage = "";
 
   function aiMove(opts) {
@@ -471,9 +462,6 @@
     const deadline = prof.budgetMs > 0 ? nowMs() + prof.budgetMs : 0;
     // deterministic mode: C1 stages get eval allowances scaled off nodeBudget
     const detEvals = prof.nodeBudget > 0 ? prof.nodeBudget : 0;
-    // cascade eval allowance: normally tracks nodeBudget, but ablation can pin
-    // it so only the alpha-beta search depth scales (isolates eval vs cascade)
-    const cascEvals = ABL.cascadeEvals > 0 ? ABL.cascadeEvals : detEvals;
     lastStage = "";
 
     resetFrom(board2d);
@@ -533,7 +521,7 @@
       C1.cloneBoard(board2d),
       me2,
       prof.vcfDepth,
-      c1Slice(deadline, 0.3, cascEvals ? cascEvals * 0.2 : 0)
+      c1Slice(deadline, 0.3, detEvals ? detEvals * 0.2 : 0)
     );
     if (vcf) {
       lastStage = "vcf";
@@ -542,7 +530,7 @@
 
     // 5) deny opponent VCF
     {
-      const dctx = c1Slice(deadline, 0.25, cascEvals ? cascEvals * 0.15 : 0);
+      const dctx = c1Slice(deadline, 0.25, detEvals ? detEvals * 0.15 : 0);
       const ov = C1.findVCF(C1.cloneBoard(board2d), them2, 18, dctx);
       if (ov) {
         const defs = C1.candidateMoves(board2d, 24, 2, me2);
@@ -580,7 +568,7 @@
       C1.cloneBoard(board2d),
       me2,
       prof.vctDepth,
-      c1Slice(deadline, 0.35, cascEvals ? cascEvals * 0.2 : 0)
+      c1Slice(deadline, 0.35, detEvals ? detEvals * 0.2 : 0)
     );
     if (vct) {
       lastStage = "vct";
@@ -603,11 +591,6 @@
     aiMove: aiMove,
     lastStage: function () {
       return lastStage;
-    },
-    _setAblate: function (o) {
-      ABL.cascadeEvals = o && typeof o.cascadeEvals === "number" ? o.cascadeEvals : 0;
-      ABL.forceExt = !!(o && o.forceExt);
-      ABL.noTT = !!(o && o.noTT);
     },
     _debug: {
       resetFrom: resetFrom,
