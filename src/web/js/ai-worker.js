@@ -3,7 +3,7 @@
  */
 /* global GobanAi */
 try {
-  importScripts("core.js", "ai.js");
+  importScripts("core.js", "ai.js", "ai2.js");
 } catch (e) {
   self.postMessage({ type: "error", error: String(e && e.message ? e.message : e) });
 }
@@ -20,12 +20,18 @@ self.onmessage = function (ev) {
     const think = data.think || "normal";
     let timeMs = data.timeMs;
     if (typeof timeMs !== "number") {
-      if (difficulty === "hard") {
+      if (difficulty === "extreme") {
+        timeMs = think === "fast" ? 2500 : think === "deep" ? 8000 : 5000;
+      } else if (difficulty === "hard") {
         timeMs = think === "fast" ? 800 : think === "deep" ? 3500 : 2000;
       } else if (difficulty === "normal") timeMs = 250;
       else timeMs = 30;
     }
-    const move = self.GobanAi.aiMove({
+    const engine =
+      (difficulty === "hard" || difficulty === "extreme") && self.GobanAi2
+        ? self.GobanAi2
+        : self.GobanAi;
+    const move = engine.aiMove({
       board: data.board,
       humanColor: data.humanColor,
       side: data.side,

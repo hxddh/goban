@@ -22,11 +22,13 @@ function load(rel) {
 load("src/web/js/core.js");
 load("src/web/js/sgf.js");
 load("src/web/js/ai.js");
+load("src/web/js/ai2.js");
 load("src/web/js/state.js");
 
 const Core = ctx.GobanCore;
 const Sgf = ctx.GobanSgf;
 const Ai = ctx.GobanAi;
+const Ai2 = ctx.GobanAi2;
 const State = ctx.GobanState;
 
 let failed = 0;
@@ -287,6 +289,25 @@ load("src/web/js/draw.js");
   b2[2][2] = "w";
   const f = Ai.forcedMove(b2, "w");
   assert(f && f.r === 7 && (f.c === 4 || f.c === 8), "live3 still forced " + JSON.stringify(f));
+}
+
+// C2: exports, block open four, take win, center opening
+{
+  assert(Ai2 && typeof Ai2.aiMove === "function", "GobanAi2 exports aiMove");
+  const b = Core.emptyBoard();
+  for (let c = 0; c < 4; c++) b[7][c] = "b";
+  b[0][0] = "w";
+  b[1][0] = "w";
+  const blk = Ai2.aiMove({ board: b, side: "w", difficulty: "hard", timeMs: 300 });
+  assert(blk && blk.r === 7 && blk.c === 4, "C2 blocks four " + JSON.stringify(blk));
+  const b2 = Core.emptyBoard();
+  for (let c = 0; c < 4; c++) b2[5][c] = "w";
+  b2[0][0] = "b";
+  const win = Ai2.aiMove({ board: b2, side: "w", difficulty: "hard", timeMs: 100 });
+  assert(win && win.r === 5 && win.c === 4, "C2 takes win " + JSON.stringify(win));
+  const b3 = Core.emptyBoard();
+  const open = Ai2.aiMove({ board: b3, side: "b", difficulty: "extreme", timeMs: 50 });
+  assert(open && open.r === 7 && open.c === 7, "C2 opening center " + JSON.stringify(open));
 }
 
 // findVCF exists

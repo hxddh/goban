@@ -1,11 +1,11 @@
 /**
- * AI strength regression (self-play). Guards against the v1.17 failure mode
- * where hard-vs-normal locked into mutual pre-blocking and drew a full board.
+ * AI strength regression (self-play). Guards the v1.17 failure mode (mutual
+ * pre-blocking full-board draws) and the C2 class gap over C1.
  * Run: node scripts/test-strength.mjs   (~20-60s; wired into package.sh)
  *
- * hard-vs-normal games use deterministic node budgets (opts.nodeBudget =
- * analyzePlace count) so outcomes are bit-reproducible regardless of CPU
- * load. easy games are inherently random and keep retry semantics.
+ * hard-vs-normal games use deterministic node budgets (opts.nodeBudget) so
+ * outcomes are bit-reproducible regardless of CPU load. easy games are
+ * inherently random and keep retry semantics.
  */
 import fs from "fs";
 import path from "path";
@@ -14,11 +14,11 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
-const ctx = { console, performance: { now: () => Date.now() } };
+const ctx = { console, Date, performance: { now: () => Date.now() } };
 ctx.globalThis = ctx;
 ctx.window = ctx;
 vm.createContext(ctx);
-for (const f of ["core.js", "ai.js"]) {
+for (const f of ["core.js", "ai.js", "ai2.js"]) {
   vm.runInContext(
     fs.readFileSync(path.join(root, "src/web/js", f), "utf8"),
     ctx,
@@ -27,18 +27,21 @@ for (const f of ["core.js", "ai.js"]) {
 }
 const Core = ctx.GobanCore;
 const Ai = ctx.GobanAi;
+const Ai2 = ctx.GobanAi2;
 
-function playGame(diffB, diffW, msB, msW, maxMoves, nodesB, nodesW) {
+/** sideCfg: { eng, difficulty, timeMs?, nodeBudget? } */
+function play(cfgB, cfgW, maxMoves) {
   const b = Core.emptyBoard();
   let turn = "b";
   let moves = 0;
   while (moves < maxMoves) {
-    const m = Ai.aiMove({
+    const cfg = turn === "b" ? cfgB : cfgW;
+    const m = cfg.eng.aiMove({
       board: b,
       side: turn,
-      difficulty: turn === "b" ? diffB : diffW,
-      timeMs: turn === "b" ? msB : msW,
-      nodeBudget: turn === "b" ? nodesB : nodesW,
+      difficulty: cfg.difficulty,
+      timeMs: cfg.timeMs,
+      nodeBudget: cfg.nodeBudget,
     });
     if (!m || b[m.r][m.c]) return { winner: "ERR", moves };
     b[m.r][m.c] = turn;
@@ -60,34 +63,46 @@ function assert(cond, msg) {
   }
 }
 
-// Deterministic gate: hard(B, 80k evals) must beat normal(W, 8k evals).
-// Bit-reproducible — a failure here is a real engine regression.
+const C1HARD = { eng: Ai, difficulty: "hard", nodeBudget: 80000 };
+const C1NORM = { eng: Ai, difficulty: "normal", nodeBudget: 8000 };
+const C2HARD = { eng: Ai2, difficulty: "hard", nodeBudget: 80000 };
+
+// Deterministic C1 gate: normal-difficulty engine must stay honest.
 {
-  const g = playGame("hard", "normal", 0, 0, 100, 80000, 8000);
-  assert(g.winner === "b", "DET hard(B,80k) beats normal(W,8k) — got " + g.winner + "/" + g.moves);
+  const g = play(C1HARD, C1NORM, 100);
+  assert(g.winner === "b", "DET C1hard(B,80k) beats C1normal(W,8k) — got " + g.winner + "/" + g.moves);
 }
 
-// White-side benchmark (deterministic): freestyle black's first-mover edge
-// means C1-hard cannot hold same-family black; C2 should flip this line to
-// a non-loss. Informational until then.
+// Deterministic C2 gates — the class gap over C1.
 {
-  const g = playGame("normal", "hard", 0, 0, 120, 8000, 80000);
-  console.log("info: DET hard(W,80k) vs normal(B,8k): " + g.winner + "/" + g.moves + " (C2 target: non-loss)");
+  const g = play(C2HARD, C1NORM, 100);
+  assert(g.winner === "b", "DET C2hard(B,80k) beats normal(W,8k) — got " + g.winner + "/" + g.moves);
+}
+{
+  // The line C1 could never hold: C2 as white must not lose to normal-black.
+  const g = play(C1NORM, C2HARD, 120);
+  assert(
+    g.winner !== "b" && g.winner !== "ERR",
+    "DET C2hard(W,80k) holds normal(B,8k) — got " + g.winner + "/" + g.moves
+  );
 }
 
-// easy is randomized: require a win within 2 attempts per side.
+// easy is randomized: require a win within 2 attempts per side (app routing:
+// hard = C2).
 {
-  const series = (label, diffB, diffW, msB, msW, want) => {
+  const series = (label, cfgB, cfgW, want) => {
     const games = [];
     for (let i = 0; i < 2; i++) {
-      const g = playGame(diffB, diffW, msB, msW, 100);
+      const g = play(cfgB, cfgW, 100);
       games.push(g.winner + "/" + g.moves);
       if (g.winner === want) return assert(true, label + " — got " + games.join(" "));
     }
     assert(false, label + " — got " + games.join(" "));
   };
-  series("hard(B) beats easy(W) within 2 games", "hard", "easy", 600, 30, "b");
-  series("hard(W) beats easy(B) within 2 games", "easy", "hard", 30, 600, "w");
+  const EASY = { eng: Ai, difficulty: "easy", timeMs: 30 };
+  const HARD = { eng: Ai2, difficulty: "hard", timeMs: 600 };
+  series("hard(B) beats easy(W) within 2 games", HARD, EASY, "b");
+  series("hard(W) beats easy(B) within 2 games", EASY, HARD, "w");
 }
 
 if (failed) {

@@ -33,17 +33,29 @@
     return 2000;
   }
 
+  function extremeTimeMs() {
+    if (thinkLevel === "fast") return 2500;
+    if (thinkLevel === "deep") return 8000;
+    return 5000;
+  }
+
   function budgetForDiff(diff) {
+    if (diff === "extreme") return extremeTimeMs();
     if (diff === "hard") return hardTimeMs();
     if (diff === "normal") return 250;
     return 30;
+  }
+
+  /** hard/extreme run the C2 engine; normal/easy keep C1. */
+  function engineFor(diff) {
+    return (diff === "hard" || diff === "extreme") && window.GobanAi2 ? window.GobanAi2 : Ai;
   }
 
   function aiMoveSync(opts) {
     const diff = (opts && opts.difficulty) || difficulty;
     const timeMs =
       typeof (opts && opts.timeMs) === "number" ? opts.timeMs : budgetForDiff(diff);
-    return Ai.aiMove({
+    return engineFor(diff).aiMove({
       board: (opts && opts.board) || board,
       humanColor: (opts && opts.humanColor) || humanColor,
       side: opts && opts.side,
@@ -100,8 +112,8 @@
       side: opts && opts.side,
       difficulty: (opts && opts.difficulty) || difficulty,
     };
-    // normal/hard both prefer worker (C1 can be heavy)
-    const useWorker = payload.difficulty === "hard" || payload.difficulty === "normal";
+    // anything above easy prefers the worker (C1/C2 can be heavy)
+    const useWorker = payload.difficulty !== "easy";
     const timeMs =
       typeof (opts && opts.timeMs) === "number" ? opts.timeMs : budgetForDiff(payload.difficulty);
     const think = (opts && opts.think) || thinkLevel;
@@ -526,13 +538,15 @@
     const liveBoard = boardAfter(history.length);
     // pvp has no difficulty knob visible — always hint at full strength there
     const hintDiff = mode === "pvp" ? "hard" : difficulty === "easy" ? "normal" : difficulty;
+    // extreme hints would take 5s+; hard-level hints are plenty
+    const hintDiff2 = hintDiff === "extreme" ? "hard" : hintDiff;
     try {
       const m = await aiMoveAsync({
         board: liveBoard,
         side: side,
-        difficulty: hintDiff,
+        difficulty: hintDiff2,
         think: thinkLevel,
-        timeMs: budgetForDiff(hintDiff),
+        timeMs: budgetForDiff(hintDiff2),
       });
       if (gen !== gameGen || histLen !== history.length || !isLive()) {
         // discarded late result (new game / stone placed / browsing replay)
@@ -598,7 +612,10 @@
       if (!raw) return;
       const s = JSON.parse(raw);
       if (s.mode === "ai" || s.mode === "pvp") mode = s.mode;
-      if (s.difficulty === "easy" || s.difficulty === "normal" || s.difficulty === "hard") difficulty = s.difficulty;
+      if (
+        s.difficulty === "easy" || s.difficulty === "normal" ||
+        s.difficulty === "hard" || s.difficulty === "extreme"
+      ) difficulty = s.difficulty;
       if (s.humanColor === "b" || s.humanColor === "w") humanColor = s.humanColor;
       if (typeof s.soundOn === "boolean") soundOn = s.soundOn;
       if (s.themeId && THEMES[s.themeId]) themeId = s.themeId;
@@ -859,7 +876,10 @@
     sync();
     // Perceived pacing: instant forced replies read as "didn't think" and
     // jolt the rhythm — keep a small floor even when compute is fast.
-    const delay = difficulty === "hard" ? 320 : difficulty === "normal" ? 240 : 160;
+    const delay =
+      difficulty === "hard" || difficulty === "extreme"
+        ? 320
+        : difficulty === "normal" ? 240 : 160;
     const t0 = performance.now();
     aiMoveAsync({
       board: boardAfter(history.length),
@@ -1023,7 +1043,9 @@
     const thinkField = document.getElementById("think-field");
     const colorField = document.getElementById("color-field");
     if (diffField) diffField.hidden = !aiOnly;
-    if (thinkField) thinkField.hidden = !(aiOnly && difficulty === "hard");
+    if (thinkField) {
+      thinkField.hidden = !(aiOnly && (difficulty === "hard" || difficulty === "extreme"));
+    }
     if (colorField) colorField.hidden = !aiOnly;
     const sbOn = document.getElementById("opt-sound");
     if (sbOn) {
@@ -1196,7 +1218,7 @@
     difficulty = b.dataset.diff;
     saveSettings();
     syncSettingsUI();
-    toast("难度：" + ({ easy: "简单", normal: "普通", hard: "困难" })[difficulty]);
+    toast("难度：" + ({ easy: "简单", normal: "普通", hard: "困难", extreme: "极难" })[difficulty]);
   };
   const thinkSeg = document.getElementById("think-seg");
   if (thinkSeg) {

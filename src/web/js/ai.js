@@ -1204,5 +1204,9 @@
     lastStage: function () {
       return lastStage;
     },
+    /** Current analyzePlace tick — lets callers build deterministic sub-budgets. */
+    ticks: function () {
+      return evalTick;
+    },
   };
 })(typeof window !== "undefined" ? window : globalThis);
