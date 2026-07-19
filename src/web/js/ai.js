@@ -108,8 +108,17 @@
   function nowMs() {
     return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
   }
+  /** Global analyzePlace counter — the deterministic budget dimension. */
+  let evalTick = 0;
+  /**
+   * ctx: { t1: wall-clock deadline (0=off), e1: evalTick deadline (0=off) }.
+   * Node budgets (e1) make games reproducible regardless of CPU load.
+   */
   function timedOut(ctx) {
-    return ctx && ctx.t1 > 0 && nowMs() >= ctx.t1;
+    if (!ctx) return false;
+    if (ctx.t1 > 0 && nowMs() >= ctx.t1) return true;
+    if (ctx.e1 > 0 && evalTick >= ctx.e1) return true;
+    return false;
   }
   function near(board, r, c, d) {
     d = d || 2;
@@ -257,6 +266,7 @@
    * Does not leave the stone on the board.
    */
   function analyzePlace(board, r, c, color) {
+    evalTick++;
     const empty = {
       score: -1e15,
       tier: 0,
@@ -984,12 +994,15 @@
     const hard = difficulty === "hard";
     const normal = difficulty === "normal";
     let budget;
-    if (typeof opts.timeMs === "number") budget = opts.timeMs;
+    if (typeof opts.nodeBudget === "number" && opts.nodeBudget > 0) budget = 0;
+    else if (typeof opts.timeMs === "number") budget = opts.timeMs;
     else if (hard) budget = opts.think === "fast" ? 800 : opts.think === "deep" ? 3500 : 2000;
     else if (normal) budget = 250;
     else budget = 0;
     return {
       budgetMs: budget,
+      nodeBudget:
+        typeof opts.nodeBudget === "number" && opts.nodeBudget > 0 ? opts.nodeBudget : 0,
       vcfDepth: hard ? 24 : normal ? 12 : 0,
       // VCT kept shallow on purpose: long speculative chains are where the
       // bounded defense generation goes unsound, and lost real games. Deep
@@ -1007,16 +1020,26 @@
       opts.side === "b" || opts.side === "w" ? opts.side : Core.opp(opts.humanColor || "b");
     const them = Core.opp(me);
     const prof = profileFor(difficulty, opts || {});
-    const ctx = { t1: prof.budgetMs > 0 ? nowMs() + prof.budgetMs : 0 };
+    const ctx = {
+      t1: prof.budgetMs > 0 ? nowMs() + prof.budgetMs : 0,
+      e1: prof.nodeBudget > 0 ? evalTick + prof.nodeBudget : 0,
+    };
     /**
-     * Budget slice: sub-deadline at `frac` of the REMAINING budget. Without
-     * this, VCT alone could burn the whole budget and starve searchRoot.
+     * Budget slice: sub-deadline at `frac` of the REMAINING budget (both
+     * dimensions). Without this, VCT alone could burn the whole budget and
+     * starve searchRoot.
      */
     const stageCtx = (frac) => {
-      if (!ctx.t1) return ctx;
-      const now = nowMs();
-      if (now >= ctx.t1) return ctx;
-      return { t1: now + (ctx.t1 - now) * frac };
+      const out = { t1: 0, e1: 0 };
+      if (ctx.t1) {
+        const now = nowMs();
+        out.t1 = now >= ctx.t1 ? ctx.t1 : now + (ctx.t1 - now) * frac;
+      }
+      if (ctx.e1) {
+        out.e1 = evalTick >= ctx.e1 ? ctx.e1 : Math.floor(evalTick + (ctx.e1 - evalTick) * frac);
+      }
+      if (!out.t1 && !out.e1) return ctx;
+      return out;
     };
     ttReset();
     lastStage = "";
@@ -1180,6 +1203,10 @@
     },
     lastStage: function () {
       return lastStage;
+    },
+    /** Current analyzePlace tick — lets callers build deterministic sub-budgets. */
+    ticks: function () {
+      return evalTick;
     },
   };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -82,7 +82,8 @@
             <div class="pill" id="diff-seg" role="group" aria-label="难度">
               <button type="button" data-diff="easy" title="随机贪心">简</button>
               <button type="button" data-diff="normal" class="active" title="棋型 + 浅搜索">普</button>
-              <button type="button" data-diff="hard" title="P0：棋型表 + 复合威胁 + VCT">难</button>
+              <button type="button" data-diff="hard" title="C2 引擎：深搜索 + 战术级联">难</button>
+              <button type="button" data-diff="extreme" title="C2 引擎 · 5–8 秒深算">极</button>
             </div>
           </div>
           <div class="setting-row" id="think-field" hidden>
@@ -137,6 +138,7 @@
           <h2 class="side-h">棋谱</h2>
           <span class="side-h-meta num" id="replay-pos">0 / 0</span>
         </div>
+        <div class="move-list" id="move-list" aria-label="手数列表"></div>
         <div class="replay-bar" id="replay-seg">
           <button type="button" id="rep-start" title="开局 (Home)">«</button>
           <button type="button" id="rep-prev" title="上一手 (←)">‹</button>
@@ -200,6 +202,7 @@
   <script src="js/core.js"></script>
   <script src="js/sgf.js"></script>
   <script src="js/ai.js"></script>
+  <script src="js/ai2.js"></script>
   <script src="js/host.js"></script>
   <script src="js/state.js"></script>
   <script src="js/draw.js"></script>

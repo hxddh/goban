@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   release:
@@ -35,3 +36,8 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes-file "$notes"
+      - name: chain macOS build + asset upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh workflow run build-macos.yml --ref "$GITHUB_REF_NAME" -f release_tag="$TAG"
