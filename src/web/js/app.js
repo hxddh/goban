@@ -103,8 +103,8 @@
     // normal/hard both prefer worker (C1 can be heavy)
     const useWorker = payload.difficulty === "hard" || payload.difficulty === "normal";
     const timeMs =
-      typeof payload.timeMs === "number" ? payload.timeMs : budgetForDiff(payload.difficulty);
-    const think = payload.think || thinkLevel;
+      typeof (opts && opts.timeMs) === "number" ? opts.timeMs : budgetForDiff(payload.difficulty);
+    const think = (opts && opts.think) || thinkLevel;
     const w = useWorker ? getAiWorker() : null;
     if (w) {
       return new Promise((resolve) => {
@@ -118,8 +118,14 @@
         };
         aiPending.set(id, {
           resolve: (move) => finish(move),
+          // Worker died: fall back on the main thread with a capped budget —
+          // a full hard/deep budget here would freeze the UI for seconds.
           reject: () =>
-            finish(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs, think: think }))),
+            finish(
+              aiMoveSync(
+                Object.assign({}, payload, { timeMs: Math.min(200, timeMs), think: think })
+              )
+            ),
         });
         try {
           w.postMessage({
@@ -367,6 +373,8 @@
   let audioCtx = null;
   /** @type {'wood' | 'night' | 'day' | 'notebook'} */
   let themeId = "wood";
+  /** Board coordinate labels (A-O / 15-1). */
+  let showCoords = false;
   /** @type {{r:number,c:number,t0:number}|null} */
   let placeAnim = null;
   /** After SGF import: no auto-AI until「续下」or human places. */
@@ -418,6 +426,7 @@
     okBtn.textContent = okLabel;
     cancelBtn.textContent = cancelLabel;
     modal.classList.add("show");
+    setTimeout(() => okBtn.focus(), 0);
     return new Promise((resolve) => {
       confirmResolver = resolve;
     });
@@ -513,17 +522,20 @@
     sync();
     const side = history.length % 2 === 0 ? "b" : "w";
     const gen = gameGen;
+    const histLen = history.length;
     const liveBoard = boardAfter(history.length);
+    // pvp has no difficulty knob visible — always hint at full strength there
+    const hintDiff = mode === "pvp" ? "hard" : difficulty === "easy" ? "normal" : difficulty;
     try {
       const m = await aiMoveAsync({
         board: liveBoard,
         side: side,
-        difficulty: difficulty === "easy" ? "normal" : difficulty,
+        difficulty: hintDiff,
         think: thinkLevel,
-        timeMs: budgetForDiff(difficulty === "easy" ? "normal" : difficulty),
+        timeMs: budgetForDiff(hintDiff),
       });
-      if (gen !== gameGen) {
-        // discarded late result
+      if (gen !== gameGen || histLen !== history.length || !isLive()) {
+        // discarded late result (new game / stone placed / browsing replay)
       } else if (!m) {
         toast("没有可用提示");
         hintCell = null;
@@ -542,7 +554,6 @@
     }
   }
 
-  /** SGF: col a–o left→right; row a–o bottom→top (Go FF4). */
 
 
 
@@ -594,13 +605,14 @@
       if (s.thinkLevel === "fast" || s.thinkLevel === "normal" || s.thinkLevel === "deep") {
         thinkLevel = s.thinkLevel;
       }
+      if (typeof s.showCoords === "boolean") showCoords = s.showCoords;
     } catch (_) {}
   }
 
   function saveSettings() {
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel })
+      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel, showCoords })
     );
   }
 
@@ -742,10 +754,15 @@
       // Resume only with a move list — board-only snapshots cannot place safely.
       const loadedHistory = Array.isArray(s.history) ? s.history : [];
       if (!loadedHistory.length) return false;
-      // Validate move coords
+      // Validate move coords (strict: `undefined < 0` is false, so type-check too)
       for (let i = 0; i < loadedHistory.length; i++) {
         const p = loadedHistory[i];
-        if (!p || p.r < 0 || p.r >= SIZE || p.c < 0 || p.c >= SIZE) return false;
+        if (
+          !p ||
+          !Number.isInteger(p.r) ||
+          !Number.isInteger(p.c) ||
+          p.r < 0 || p.r >= SIZE || p.c < 0 || p.c >= SIZE
+        ) return false;
       }
       history = loadedHistory;
       mode = s.mode === "pvp" ? "pvp" : "ai";
@@ -783,12 +800,25 @@
     }
   }
 
+  let panelAnimUntil = 0;
+  let panelAnimActive = false;
+
   function setPanelOpen(open) {
     appEl.classList.toggle("panel-open", open);
     appEl.classList.toggle("scrim-on", open && window.innerWidth < 900);
     Host.storageSet(PANEL_KEY, open ? "1" : "0");
-    requestAnimationFrame(() => { resizeCanvas(); draw(); });
-    setTimeout(() => { resizeCanvas(); draw(); }, 220);
+    // Follow the .28s CSS layout transition frame-by-frame, then settle —
+    // a single mid-transition resize left the canvas at a stale size.
+    panelAnimUntil = performance.now() + 340;
+    if (panelAnimActive) return;
+    panelAnimActive = true;
+    const tick = () => {
+      resizeCanvas();
+      draw();
+      if (performance.now() < panelAnimUntil) requestAnimationFrame(tick);
+      else panelAnimActive = false;
+    };
+    requestAnimationFrame(tick);
   }
 
   function togglePanel() {
@@ -805,6 +835,7 @@
     winFlashUntil: winFlashUntil,
     hover: hoverCell,
     hint: hintCell,
+    coords: showCoords,
     clearPlaceAnim: () => { placeAnim = null; },
   }));
 
@@ -826,7 +857,9 @@
     clearHint();
     const gen = gameGen;
     sync();
-    const delay = difficulty === "hard" ? 30 : difficulty === "normal" ? 70 : 55;
+    // Perceived pacing: instant forced replies read as "didn't think" and
+    // jolt the rhythm — keep a small floor even when compute is fast.
+    const delay = difficulty === "hard" ? 320 : difficulty === "normal" ? 240 : 160;
     const t0 = performance.now();
     aiMoveAsync({
       board: boardAfter(history.length),
@@ -857,8 +890,13 @@
   function place(r, c, fromAi) {
     if (result !== "play") return;
     if (!isLive()) {
-      if (!fromAi) toast("请先「回到最新一手」再落子");
-      return;
+      if (!fromAi) {
+        toast("请先「回到最新一手」再落子");
+        return;
+      }
+      // AI reply landed while the user browses the replay: snap to live and
+      // apply it — dropping the move would deadlock the game (AI never re-fires).
+      viewIndex = history.length;
     }
     // live board must match full history
     board = boardAfter(history.length);
@@ -992,6 +1030,11 @@
       sbOn.classList.toggle("active", soundOn);
       sbOn.setAttribute("aria-pressed", soundOn ? "true" : "false");
     }
+    const cdOn = document.getElementById("opt-coords");
+    if (cdOn) {
+      cdOn.classList.toggle("active", showCoords);
+      cdOn.setAttribute("aria-pressed", showCoords ? "true" : "false");
+    }
   }
 
   function sync() {
@@ -1050,6 +1093,9 @@
     blackTurn.hidden = !(showTurn && turn === "b");
     whiteTurn.hidden = !(showTurn && turn === "w");
 
+    const thinkDot = document.getElementById("think-dot");
+    if (thinkDot) thinkDot.hidden = !(aiThinking && result === "play");
+
     status.classList.toggle("win", live && (result === "b" || result === "w"));
     status.classList.toggle("thinking", live && result === "play" && aiThinking);
     status.classList.toggle("replay", !live);
@@ -1087,7 +1133,17 @@
     if (!cell) return;
     place(cell.r, cell.c, false);
   });
-  canvas.addEventListener("mousemove", (ev) => { setHoverFromEvent(ev); });
+  let hoverRafId = 0;
+  let lastHoverEvt = null;
+  canvas.addEventListener("mousemove", (ev) => {
+    // coalesce high-frequency mousemove into one repaint per frame
+    lastHoverEvt = { clientX: ev.clientX, clientY: ev.clientY };
+    if (hoverRafId) return;
+    hoverRafId = requestAnimationFrame(() => {
+      hoverRafId = 0;
+      if (lastHoverEvt) setHoverFromEvent(lastHoverEvt);
+    });
+  });
   canvas.addEventListener("mouseleave", () => { clearHover(); });
   canvas.style.cursor = "crosshair";
 
@@ -1173,6 +1229,16 @@
     if (soundOn) playMoveSound("b");
     toast(soundOn ? "音效已开" : "音效已关");
   };
+  const coordsBtn = document.getElementById("opt-coords");
+  if (coordsBtn) {
+    coordsBtn.onclick = () => {
+      showCoords = !showCoords;
+      saveSettings();
+      syncSettingsUI();
+      draw();
+      toast(showCoords ? "坐标已开" : "坐标已关");
+    };
+  }
   document.getElementById("color-seg").onclick = async (ev) => {
     const b = ev.target.closest("button[data-human]");
     if (!b) return;
@@ -1209,6 +1275,13 @@
     }
     if (confirmModal.classList.contains("show")) {
       if (ev.key === "Enter") { ev.preventDefault(); finishConfirm(true); }
+      else if (ev.key === "Tab") {
+        // keep focus inside the dialog, toggling between the two buttons
+        ev.preventDefault();
+        const ok = document.getElementById("confirm-ok");
+        const ca = document.getElementById("confirm-cancel");
+        (document.activeElement === ok ? ca : ok).focus();
+      }
       return;
     }
     // Ignore game shortcuts while help is open (Esc closes it above)
@@ -1308,6 +1381,9 @@
     originalStartedAt = startedAt;
     elapsedBaseMs = 0;
   }
+
+  // Pre-warm the AI worker so the first computer reply has no cold-start hitch
+  if (mode === "ai" && difficulty !== "easy") getAiWorker();
 
   resizeCanvas();
   sync();

@@ -6,15 +6,15 @@
   const Core = global.GobanCore;
   const SIZE = Core.SIZE;
 
+  /** FF4 point: first letter = column, second = row, both from top-left ("aa"). */
   function sgfCoord(r, c) {
-    return String.fromCharCode(97 + c) + String.fromCharCode(97 + (SIZE - 1 - r));
+    return String.fromCharCode(97 + c) + String.fromCharCode(97 + r);
   }
 
   function parseSgfCoord(s) {
     if (!s || s.length < 2) return null;
     const c = s.charCodeAt(0) - 97;
-    const rowFromBottom = s.charCodeAt(1) - 97;
-    const r = SIZE - 1 - rowFromBottom;
+    const r = s.charCodeAt(1) - 97;
     if (r < 0 || r >= SIZE || c < 0 || c >= SIZE) return null;
     return { r, c };
   }
@@ -41,7 +41,7 @@
     let s =
       "(;FF[4]GM[4]SZ[" +
       SIZE +
-      "]AP[Goban:1.17]DT[" +
+      "]AP[Goban:1.18]DT[" +
       dtStr +
       "]RE[" +
       re +
@@ -68,9 +68,12 @@
   function parseSgf(text) {
     if (text == null) return { history: [], error: "没有棋谱内容" };
     if (typeof text !== "string") return { history: [], error: "棋谱格式无效" };
-    const src = text.replace(/\uFEFF/g, "").replace(/\s+/g, " ").trim();
+    let src = text.replace(/\uFEFF/g, "").replace(/\s+/g, " ").trim();
     if (!src) return { history: [], error: "棋谱为空" };
     if (src.length > 200000) return { history: [], error: "棋谱过大（上限约 200KB）" };
+    // Drop comment-style text properties first — their free text can contain
+    // move lookalikes such as "B[ii]" (escaped \] respected).
+    src = src.replace(/(^|[^A-Za-z])(?:GC|C)\[(?:\\[\s\S]|[^\]\\])*\]/g, "$1 ");
     if (!/[;\s]*[BW]\s*\[/i.test(src) && !/\(/.test(src)) {
       return { history: [], error: "不像 SGF 文件（未找到 B[]/W[] 落子）" };
     }
@@ -80,7 +83,9 @@
     }
     const history = [];
     const occupied = Core.emptyBoard();
-    const re = /;?\s*([BW])\[([a-z]{0,2})\]/gi;
+    // Boundary required before B/W so setup props (AB[]/AW[]) and idents
+    // ending in B/W never read as moves.
+    const re = /(?:^|[;()\s])([BW])\s*\[([a-z]{0,2})\]/gi;
     let m;
     let skipped = 0;
     while ((m = re.exec(src))) {
@@ -117,9 +122,13 @@
   }
 
   function fileNameFromDate(ts) {
+    // local wall-clock, not UTC — late-night exports should carry today's date
+    const d = new Date(ts || Date.now());
+    const p = (n) => String(n).padStart(2, "0");
     return (
       "goban-" +
-      new Date(ts || Date.now()).toISOString().slice(0, 19).replace(/[:T]/g, "") +
+      d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+      p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) +
       ".sgf"
     );
   }

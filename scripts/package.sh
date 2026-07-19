@@ -25,6 +25,11 @@ test -f frontend/dist/js/ai-worker.js
 echo "==> unit tests"
 node scripts/test-game.mjs
 
+echo "==> AI strength regression (self-play, ~15-30s; skip: SKIP_STRENGTH=1)"
+if [[ "${SKIP_STRENGTH:-0}" != "1" ]]; then
+  node scripts/test-strength.mjs
+fi
+
 echo "==> zig build -Doptimize=ReleaseFast"
 zig build -Doptimize=ReleaseFast
 

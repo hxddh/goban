@@ -28,6 +28,7 @@
     <div class="stage">
       <div id="board-wrap">
         <canvas id="board" width="900" height="900" aria-label="棋盘"></canvas>
+        <div class="think-dot" id="think-dot" hidden aria-hidden="true"></div>
       </div>
     </div>
 
@@ -113,6 +114,12 @@
               <button type="button" data-theme="day" title="日间">日</button>
               <button type="button" data-theme="notebook" title="练习本">本</button>
             </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-k">坐标</span>
+            <button type="button" class="switch" id="opt-coords" aria-pressed="false" title="坐标标注（A–O / 15–1）">
+              <span class="switch-knob"></span>
+            </button>
           </div>
           <div class="setting-row">
             <span class="setting-k">音效</span>

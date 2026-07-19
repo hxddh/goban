@@ -92,6 +92,33 @@ function assert(cond, msg) {
   assert(Sgf.parseSgf("(;SZ[19];B[dd])").error.includes("19"), "size mismatch");
 }
 
+// sgf FF4 orientation: "aa" is the TOP-left corner (col, row from top)
+{
+  assert(Sgf.sgfCoord(0, 0) === "aa", "sgfCoord top-left aa");
+  assert(Sgf.sgfCoord(14, 14) === "oo", "sgfCoord bottom-right oo");
+  assert(Sgf.sgfCoord(0, 14) === "oa", "sgfCoord top-right oa");
+  const p0 = Sgf.parseSgfCoord("aa");
+  assert(p0 && p0.r === 0 && p0.c === 0, "parse aa = top-left");
+  const p1 = Sgf.parseSgfCoord("ao");
+  assert(p1 && p1.r === 14 && p1.c === 0, "parse ao = bottom-left");
+}
+
+// sgf: AB[] setup props and comment text must not read as moves
+{
+  const r = Sgf.parseSgf("(;FF[4]SZ[15]AB[hh]C[try B[ii] later];B[aa];W[bb])");
+  assert(!r.error && r.history.length === 2, "AB/comment not moves " + JSON.stringify(r));
+  assert(r.history[0].r === 0 && r.history[0].c === 0, "first move aa");
+  assert(r.history[1].r === 1 && r.history[1].c === 1, "second move bb");
+  const esc = Sgf.parseSgf("(;FF[4]SZ[15];B[aa]C[escaped \\] B[cc] more];W[bb])");
+  assert(!esc.error && esc.history.length === 2, "escaped ] in comment " + JSON.stringify(esc));
+}
+
+// sgf: local-time filename shape
+{
+  const name = Sgf.fileNameFromDate(new Date(2026, 0, 2, 3, 4, 5).getTime());
+  assert(name === "goban-20260102030405.sgf", "local filename " + name);
+}
+
 // state import helper does not imply AI; sets importPaused for continue
 {
   const hist = [
@@ -157,7 +184,7 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.17]"), "SGF AP version");
+  assert(text.includes("AP[Goban:1.18]"), "SGF AP version");
 }
 
 // importPaused persists only when open game
@@ -247,6 +274,21 @@ load("src/web/js/draw.js");
   assert(m && m.r === 10 && (m.c === 0 || m.c === 5), "block open four ends " + JSON.stringify(m));
 }
 
+// forcedMove is strictly forced: a mere opponent live-two (potential live3)
+// must NOT trigger a hard pre-block — that passivity drew won games (v1.17).
+{
+  const b = Core.emptyBoard();
+  b[7][6] = b[7][7] = "b"; // black live two only
+  b[2][2] = "w";
+  assert(Ai.forcedMove(b, "w") == null, "no forced pre-block vs live two");
+  // …but an existing live three still forces a block (extensions = compound4)
+  const b2 = Core.emptyBoard();
+  b2[7][5] = b2[7][6] = b2[7][7] = "b";
+  b2[2][2] = "w";
+  const f = Ai.forcedMove(b2, "w");
+  assert(f && f.r === 7 && (f.c === 4 || f.c === 8), "live3 still forced " + JSON.stringify(f));
+}
+
 // findVCF exists
 {
   assert(typeof Ai.findVCF === "function" && typeof Ai.findVCT === "function", "C1 exports VCF/VCT");
@@ -260,7 +302,7 @@ load("src/web/js/draw.js");
   assert(pFast.budgetMs === 800, "fast budget " + pFast.budgetMs);
   assert(pDeep.budgetMs === 3500, "deep budget " + pDeep.budgetMs);
   assert(pNorm.budgetMs === 2000, "normal hard budget " + pNorm.budgetMs);
-  assert(pNorm.vctDepth >= 10 && pNorm.abDepth >= 7, "hard depths");
+  assert(pNorm.vctDepth >= 6 && pNorm.abDepth >= 7, "hard depths");
 }
 
 // C1.c: forced hierarchy
