@@ -373,6 +373,8 @@
   let audioCtx = null;
   /** @type {'wood' | 'night' | 'day' | 'notebook'} */
   let themeId = "wood";
+  /** Board coordinate labels (A-O / 15-1). */
+  let showCoords = false;
   /** @type {{r:number,c:number,t0:number}|null} */
   let placeAnim = null;
   /** After SGF import: no auto-AI until「续下」or human places. */
@@ -424,6 +426,7 @@
     okBtn.textContent = okLabel;
     cancelBtn.textContent = cancelLabel;
     modal.classList.add("show");
+    setTimeout(() => okBtn.focus(), 0);
     return new Promise((resolve) => {
       confirmResolver = resolve;
     });
@@ -602,13 +605,14 @@
       if (s.thinkLevel === "fast" || s.thinkLevel === "normal" || s.thinkLevel === "deep") {
         thinkLevel = s.thinkLevel;
       }
+      if (typeof s.showCoords === "boolean") showCoords = s.showCoords;
     } catch (_) {}
   }
 
   function saveSettings() {
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel })
+      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel, showCoords })
     );
   }
 
@@ -831,6 +835,7 @@
     winFlashUntil: winFlashUntil,
     hover: hoverCell,
     hint: hintCell,
+    coords: showCoords,
     clearPlaceAnim: () => { placeAnim = null; },
   }));
 
@@ -852,7 +857,9 @@
     clearHint();
     const gen = gameGen;
     sync();
-    const delay = difficulty === "hard" ? 30 : difficulty === "normal" ? 70 : 55;
+    // Perceived pacing: instant forced replies read as "didn't think" and
+    // jolt the rhythm — keep a small floor even when compute is fast.
+    const delay = difficulty === "hard" ? 320 : difficulty === "normal" ? 240 : 160;
     const t0 = performance.now();
     aiMoveAsync({
       board: boardAfter(history.length),
@@ -1023,6 +1030,11 @@
       sbOn.classList.toggle("active", soundOn);
       sbOn.setAttribute("aria-pressed", soundOn ? "true" : "false");
     }
+    const cdOn = document.getElementById("opt-coords");
+    if (cdOn) {
+      cdOn.classList.toggle("active", showCoords);
+      cdOn.setAttribute("aria-pressed", showCoords ? "true" : "false");
+    }
   }
 
   function sync() {
@@ -1081,6 +1093,9 @@
     blackTurn.hidden = !(showTurn && turn === "b");
     whiteTurn.hidden = !(showTurn && turn === "w");
 
+    const thinkDot = document.getElementById("think-dot");
+    if (thinkDot) thinkDot.hidden = !(aiThinking && result === "play");
+
     status.classList.toggle("win", live && (result === "b" || result === "w"));
     status.classList.toggle("thinking", live && result === "play" && aiThinking);
     status.classList.toggle("replay", !live);
@@ -1118,7 +1133,17 @@
     if (!cell) return;
     place(cell.r, cell.c, false);
   });
-  canvas.addEventListener("mousemove", (ev) => { setHoverFromEvent(ev); });
+  let hoverRafId = 0;
+  let lastHoverEvt = null;
+  canvas.addEventListener("mousemove", (ev) => {
+    // coalesce high-frequency mousemove into one repaint per frame
+    lastHoverEvt = { clientX: ev.clientX, clientY: ev.clientY };
+    if (hoverRafId) return;
+    hoverRafId = requestAnimationFrame(() => {
+      hoverRafId = 0;
+      if (lastHoverEvt) setHoverFromEvent(lastHoverEvt);
+    });
+  });
   canvas.addEventListener("mouseleave", () => { clearHover(); });
   canvas.style.cursor = "crosshair";
 
@@ -1204,6 +1229,16 @@
     if (soundOn) playMoveSound("b");
     toast(soundOn ? "音效已开" : "音效已关");
   };
+  const coordsBtn = document.getElementById("opt-coords");
+  if (coordsBtn) {
+    coordsBtn.onclick = () => {
+      showCoords = !showCoords;
+      saveSettings();
+      syncSettingsUI();
+      draw();
+      toast(showCoords ? "坐标已开" : "坐标已关");
+    };
+  }
   document.getElementById("color-seg").onclick = async (ev) => {
     const b = ev.target.closest("button[data-human]");
     if (!b) return;
@@ -1240,6 +1275,13 @@
     }
     if (confirmModal.classList.contains("show")) {
       if (ev.key === "Enter") { ev.preventDefault(); finishConfirm(true); }
+      else if (ev.key === "Tab") {
+        // keep focus inside the dialog, toggling between the two buttons
+        ev.preventDefault();
+        const ok = document.getElementById("confirm-ok");
+        const ca = document.getElementById("confirm-cancel");
+        (document.activeElement === ok ? ca : ok).focus();
+      }
       return;
     }
     // Ignore game shortcuts while help is open (Esc closes it above)
@@ -1339,6 +1381,9 @@
     originalStartedAt = startedAt;
     elapsedBaseMs = 0;
   }
+
+  // Pre-warm the AI worker so the first computer reply has no cold-start hitch
+  if (mode === "ai" && difficulty !== "easy") getAiWorker();
 
   resizeCanvas();
   sync();

@@ -62,6 +62,12 @@
   let _ctx = null;
   let _model = null;
   let rafId = 0;
+  /** Offscreen base layer: board background + grid + stones. Rebuilt only
+   *  when the position/theme/size changes; hover/hint/markers composite on
+   *  top so mousemove repaints cost one drawImage, not a full repaint. */
+  let baseCanvas = null;
+  let baseCtx = null;
+  let baseSig = "";
 
   function attach(canvas, ctx, modelFn) {
     _canvas = canvas;
@@ -163,17 +169,24 @@
     rafId = requestAnimationFrame(tick);
   }
 
-  function draw() {
-    const m = getM();
-    if (!m || !_ctx || !_canvas) return;
+  function boardSig(board) {
+    let h = 0;
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++) {
+        const s = board[r][c];
+        if (s) h = (Math.imul(h, 31) + r * 15 + c + (s === "b" ? 300 : 600)) | 0;
+      }
+    return h;
+  }
+
+  function paintBase(m, w) {
     const board = m.board;
-    const history = m.history;
-    const viewIndex = m.viewIndex;
     const themeId = m.themeId;
-    const winLine = m.winLine;
-    const ctx = _ctx;
-    const { pad, step, w } = geometry();
+    const ctx = baseCtx;
+    const { pad, step } = geometry();
     const th = THEMES[themeId] || THEMES.wood;
+    const savedCtx = _ctx;
+    _ctx = baseCtx; // outline helpers + stoneScale draw into the base layer
     ctx.clearRect(0, 0, w, w);
 
     if (th.style === "pencil") {
@@ -334,6 +347,59 @@
         }
       }
     }
+
+    // Coordinate labels: columns A-O along the bottom, rows 15-1 down the left
+    if (m.coords) {
+      ctx.save();
+      ctx.fillStyle = th.style === "pencil" ? (th.pencil || th.line) : th.line;
+      ctx.globalAlpha = 0.5;
+      const fs = Math.max(8, step * 0.24);
+      ctx.font = "500 " + fs + "px system-ui, -apple-system, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      for (let i = 0; i < SIZE; i++) {
+        const p = pad + i * step;
+        ctx.fillText(String.fromCharCode(65 + i), p, pad + step * (SIZE - 1) + pad * 0.55);
+        ctx.fillText(String(SIZE - i), pad * 0.42, p);
+      }
+      ctx.restore();
+    }
+
+    _ctx = savedCtx;
+  }
+
+  function draw() {
+    const m = getM();
+    if (!m || !_ctx || !_canvas) return;
+    const board = m.board;
+    const history = m.history;
+    const viewIndex = m.viewIndex;
+    const themeId = m.themeId;
+    const winLine = m.winLine;
+    const ctx = _ctx;
+    const { pad, step, w } = geometry();
+    const th = THEMES[themeId] || THEMES.wood;
+
+    if (!baseCanvas) {
+      baseCanvas = document.createElement("canvas");
+      baseCtx = baseCanvas.getContext("2d");
+    }
+    if (baseCanvas.width !== w) {
+      baseCanvas.width = w;
+      baseCanvas.height = w;
+      baseSig = "";
+    }
+    // While the place animation runs the animated stone lives in the base,
+    // so keep repainting it; otherwise repaint only on real changes.
+    const animActive = !!m.placeAnim;
+    const sig = themeId + "|" + (m.coords ? 1 : 0) + "|" + boardSig(board);
+    if (animActive || sig !== baseSig) {
+      paintBase(m, w);
+      baseSig = animActive ? "" : sig;
+    }
+
+    ctx.clearRect(0, 0, w, w);
+    ctx.drawImage(baseCanvas, 0, 0);
 
     // Hover ghost (next stone preview)
     const hover = m.hover;
