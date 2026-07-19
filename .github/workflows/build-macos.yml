@@ -37,6 +37,7 @@ jobs:
           rm -rf frontend/dist && mkdir -p frontend/dist/js
           cp src/web/index.html src/web/styles.css frontend/dist/
           cp src/web/js/*.js frontend/dist/js/
+          node scripts/gen-worker-src.mjs frontend/dist/js
       - name: zig build
         run: zig build -Doptimize=ReleaseFast -Dnative-sdk-path="$SDK_PATH"
       - name: package .app + zip

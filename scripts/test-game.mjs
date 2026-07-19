@@ -9,7 +9,9 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
-const ctx = { console };
+// REAL clocks: a Date.now-based performance shim once masked a clock-domain
+// bug that hung the engine only in browsers.
+const ctx = { console, Date, performance };
 ctx.globalThis = ctx;
 ctx.window = ctx;
 vm.createContext(ctx);
@@ -186,7 +188,7 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.19.2]"), "SGF AP version");
+  assert(text.includes("AP[Goban:1.19.3]"), "SGF AP version");
 }
 
 // importPaused persists only when open game
@@ -308,6 +310,19 @@ load("src/web/js/draw.js");
   const b3 = Core.emptyBoard();
   const open = Ai2.aiMove({ board: b3, side: "b", difficulty: "extreme", timeMs: 50 });
   assert(open && open.r === 7 && open.c === 7, "C2 opening center " + JSON.stringify(open));
+}
+
+// real-clock budget adherence: a tactical midgame C2 move must respect its
+// wall budget (guards the clock-domain hang class; generous grace for CI load)
+{
+  const b = Core.emptyBoard();
+  const seq = [[7,7],[6,8],[8,6],[5,7],[9,5],[6,6],[9,8],[9,6],[10,5],[6,5],[8,8],[6,7]];
+  seq.forEach((p, i) => { b[p[0]][p[1]] = i % 2 === 0 ? "b" : "w"; });
+  const t0 = Date.now();
+  const m = Ai2.aiMove({ board: b, side: "b", difficulty: "hard", timeMs: 300 });
+  const dt = Date.now() - t0;
+  assert(m && !b[m.r][m.c], "C2 budget move legal " + JSON.stringify(m));
+  assert(dt < 5000, "C2 respects wall budget: " + dt + "ms for 300ms");
 }
 
 // findVCF exists

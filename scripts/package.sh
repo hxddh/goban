@@ -12,6 +12,7 @@ mkdir -p frontend/dist/js
 cp src/web/index.html frontend/dist/
 cp src/web/styles.css frontend/dist/
 cp src/web/js/*.js frontend/dist/js/
+node scripts/gen-worker-src.mjs frontend/dist/js
 # sanity: required files
 test -f frontend/dist/index.html
 test -f frontend/dist/js/app.js
@@ -22,6 +23,7 @@ test -f frontend/dist/js/draw.js
 test -f frontend/dist/js/ai.js
 test -f frontend/dist/js/ai2.js
 test -f frontend/dist/js/ai-worker.js
+test -f frontend/dist/js/worker-src.js
 
 echo "==> unit tests"
 node scripts/test-game.mjs

@@ -13,6 +13,14 @@
 (function (global) {
   const Core = global.GobanCore;
   const C1 = global.GobanAi;
+  /**
+   * Clock aligned with C1's nowMs (performance.now when available). C2 once
+   * mixed Date.now() deadlines with C1's performance.now() timedOut() —
+   * epoch vs monotonic milliseconds — so C1 cascade stages NEVER expired in
+   * real browsers: the "stuck thinking forever" bug.
+   */
+  const nowMs = () =>
+    typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
   const SZ = 15;
   const N = SZ * SZ;
   const B = 1;
@@ -264,7 +272,7 @@
   function outOfBudget() {
     if (ctxTick1 > 0 && tick >= ctxTick1) return true;
     if (ctxT1 > 0 && (tick & 1023) === 0) {
-      return Date.now() >= ctxT1;
+      return nowMs() >= ctxT1;
     }
     return false;
   }
@@ -434,7 +442,7 @@
   function c1Slice(deadline, frac, evals) {
     const out = { t1: 0, e1: 0 };
     if (deadline > 0) {
-      const now = Date.now();
+      const now = nowMs();
       out.t1 = now >= deadline ? deadline : now + (deadline - now) * frac;
     }
     if (evals > 0) out.e1 = C1.ticks() + evals;
@@ -451,7 +459,7 @@
     const themC = me2 === "b" ? W : B;
     const them2 = Core.opp(me2);
     const prof = profileFor(difficulty, opts || {});
-    const deadline = prof.budgetMs > 0 ? Date.now() + prof.budgetMs : 0;
+    const deadline = prof.budgetMs > 0 ? nowMs() + prof.budgetMs : 0;
     // deterministic mode: C1 stages get eval allowances scaled off nodeBudget
     const detEvals = prof.nodeBudget > 0 ? prof.nodeBudget : 0;
     lastStage = "";
@@ -532,11 +540,11 @@
           b2[d.r][d.c] = me2;
           if (C1.listWinCells(b2, them2).length) continue;
           const still = C1.findVCF(b2, them2, 16, dctx);
-          if (!still && !(dctx.t1 > 0 && Date.now() >= dctx.t1) && !(dctx.e1 > 0 && C1.ticks() >= dctx.e1)) {
+          if (!still && !(dctx.t1 > 0 && nowMs() >= dctx.t1) && !(dctx.e1 > 0 && C1.ticks() >= dctx.e1)) {
             lastStage = "deny";
             return d;
           }
-          if ((dctx.t1 > 0 && Date.now() >= dctx.t1) || (dctx.e1 > 0 && C1.ticks() >= dctx.e1)) break;
+          if ((dctx.t1 > 0 && nowMs() >= dctx.t1) || (dctx.e1 > 0 && C1.ticks() >= dctx.e1)) break;
         }
         if (force) {
           lastStage = "force";
