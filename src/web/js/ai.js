@@ -96,6 +96,9 @@
     return (h ^ zobrist[(color === "b" ? 0 : ZN) + r * SZ + c]) >>> 0;
   }
 
+  /** Debug: which aiMove stage produced the last move (for tuning/tests). */
+  let lastStage = "";
+
   // --- utils ---------------------------------------------------------------
   function cloneBoard(board) {
     const o = new Array(SZ);
@@ -354,7 +357,9 @@
       else if (cnt === 2 && open === 2) live2 = Math.max(live2, 1);
     }
 
-    const winCells = listWins(board, color).length;
+    // Win-cell scan is O(cells); it can only be non-zero when this stone
+    // forms a four-type shape (an immediate five returned above already).
+    const winCells = live4 || rush4 || jump4 ? listWins(board, color).length : 0;
     board[r][c] = "";
 
     // compound classification
@@ -441,7 +446,25 @@
     const them = Core.opp(me);
     // sample potential of empty near cells for both
     const cells = emptiesNear(board, 2);
-    const lim = Math.min(cells.length, 36);
+    let lim = cells.length;
+    if (lim > 36) {
+      // sample the HOTTEST cells (most adjacent stones) — plain row-major
+      // truncation silently ignored threats in the lower board half
+      for (let i = 0; i < cells.length; i++) {
+        const m = cells[i];
+        let n = 0;
+        for (let dr = -1; dr <= 1; dr++)
+          for (let dc = -1; dc <= 1; dc++) {
+            if (!dr && !dc) continue;
+            const rr = m.r + dr,
+              cc = m.c + dc;
+            if (rr >= 0 && rr < SZ && cc >= 0 && cc < SZ && board[rr][cc]) n++;
+          }
+        m.hot = n;
+      }
+      cells.sort((a, b) => b.hot - a.hot);
+      lim = 36;
+    }
     for (let i = 0; i < lim; i++) {
       const m = cells[i];
       const o = analyzePlace(board, m.r, m.c, me);
@@ -532,34 +555,76 @@
     myC.sort((a, b) => b.s - a.s);
     theirC.sort((a, b) => b.s - a.s);
 
-    const pickMy = (minComp, minTier) => {
+    const pickMy = (pred, check) => {
       for (let i = 0; i < myC.length; i++) {
-        if (myC[i].o.compound >= minComp || myC[i].o.tier >= minTier) return myC[i].m;
+        if (pred(myC[i].o) && (!check || check(myC[i].m))) return myC[i].m;
       }
       return null;
     };
-    const pickTheir = (minComp, minTier) => {
+
+    /**
+     * A four-three only wins if the forced block of the four cannot kill the
+     * three too (win cell on the three's growth line refutes both at once).
+     * Verify: after my move + their block, I must still have a live4/dual
+     * point, and their block must not hand them a win threat.
+     */
+    const fourThreeWins = (m) => {
+      board[m.r][m.c] = me;
+      const wins = listWins(board, me);
+      let ok = false;
+      if (wins.length >= 2) ok = true;
+      else if (wins.length === 1) {
+        const b0 = wins[0];
+        board[b0.r][b0.c] = them;
+        if (!listWins(board, them).length) {
+          const c2 = emptiesNear(board, 2);
+          for (let i = 0; i < c2.length; i++) {
+            const a = analyzePlace(board, c2[i].r, c2[i].c, me);
+            if (a.compound >= 4) {
+              ok = true;
+              break;
+            }
+            if (timedOut(ctx)) break;
+          }
+        }
+        board[b0.r][b0.c] = "";
+      }
+      board[m.r][m.c] = "";
+      return ok;
+    };
+    const pickTheir = (pred) => {
       for (let i = 0; i < theirC.length; i++) {
-        if (theirC[i].d.compound >= minComp || theirC[i].d.tier >= minTier) return theirC[i].m;
+        if (pred(theirC[i].d)) return theirC[i].m;
       }
       return null;
     };
 
-    // 3 my compound ≥3 (double live3 / four-three / dual)
-    let mv = pickMy(3, 4);
+    // Tempo-ordered hierarchy. Key distinction: a four (rush4/live4) wins or
+    // forces NEXT move; a pure double-live3 needs two more tempi, so it must
+    // yield to any opposing four-speed threat. `_decisive` marks winning
+    // forces the caller may take before opponent-VCF denial.
+    // 3a own unstoppable: live4 / dual win cells
+    let mv = pickMy((o) => o.compound >= 4);
+    if (mv) return { r: mv.r, c: mv.c, _decisive: true };
+    // 3b own four-three: the four forces, the live3 then converts —
+    // verified against the one-stone dual-purpose refutation
+    mv = pickMy((o) => o.rush4 >= 1 && o.live3 >= 1, fourThreeWins);
+    if (mv) return { r: mv.r, c: mv.c, _decisive: true };
+    // 4 block their four-speed wins: live4 points and four-three points
+    // (covers existing live threes — their extensions analyze as live4)
+    mv = pickTheir((d) => d.compound >= 4 || (d.rush4 >= 1 && d.live3 >= 1));
     if (mv) return mv;
-    // 4 block their compound ≥3 — covers existing live threes: their
-    // extension points analyze as live4/compound for the attacker.
-    mv = pickTheir(3, 4);
+    // 5 own pure double-live3: as the mover it outruns non-four threats
+    mv = pickMy((o) => o.compound >= 3);
     if (mv) return mv;
-    // 5 my rush4 / winCells
-    mv = pickMy(2, 3);
+    // 6 block their remaining compound≥3 (double-three seeds)
+    mv = pickTheir((d) => d.compound >= 3 || d.tier >= 4);
     if (mv) return mv;
 
-    // Anything softer (pre-blocking a *potential* rush4/live3, or playing a
-    // plain own live3) is NOT a forced move: hard-returning those made the
-    // engine trade tempo for pre-emptive blocks and drew won games. Those
-    // moves now surface through rankMoves ordering + search instead.
+    // NOT forced: a lone rush4 (four-spam wastes tempo and feeds the
+    // opponent blocking stones — winning four chains are VCF's job), and
+    // anything softer (pre-blocking potential rush4/live3, plain own live3).
+    // Those surface through rankMoves ordering + search instead.
     return null;
   }
 
@@ -606,6 +671,7 @@
 
   // --- VCT (tight generation) ----------------------------------------------
   function findVCT(board, me, maxD, ctx) {
+    if (ctx) ctx.vctNodes = 0;
     return vctRec(board, me, 0, maxD, ctx);
   }
 
@@ -643,6 +709,8 @@
 
   function vctRec(board, me, d, maxD, ctx) {
     if (timedOut(ctx) || d > maxD) return null;
+    // node backstop for pathological branching (budget slicing is primary)
+    if (ctx && (ctx.vctNodes = (ctx.vctNodes || 0) + 1) > 5000) return null;
     const them = Core.opp(me);
 
     const vcf = findVCF(board, me, maxD - d + 10, ctx);
@@ -678,7 +746,9 @@
         continue;
       }
       // Defender counter-fours: a rush4 punch elsewhere steals the tempo and
-      // can refute the whole sequence — occupying/blocking is not the only reply.
+      // can refute the whole sequence — occupying/blocking is not the only
+      // reply. All plies: unsound "wins" here cost real games; the node cap
+      // and shallower vctDepth bound the price.
       const punch = mustDefendPoints(board, them).slice(0, 2);
       for (let j = 0; j < punch.length; j++) {
         const p = punch[j];
@@ -721,7 +791,11 @@
 
   // --- α-β -----------------------------------------------------------------
   function negamax(board, depth, alpha, beta, side, root, ctx, ply, h, killers, threatOnly) {
-    if (timedOut(ctx)) return evalStatic(board, root);
+    // Leaf values MUST be side-to-move relative (negamax contract).
+    // evalStatic(board, root) here inverted every odd-depth subtree — with
+    // iterative deepening stopping on timeout, the root then picked the
+    // WORST shallow-eval move.
+    if (timedOut(ctx)) return evalStatic(board, side);
     const a0 = alpha;
     let ttMv = -1;
     const hit = ttGet(h, depth, alpha, beta);
@@ -729,7 +803,7 @@
       if (hit.sc != null) return hit.sc;
       if (hit.mv >= 0) ttMv = hit.mv;
     }
-    if (depth <= 0) return evalStatic(board, root);
+    if (depth <= 0) return evalStatic(board, side);
 
     // quick wins
     const nearCells = emptiesNear(board, 2);
@@ -803,8 +877,11 @@
         break;
       }
     }
-    // A timed-out (or empty) scan yields a bogus/partial score — never store it.
-    if (best > -Infinity && !timedOut(ctx)) {
+    // No child evaluated (timeout hit before the first move): a raw
+    // -Infinity would negate into +Infinity at the parent and poison it.
+    if (best === -Infinity) return evalStatic(board, side);
+    // A timed-out scan yields a partial score — never store it.
+    if (!timedOut(ctx)) {
       let fl = EX;
       if (best <= a0) fl = UP;
       else if (best >= beta) fl = LO;
@@ -817,7 +894,10 @@
     const them = Core.opp(me);
     const killers = [new Int16Array(64).fill(-1), new Int16Array(64).fill(-1)];
     const h0 = hashBoard(board, me);
-    let moves = rankMoves(board, me, 28, ctx);
+    // Root list is ranked WITHOUT the clock: a timed-out scan truncates in
+    // row-major order and the "best" move degrades to a top-left bias.
+    // One full pass costs ~1-2ms — always affordable.
+    let moves = rankMoves(board, me, 28, null);
     let best = moves[0] ? { r: moves[0].r, c: moves[0].c } : null;
     let bestV = -Infinity;
 
@@ -867,6 +947,39 @@
     return a && a.length ? a[(Math.random() * a.length) | 0] : null;
   }
 
+  /**
+   * Tiny deterministic opening book, plies 1-3. Deterministic on purpose:
+   * keeps self-play regressions stable.
+   */
+  function bookMove(board, me) {
+    const stones = [];
+    for (let r = 0; r < SZ; r++)
+      for (let c = 0; c < SZ; c++) {
+        if (board[r][c]) {
+          stones.push({ r: r, c: c, s: board[r][c] });
+          if (stones.length > 2) return null;
+        }
+      }
+    if (!stones.length) return { r: 7, c: 7 };
+    if (stones.length === 1) {
+      const s = stones[0];
+      if (s.r === 7 && s.c === 7) return { r: 6, c: 8 }; // diagonal contact
+      return !board[7][7] ? { r: 7, c: 7 } : null;
+    }
+    // ply 3, we hold the center: answer with the far-side diagonal (斜指-style)
+    const mine = stones.find((x) => x.s === me);
+    const theirs = stones.find((x) => x.s !== me);
+    if (!mine || !theirs || mine.r !== 7 || mine.c !== 7) return null;
+    const dr = theirs.r - 7,
+      dc = theirs.c - 7;
+    const pr = 7 - (dr === 0 ? 1 : dr > 0 ? 1 : -1);
+    const pc = 7 - (dc === 0 ? 1 : dc > 0 ? 1 : -1);
+    if (pr >= 0 && pr < SZ && pc >= 0 && pc < SZ && !board[pr][pc]) {
+      return { r: pr, c: pc };
+    }
+    return null;
+  }
+
   function profileFor(difficulty, opts) {
     const hard = difficulty === "hard";
     const normal = difficulty === "normal";
@@ -878,7 +991,10 @@
     return {
       budgetMs: budget,
       vcfDepth: hard ? 24 : normal ? 12 : 0,
-      vctDepth: hard ? 14 : normal ? 6 : 0,
+      // VCT kept shallow on purpose: long speculative chains are where the
+      // bounded defense generation goes unsound, and lost real games. Deep
+      // wins re-emerge move by move as the position develops.
+      vctDepth: hard ? 8 : normal ? 4 : 0,
       abDepth: hard ? 8 : normal ? 5 : 1,
       useVct: hard || normal,
     };
@@ -892,9 +1008,21 @@
     const them = Core.opp(me);
     const prof = profileFor(difficulty, opts || {});
     const ctx = { t1: prof.budgetMs > 0 ? nowMs() + prof.budgetMs : 0 };
+    /**
+     * Budget slice: sub-deadline at `frac` of the REMAINING budget. Without
+     * this, VCT alone could burn the whole budget and starve searchRoot.
+     */
+    const stageCtx = (frac) => {
+      if (!ctx.t1) return ctx;
+      const now = nowMs();
+      if (now >= ctx.t1) return ctx;
+      return { t1: now + (ctx.t1 - now) * frac };
+    };
     ttReset();
+    lastStage = "";
 
     if (!hasStone(board)) {
+      lastStage = "book";
       if (difficulty === "easy") {
         return randomPick([
           { r: 7, c: 7 },
@@ -907,15 +1035,22 @@
       return { r: 7, c: 7 };
     }
 
+    // Opening book, plies 2-3 (easy keeps its own randomness)
+    if (difficulty !== "easy") {
+      const bk = bookMove(board, me);
+      if (bk) { lastStage = "book"; return bk; }
+    }
+
     // Absolute win/block
     const cells = emptiesNear(board, 2);
     for (let i = 0; i < cells.length; i++) {
-      if (Core.wouldWin(board, cells[i].r, cells[i].c, me)) return cells[i];
+      if (Core.wouldWin(board, cells[i].r, cells[i].c, me)) { lastStage = "win"; return cells[i]; }
     }
     for (let i = 0; i < cells.length; i++) {
-      if (Core.wouldWin(board, cells[i].r, cells[i].c, them)) return cells[i];
+      if (Core.wouldWin(board, cells[i].r, cells[i].c, them)) { lastStage = "blockwin"; return cells[i]; }
     }
 
+    lastStage = "easy";
     if (difficulty === "easy") {
       const ranked = rankMoves(board, me, 8, null);
       const pool = ranked.slice(0, 5);
@@ -926,39 +1061,59 @@
     // P0 forced hierarchy (compound + live3)
     const force = forcedMove(board, me, ctx);
 
-    // Own VCF before settling for mere live3
+    // Own VCF before settling for mere live3 (≤35% of remaining budget)
     if (prof.vcfDepth > 0) {
-      const v = findVCF(board, me, prof.vcfDepth, ctx);
-      if (v) return v;
+      const v = findVCF(board, me, prof.vcfDepth, stageCtx(0.35));
+      if (v) { lastStage = "vcf"; return v; }
     }
 
-    // forcedMove now yields only compound≥3 / rush4-level moves — take them.
-    if (force) return force;
+    // Decisive forces (own live4/dual, verified four-three) are safe now;
+    // softer forces (blocks, pure double-live3) must not preempt the
+    // opponent-VCF denial below — a four chain outruns them all.
+    if (force && force._decisive) { lastStage = "force!"; return force; }
 
-    // Deny opponent VCF
+    // Deny opponent VCF (≤30% of remaining budget)
     if (prof.vcfDepth > 0 && !timedOut(ctx)) {
-      const ov = findVCF(board, them, Math.min(18, prof.vcfDepth), ctx);
+      const denyCtx = stageCtx(0.3);
+      const ov = findVCF(board, them, Math.min(18, prof.vcfDepth), denyCtx);
       if (ov) {
-        const defs = rankMoves(board, me, 28, ctx);
+        const defs = rankMoves(board, me, 28, denyCtx);
         for (let i = 0; i < defs.length; i++) {
-          if (timedOut(ctx)) break;
+          if (timedOut(denyCtx)) break;
           const d = defs[i];
-          if (Core.wouldWin(board, d.r, d.c, me)) return d;
+          if (Core.wouldWin(board, d.r, d.c, me)) { lastStage = "deny"; return d; }
           board[d.r][d.c] = me;
           const ow = listWins(board, them);
           let still = null;
-          if (!ow.length) still = findVCF(board, them, Math.min(16, prof.vcfDepth), ctx);
+          if (!ow.length) still = findVCF(board, them, Math.min(16, prof.vcfDepth), denyCtx);
           board[d.r][d.c] = "";
-          if (!ow.length && !still) return d;
+          // A null `still` right at the deadline is a timeout, not a proof —
+          // trusting it returned effectively random "defenses" under load.
+          if (!ow.length && !still && !timedOut(denyCtx)) { lastStage = "deny"; return d; }
         }
-        if (!board[ov.r][ov.c]) return ov;
+        // No defense verified. A DEFENSIVE force (their live4/four-three
+        // point) beats blindly occupying the chain's first move — a VCF often
+        // reroutes around ov, a compound point does not move. An offensive
+        // force (own double-3) is slower than their chain — never that here.
+        if (force) {
+          const fd = analyzePlace(board, force.r, force.c, them);
+          if (fd.compound >= 4 || (fd.rush4 >= 1 && fd.live3 >= 1)) {
+            lastStage = "force";
+            return force;
+          }
+        }
+        if (!board[ov.r][ov.c]) { lastStage = "deny-fb"; return ov; }
       }
     }
 
-    // VCT
+    // Softer force now that no opponent four-chain is pending
+    if (force) { lastStage = "force"; return force; }
+
+    // VCT (≤50% of remaining budget — the rest is reserved for searchRoot,
+    // which previously could be starved to a depth-0 greedy pick)
     if (prof.useVct && prof.vctDepth > 0 && !timedOut(ctx)) {
-      const vt = findVCT(board, me, prof.vctDepth, ctx);
-      if (vt) return vt;
+      const vt = findVCT(board, me, prof.vctDepth, stageCtx(0.5));
+      if (vt) { lastStage = "vct"; return vt; }
     }
 
     // Block opponent next-move compound points (bud stage)
@@ -976,11 +1131,13 @@
           best = p;
         }
       }
+      lastStage = "danger";
       return { r: best.r, c: best.c };
     }
 
     const mv = searchRoot(board, me, prof.abDepth, ctx);
-    if (mv) return mv;
+    if (mv) { lastStage = "search"; return mv; }
+    lastStage = "fallback";
     const fb = rankMoves(board, me, 3, null);
     return fb[0] ? { r: fb[0].r, c: fb[0].c } : emptiesNear(board, 2)[0];
   }
@@ -1020,6 +1177,9 @@
     profileFor: profileFor,
     forcedMove: function (b, me) {
       return forcedMove(cloneBoard(b), me, { t1: nowMs() + 300 });
+    },
+    lastStage: function () {
+      return lastStage;
     },
   };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -302,7 +302,7 @@ load("src/web/js/draw.js");
   assert(pFast.budgetMs === 800, "fast budget " + pFast.budgetMs);
   assert(pDeep.budgetMs === 3500, "deep budget " + pDeep.budgetMs);
   assert(pNorm.budgetMs === 2000, "normal hard budget " + pNorm.budgetMs);
-  assert(pNorm.vctDepth >= 10 && pNorm.abDepth >= 7, "hard depths");
+  assert(pNorm.vctDepth >= 6 && pNorm.abDepth >= 7, "hard depths");
 }
 
 // C1.c: forced hierarchy
