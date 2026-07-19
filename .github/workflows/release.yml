@@ -1,0 +1,37 @@
+name: release
+
+# Creates the git tag + GitHub Release from notes in .github/release-notes/.
+# The macOS app zip cannot be built here (Native SDK is a local framework),
+# so build it with scripts/package.sh and attach it to the release:
+#   gh release upload <tag> dist/Goban-macOS-arm64.zip
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v1.18.0); notes file must exist"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: unit tests
+        run: node scripts/test-game.mjs
+      - name: create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          notes=".github/release-notes/${TAG}.md"
+          test -f "$notes" || { echo "missing $notes"; exit 1; }
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes-file "$notes"
