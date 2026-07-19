@@ -1,11 +1,11 @@
 /**
  * AI strength regression (self-play). Guards against the v1.17 failure mode
  * where hard-vs-normal locked into mutual pre-blocking and drew a full board.
- * Run: node scripts/test-strength.mjs   (~15-60s; wired into package.sh)
+ * Run: node scripts/test-strength.mjs   (~20-60s; wired into package.sh)
  *
- * Budgets are wall-clock, so results vary with machine load — assertions are
- * series-based floors, not exact outcomes. On quiet dev hardware hard(B)
- * typically wins game 1; under noisy CI CPU it may need the retries.
+ * hard-vs-normal games use deterministic node budgets (opts.nodeBudget =
+ * analyzePlace count) so outcomes are bit-reproducible regardless of CPU
+ * load. easy games are inherently random and keep retry semantics.
  */
 import fs from "fs";
 import path from "path";
@@ -28,7 +28,7 @@ for (const f of ["core.js", "ai.js"]) {
 const Core = ctx.GobanCore;
 const Ai = ctx.GobanAi;
 
-function playGame(diffB, diffW, msB, msW, maxMoves) {
+function playGame(diffB, diffW, msB, msW, maxMoves, nodesB, nodesW) {
   const b = Core.emptyBoard();
   let turn = "b";
   let moves = 0;
@@ -38,6 +38,7 @@ function playGame(diffB, diffW, msB, msW, maxMoves) {
       side: turn,
       difficulty: turn === "b" ? diffB : diffW,
       timeMs: turn === "b" ? msB : msW,
+      nodeBudget: turn === "b" ? nodesB : nodesW,
     });
     if (!m || b[m.r][m.c]) return { winner: "ERR", moves };
     b[m.r][m.c] = turn;
@@ -59,25 +60,19 @@ function assert(cond, msg) {
   }
 }
 
-// Timing-noise note: budgets are wall-clock, so identical pairings can play
-// different games under CPU load. Series verdicts, not single games.
-
-// hard-vs-normal both ways: benchmark info, not a gate. Under throttled CI
-// CPU the wall-clock budgets collapse for both engines and series outcomes
-// swing wildly; on quiet dev hardware hard(B) should win most games — check
-// this line when tuning the engine.
+// Deterministic gate: hard(B, 80k evals) must beat normal(W, 8k evals).
+// Bit-reproducible — a failure here is a real engine regression.
 {
-  const g = playGame("hard", "normal", 1000, 250, 100);
-  console.log("info: hard(B) vs normal(W): " + g.winner + "/" + g.moves + " (not asserted)");
+  const g = playGame("hard", "normal", 0, 0, 100, 80000, 8000);
+  assert(g.winner === "b", "DET hard(B,80k) beats normal(W,8k) — got " + g.winner + "/" + g.moves);
 }
 
-// Freestyle black's first-mover edge is decisive between same-class engines —
-// both sides now convert it (v1.17 could not attack at all), so white-side
-// defense vs a same-family attacker has no reliable floor short of a deeper
-// engine (C2). Informational only: printed, never fails the suite.
+// White-side benchmark (deterministic): freestyle black's first-mover edge
+// means C1-hard cannot hold same-family black; C2 should flip this line to
+// a non-loss. Informational until then.
 {
-  const g = playGame("normal", "hard", 250, 1000, 120);
-  console.log("info: hard(W) vs normal(B): " + g.winner + "/" + g.moves + " (not asserted)");
+  const g = playGame("normal", "hard", 0, 0, 120, 8000, 80000);
+  console.log("info: DET hard(W,80k) vs normal(B,8k): " + g.winner + "/" + g.moves + " (C2 target: non-loss)");
 }
 
 // easy is randomized: require a win within 2 attempts per side.
