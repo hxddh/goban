@@ -4,10 +4,10 @@
  * Board is a flat Int8Array(225); every 5-cell window (572 of them) keeps
  * per-color stone counts maintained incrementally on make/unmake, so leaf
  * evaluation is O(1) and threat facts (a five, a four-with-win-cell) are
- * plain counters. Search is negamax + TT + killers + iterative deepening.
- * The battle-tested C1 tactical cascade (forced hierarchy, VCF/VCT, deny)
- * still runs at the root via GobanAi exports; C2 replaces the starved
- * shallow α-β underneath it.
+ * plain counters. Search is negamax + TT + killers + iterative deepening
+ * with forcing extensions. The battle-tested C1 tactical cascade (forced
+ * hierarchy, VCF/VCT, deny) still runs at the root via GobanAi exports;
+ * C2 replaces the starved shallow α-β underneath it.
  * @module ai2
  */
 (function (global) {
@@ -314,19 +314,15 @@
     let bestMv = -1;
     for (let i = 0; i < n; i++) {
       const idx = mIdx[ply][i];
+      const f4Before = four[side];
       make(idx, side);
       let val;
       if (five[side] > 0) {
         val = WINV - ply;
       } else {
-        // No forcing extension. Extending +1 on four-making moves made the
-        // extended sub-depth get stored/probed inconsistently against the TT,
-        // so deeper search grafted inflated results and chased four-spam that
-        // ceded initiative — search became non-monotonic (more budget played
-        // WEAKER: deep 120k lost to shallow 40k, 1-5). Removing it restores
-        // monotonic search (deep 4-2); forced wins remain covered by the C1
-        // VCF/VCT cascade that runs before this search.
-        val = -negamax(depth - 1, -beta, -alpha, opp, ply + 1, extLeft);
+        // forcing extension: creating a four keeps the line alive one deeper
+        const ext = extLeft > 0 && four[side] > f4Before ? 1 : 0;
+        val = -negamax(depth - 1 + ext, -beta, -alpha, opp, ply + 1, extLeft - ext);
       }
       unmake(idx, side);
       if (hardStop) {
@@ -391,13 +387,15 @@
       let done = true;
       for (let i = 0; i < rootIdx.length; i++) {
         const idx = rootIdx[i];
+        const f4Before = four[me];
         make(idx, me);
         let val;
         if (five[me] > 0) {
           unmake(idx, me);
           return idx; // immediate five
         }
-        val = -negamax(depth - 1, -Infinity, -alpha, opp, 1, 12);
+        const ext = four[me] > f4Before ? 1 : 0;
+        val = -negamax(depth - 1 + ext, -Infinity, -alpha, opp, 1, 12 - ext);
         unmake(idx, me);
         if (hardStop) {
           done = false;
@@ -464,7 +462,6 @@
     const deadline = prof.budgetMs > 0 ? nowMs() + prof.budgetMs : 0;
     // deterministic mode: C1 stages get eval allowances scaled off nodeBudget
     const detEvals = prof.nodeBudget > 0 ? prof.nodeBudget : 0;
-
     lastStage = "";
 
     resetFrom(board2d);
