@@ -50,10 +50,16 @@ echo "==> zip + remove package .app (avoid duplicate Launchpad entry)"
 
 echo "==> install ~/Applications/Goban.app"
 rm -rf "${HOME}/Applications/Goban.app"
-# re-extract zip for install (we deleted .app)
-unzip -q -o dist/Goban-macOS-arm64.zip -d dist
+# re-extract zip for install (we deleted .app). Avoid __MACOSX ghost apps
+# which create a second Launchpad icon (same CFBundleIdentifier).
+rm -rf dist/Goban.app dist/__MACOSX
+unzip -q -o dist/Goban-macOS-arm64.zip -d dist -x '__MACOSX/*' '*/__MACOSX/*' || {
+  # fallback if unzip -x quirks: extract then purge resource-fork stubs
+  unzip -q -o dist/Goban-macOS-arm64.zip -d dist
+  rm -rf dist/__MACOSX
+}
 ditto dist/Goban.app "${HOME}/Applications/Goban.app"
-rm -rf dist/Goban.app
+rm -rf dist/Goban.app dist/__MACOSX
 
 echo "OK: ${HOME}/Applications/Goban.app"
 echo "    dist/Goban-macOS-arm64.zip"

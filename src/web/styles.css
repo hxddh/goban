@@ -199,9 +199,15 @@
       transition: transform .28s var(--ease);
       box-shadow: -12px 0 40px rgba(0,0,0,.22);
       overflow-y: auto;
+      overflow-x: hidden;
       scrollbar-width: thin;
+      /* Closed: ignore pointer/hit testing so half-visible glitches can't steal clicks */
+      pointer-events: none;
     }
-    #app.panel-open .side { transform: translateX(0); }
+    #app.panel-open .side {
+      transform: translateX(0);
+      pointer-events: auto;
+    }
 
     /* —— side: more air, less density —— */
     .side-head {

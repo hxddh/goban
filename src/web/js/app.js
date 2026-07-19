@@ -447,6 +447,10 @@
   function finishConfirm(value) {
     const modal = document.getElementById("confirm-modal");
     if (modal) modal.classList.remove("show");
+    // Avoid leaving focus on a now-hidden dialog button (can surface off-screen UI).
+    try {
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    } catch (_) {}
     if (confirmResolver) {
       const r = confirmResolver;
       confirmResolver = null;
@@ -827,26 +831,69 @@
   let panelAnimUntil = 0;
   let panelAnimActive = false;
 
+  function isPanelOpen() {
+    return appEl.classList.contains("panel-open");
+  }
+
   function setPanelOpen(open) {
-    appEl.classList.toggle("panel-open", open);
-    appEl.classList.toggle("scrim-on", open && window.innerWidth < 900);
-    Host.storageSet(PANEL_KEY, open ? "1" : "0");
+    const want = !!open;
+    const was = isPanelOpen();
+    appEl.classList.toggle("panel-open", want);
+    appEl.classList.toggle("scrim-on", want && window.innerWidth < 900);
+    Host.storageSet(PANEL_KEY, want ? "1" : "0");
+    // Keep closed sidebar out of tab order / a11y tree (also stops focus-driven reveals).
+    const side = document.getElementById("side");
+    if (side) {
+      if (want) {
+        side.removeAttribute("inert");
+        side.setAttribute("aria-hidden", "false");
+      } else {
+        side.setAttribute("inert", "");
+        side.setAttribute("aria-hidden", "true");
+        // Drop focus that may sit on a control inside the off-screen panel.
+        if (side.contains(document.activeElement) && document.activeElement.blur) {
+          document.activeElement.blur();
+        }
+      }
+    }
     // Follow the .28s CSS layout transition frame-by-frame, then settle —
     // a single mid-transition resize left the canvas at a stale size.
     panelAnimUntil = performance.now() + 340;
-    if (panelAnimActive) return;
-    panelAnimActive = true;
-    const tick = () => {
-      resizeCanvas();
-      draw();
-      if (performance.now() < panelAnimUntil) requestAnimationFrame(tick);
-      else panelAnimActive = false;
-    };
-    requestAnimationFrame(tick);
+    if (!panelAnimActive) {
+      panelAnimActive = true;
+      const tick = () => {
+        resizeCanvas();
+        draw();
+        if (performance.now() < panelAnimUntil) requestAnimationFrame(tick);
+        else {
+          panelAnimActive = false;
+          // After open animation, scroll move list without using scrollIntoView on page.
+          if (want) scrollMoveListToCurrent();
+        }
+      };
+      requestAnimationFrame(tick);
+    } else if (want && !was) {
+      // Already animating; still schedule list scroll after settle.
+      setTimeout(() => {
+        if (isPanelOpen()) scrollMoveListToCurrent();
+      }, 320);
+    }
   }
 
   function togglePanel() {
-    setPanelOpen(!appEl.classList.contains("panel-open"));
+    setPanelOpen(!isPanelOpen());
+  }
+
+  /** Scroll #move-list only — never element.scrollIntoView (pulls closed panel into view in WKWebView). */
+  function scrollMoveListToCurrent() {
+    const el = document.getElementById("move-list");
+    if (!el || !isPanelOpen()) return;
+    const cur = el.querySelector("button.cur");
+    if (!cur) return;
+    const listH = el.clientHeight;
+    if (listH <= 0) return;
+    const top = cur.offsetTop - listH / 2 + cur.offsetHeight / 2;
+    el.scrollTop = Math.max(0, Math.min(top, el.scrollHeight - listH));
   }
 
   Draw.attach(canvas, ctx, () => ({
@@ -1034,20 +1081,26 @@
       for (let i = 0; i < history.length; i++) {
         const p = history[i];
         const lab = String.fromCharCode(65 + p.c) + (SIZE - p.r);
-        html += '<button type="button" data-i="' + (i + 1) + '">' + (i + 1) + ". " + lab + "</button>";
+        // tabindex=-1: list is navigated by click / replay keys, not Tab-steal from board
+        html +=
+          '<button type="button" tabindex="-1" data-i="' +
+          (i + 1) +
+          '">' +
+          (i + 1) +
+          ". " +
+          lab +
+          "</button>";
       }
       el.innerHTML = html;
     }
     const btns = el.children;
-    let cur = null;
     for (let i = 0; i < btns.length; i++) {
-      const on = i + 1 === viewIndex;
-      btns[i].classList.toggle("cur", on);
-      if (on) cur = btns[i];
+      btns[i].classList.toggle("cur", i + 1 === viewIndex);
     }
-    if (cur && typeof cur.scrollIntoView === "function") {
-      cur.scrollIntoView({ block: "nearest" });
-    }
+    // Only adjust scroll when the panel is actually open. scrollIntoView on an
+    // off-screen (translateX(100%)) button makes WKWebView yank the sidebar
+    // partially into view every move — the "auto pop incomplete panel" bug.
+    if (isPanelOpen()) scrollMoveListToCurrent();
   }
 
   function updateClock() {
@@ -1355,7 +1408,17 @@
       return;
     }
     if (ev.key === "?" || (ev.shiftKey && k === "/")) { openHelp(); return; }
-    if (ev.key === "Tab") { ev.preventDefault(); togglePanel(); return; }
+    if (ev.key === "Tab") {
+      // Tab = panel toggle only when not chorded (Shift+Tab etc. still toggle — intentional).
+      // Ignore when focus is already in a text field (future-proof).
+      const tag = (document.activeElement && document.activeElement.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || (document.activeElement && document.activeElement.isContentEditable)) {
+        return;
+      }
+      ev.preventDefault();
+      togglePanel();
+      return;
+    }
     if (ev.key === "ArrowLeft") { ev.preventDefault(); setViewIndex(viewIndex - 1); return; }
     if (ev.key === "ArrowRight") { ev.preventDefault(); setViewIndex(viewIndex + 1); return; }
     if (ev.key === "Home") { ev.preventDefault(); setViewIndex(0); return; }
@@ -1435,6 +1498,7 @@
   loadSettings();
   document.documentElement.setAttribute("data-theme", themeId);
   const savedPanel = Host.storageGet(PANEL_KEY);
+  // Restore only if user left panel open; always run setPanelOpen so inert/aria apply.
   setPanelOpen(savedPanel === "1");
 
   const resumed = tryLoadSave();
