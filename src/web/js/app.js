@@ -68,19 +68,69 @@
   let aiWorker = null;
   let aiReqId = 0;
   const aiPending = new Map();
+  /**
+   * 'init' | 'ready' | 'failed'. The packaged WKWebView cannot load classic
+   * worker scripts through the zero:// custom-scheme handler (workers bypass
+   * WKURLSchemeHandler), so the worker is built from a Blob of the engine
+   * sources fetched by the page — the page context CAN fetch them.
+   */
+  let workerState = "init";
+  let workerInitPromise = null;
+  let workerRestarts = 0;
+  let degradeToastShown = false;
 
-  function getAiWorker() {
-    if (aiWorker) return aiWorker;
-    if (typeof Worker === "undefined") return null;
+  const WORKER_SRC = ["js/core.js", "js/ai.js", "js/ai2.js", "js/ai-worker.js"];
+
+  function rejectAllPending(reason) {
+    const pend = Array.from(aiPending.values());
+    aiPending.clear();
+    pend.forEach((p) => {
+      try { p.reject(new Error(reason)); } catch (_) {}
+    });
+  }
+
+  function dropWorker(permanent) {
+    if (aiWorker) {
+      try { aiWorker.terminate(); } catch (_) {}
+    }
+    aiWorker = null;
+    if (permanent) workerState = "failed";
+    rejectAllPending("worker unavailable");
+  }
+
+  async function initAiWorker() {
+    if (aiWorker || workerState === "failed" || typeof Worker === "undefined") return;
+    // debug/diagnostic switch: force the degraded main-thread path
+    if (/[?&]noworker=1/.test(window.location.search)) {
+      workerState = "failed";
+      return;
+    }
     try {
-      const url = new URL("js/ai-worker.js", window.location.href).href;
-      aiWorker = new Worker(url);
-      aiWorker.onmessage = (ev) => {
+      const texts = await Promise.all(
+        WORKER_SRC.map((path) =>
+          fetch(path).then((r) => {
+            if (!r.ok) throw new Error("fetch " + path + ": " + r.status);
+            return r.text();
+          })
+        )
+      );
+      const blob = new Blob([texts.join("\n;\n")], { type: "text/javascript" });
+      const w = new Worker(URL.createObjectURL(blob));
+      let pongResolve = null;
+      w.onmessage = (ev) => {
         const data = ev.data || {};
+        if (data.pong) {
+          if (pongResolve) {
+            const r = pongResolve;
+            pongResolve = null;
+            r(!!data.engines);
+          }
+          return;
+        }
         if (data.type === "error" && !data.id) {
-          // worker bootstrap failed — disable worker
-          try { aiWorker.terminate(); } catch (_) {}
-          aiWorker = null;
+          // bootstrap failure: reject waiters NOW instead of leaving them to
+          // the safety timeout (the old gap behind "stuck thinking")
+          dropWorker(true);
           return;
         }
         const pending = aiPending.get(data.id);
@@ -89,35 +139,62 @@
         if (data.error) pending.reject(new Error(data.error));
         else pending.resolve(data.move || null);
       };
-      aiWorker.onerror = () => {
-        try { aiWorker.terminate(); } catch (_) {}
-        aiWorker = null;
-        aiPending.forEach((p) => p.reject(new Error("worker error")));
-        aiPending.clear();
+      w.onerror = () => {
+        dropWorker(false);
+        workerState = "init";
+        // one rebuild for transient faults, then give up for the session
+        if (workerRestarts++ < 1) workerInitPromise = initAiWorker();
+        else workerState = "failed";
       };
-      return aiWorker;
+      const healthy = await new Promise((resolve) => {
+        const t = setTimeout(() => resolve(false), 1500);
+        pongResolve = (ok) => {
+          clearTimeout(t);
+          resolve(ok);
+        };
+        try {
+          w.postMessage({ ping: true });
+        } catch (_) {
+          resolve(false);
+        }
+      });
+      if (!healthy || workerState === "failed") {
+        try { w.terminate(); } catch (_) {}
+        if (workerState !== "failed") workerState = "failed";
+        return;
+      }
+      aiWorker = w;
+      workerState = "ready";
     } catch (_) {
-      return null;
+      workerState = "failed";
     }
   }
 
+  /** Diagnostic hook for bug reports: current worker pipeline state. */
+  window.__gobanWorker = () => workerState;
+
   /**
-   * Run AI off-thread when possible (hard), else setTimeout yield.
+   * Run AI off-thread when the Blob worker is healthy; otherwise a DEGRADED
+   * main-thread run with a hard 600ms cap — the UI must never freeze for a
+   * full hard/extreme budget.
    * @returns {Promise<{r:number,c:number}|null>}
    */
-  function aiMoveAsync(opts) {
+  async function aiMoveAsync(opts) {
     const payload = {
       board: (opts && opts.board) || board,
       humanColor: (opts && opts.humanColor) || humanColor,
       side: opts && opts.side,
       difficulty: (opts && opts.difficulty) || difficulty,
     };
-    // anything above easy prefers the worker (C1/C2 can be heavy)
     const useWorker = payload.difficulty !== "easy";
     const timeMs =
       typeof (opts && opts.timeMs) === "number" ? opts.timeMs : budgetForDiff(payload.difficulty);
     const think = (opts && opts.think) || thinkLevel;
-    const w = useWorker ? getAiWorker() : null;
+    if (useWorker && workerState === "init" && workerInitPromise) {
+      try { await workerInitPromise; } catch (_) {}
+    }
+    const w = useWorker && workerState === "ready" ? aiWorker : null;
+    const cappedMs = Math.min(600, timeMs);
     if (w) {
       return new Promise((resolve) => {
         const id = ++aiReqId;
@@ -130,13 +207,10 @@
         };
         aiPending.set(id, {
           resolve: (move) => finish(move),
-          // Worker died: fall back on the main thread with a capped budget —
-          // a full hard/deep budget here would freeze the UI for seconds.
+          // worker died mid-request: capped main-thread fallback
           reject: () =>
             finish(
-              aiMoveSync(
-                Object.assign({}, payload, { timeMs: Math.min(200, timeMs), think: think })
-              )
+              aiMoveSync(Object.assign({}, payload, { timeMs: cappedMs, think: think }))
             ),
         });
         try {
@@ -150,25 +224,34 @@
             think: think,
           });
         } catch (e) {
-          finish(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs, think: think })));
+          finish(aiMoveSync(Object.assign({}, payload, { timeMs: cappedMs, think: think })));
           return;
         }
-        // safety: budget + margin for deep C1.c search
+        // safety net: budget + margin
         setTimeout(() => {
           if (settled) return;
           finish(
-            aiMoveSync(
-              Object.assign({}, payload, { timeMs: Math.min(200, timeMs), think: think })
-            )
+            aiMoveSync(Object.assign({}, payload, { timeMs: cappedMs, think: think }))
           );
         }, timeMs + 2000);
       });
     }
+    // degraded path
+    if (
+      useWorker &&
+      workerState === "failed" &&
+      (payload.difficulty === "hard" || payload.difficulty === "extreme") &&
+      !degradeToastShown
+    ) {
+      degradeToastShown = true;
+      toast("后台计算不可用，已降级速算");
+    }
     return new Promise((resolve) => {
+      // small delay lets the 思考中 status paint before the sync compute
       setTimeout(
         () =>
-          resolve(aiMoveSync(Object.assign({}, payload, { timeMs: timeMs, think: think }))),
-        0
+          resolve(aiMoveSync(Object.assign({}, payload, { timeMs: cappedMs, think: think }))),
+        30
       );
     });
   }
@@ -1511,8 +1594,9 @@
     elapsedBaseMs = 0;
   }
 
-  // Pre-warm the AI worker so the first computer reply has no cold-start hitch
-  if (mode === "ai" && difficulty !== "easy") getAiWorker();
+  // Build the Blob worker up-front so the first computer reply has no
+  // cold-start hitch (and degraded mode is known before it matters)
+  workerInitPromise = initAiWorker();
 
   resizeCanvas();
   sync();
