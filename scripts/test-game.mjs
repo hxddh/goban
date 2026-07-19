@@ -186,7 +186,7 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.18]"), "SGF AP version");
+  assert(text.includes("AP[Goban:1.19]"), "SGF AP version");
 }
 
 // importPaused persists only when open game

@@ -508,34 +508,38 @@
   }
 
   async function requestHint() {
-    if (result !== "play") {
-      toast("对局已结束");
-      return;
-    }
-    if (!isLive()) {
-      toast("请先回到最新一手再提示");
-      return;
-    }
-    if (importPaused && mode === "ai" && !isHumanTurn()) {
-      toast("请先点「续下」");
-      return;
-    }
     if (aiThinking || hintBusy) {
       toast("请稍候…");
       return;
     }
-    // Hint for the side to move (human's turn in AI mode, or either in pvp)
-    if (mode === "ai" && !isHumanTurn()) {
-      toast("轮到电脑时无需提示");
+    const live = isLive();
+    if (live) {
+      if (result !== "play") {
+        toast("对局已结束");
+        return;
+      }
+      if (importPaused && mode === "ai" && !isHumanTurn()) {
+        toast("请先点「续下」");
+        return;
+      }
+      // Hint for the side to move (human's turn in AI mode, or either in pvp)
+      if (mode === "ai" && !isHumanTurn()) {
+        toast("轮到电脑时无需提示");
+        return;
+      }
+    } else if (winLineAt(viewIndex)) {
+      // analysis mode works on any browsed position, except a finished one
+      toast("此局面已成五");
       return;
     }
     hintBusy = true;
     hoverCell = null;
     sync();
-    const side = history.length % 2 === 0 ? "b" : "w";
+    const reqView = live ? history.length : viewIndex;
+    const side = reqView % 2 === 0 ? "b" : "w";
     const gen = gameGen;
     const histLen = history.length;
-    const liveBoard = boardAfter(history.length);
+    const liveBoard = boardAfter(reqView);
     // pvp has no difficulty knob visible — always hint at full strength there
     const hintDiff = mode === "pvp" ? "hard" : difficulty === "easy" ? "normal" : difficulty;
     // extreme hints would take 5s+; hard-level hints are plenty
@@ -548,8 +552,11 @@
         think: thinkLevel,
         timeMs: budgetForDiff(hintDiff2),
       });
-      if (gen !== gameGen || histLen !== history.length || !isLive()) {
-        // discarded late result (new game / stone placed / browsing replay)
+      const stillHere =
+        gen === gameGen &&
+        (live ? histLen === history.length && isLive() : viewIndex === reqView);
+      if (!stillHere) {
+        // discarded late result (new game / stone placed / view moved)
       } else if (!m) {
         toast("没有可用提示");
         hintCell = null;
@@ -1014,6 +1021,35 @@
     maybeAiTurn();
   }
 
+  /** Sidebar move list: rebuilt when moves change, highlight follows view. */
+  let mlSig = "";
+  function renderMoveList() {
+    const el = document.getElementById("move-list");
+    if (!el) return;
+    const last = history.length ? history[history.length - 1] : null;
+    const sig = history.length + ":" + (last ? last.r + "," + last.c : "") + ":" + gameGen;
+    if (sig !== mlSig) {
+      mlSig = sig;
+      let html = "";
+      for (let i = 0; i < history.length; i++) {
+        const p = history[i];
+        const lab = String.fromCharCode(65 + p.c) + (SIZE - p.r);
+        html += '<button type="button" data-i="' + (i + 1) + '">' + (i + 1) + ". " + lab + "</button>";
+      }
+      el.innerHTML = html;
+    }
+    const btns = el.children;
+    let cur = null;
+    for (let i = 0; i < btns.length; i++) {
+      const on = i + 1 === viewIndex;
+      btns[i].classList.toggle("cur", on);
+      if (on) cur = btns[i];
+    }
+    if (cur && typeof cur.scrollIntoView === "function") {
+      cur.scrollIntoView({ block: "nearest" });
+    }
+  }
+
   function updateClock() {
     const el = formatDuration(nowElapsed());
     const c1 = document.getElementById("clock");
@@ -1072,6 +1108,7 @@
     document.getElementById("info-moves").textContent =
       history.length + (live ? "" : "·看" + viewIndex);
     document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
+    renderMoveList();
     updateClock();
 
     undoBtns.forEach((b) => {
@@ -1093,12 +1130,11 @@
     const hintBtn = document.getElementById("btn-hint");
     if (hintBtn) {
       const canHint =
-        result === "play" &&
-        isLive() &&
         !aiThinking &&
         !hintBusy &&
-        !(mode === "ai" && !isHumanTurn()) &&
-        !(importPaused && mode === "ai" && !isHumanTurn());
+        (isLive()
+          ? result === "play" && !(mode === "ai" && !isHumanTurn())
+          : true);
       hintBtn.disabled = !canHint;
       hintBtn.classList.toggle("busy", hintBusy);
     }
@@ -1187,6 +1223,13 @@
   document.getElementById("collapse").onclick = () => setPanelOpen(false);
   document.getElementById("scrim").onclick = () => setPanelOpen(false);
 
+  const mlEl = document.getElementById("move-list");
+  if (mlEl) {
+    mlEl.onclick = (ev) => {
+      const b = ev.target.closest("button[data-i]");
+      if (b) setViewIndex(Number(b.dataset.i));
+    };
+  }
   document.getElementById("rep-start").onclick = () => setViewIndex(0);
   document.getElementById("rep-prev").onclick = () => setViewIndex(viewIndex - 1);
   document.getElementById("rep-next").onclick = () => setViewIndex(viewIndex + 1);
