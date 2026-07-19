@@ -521,16 +521,18 @@
     const gen = gameGen;
     const histLen = history.length;
     const liveBoard = boardAfter(history.length);
+    // pvp has no difficulty knob visible — always hint at full strength there
+    const hintDiff = mode === "pvp" ? "hard" : difficulty === "easy" ? "normal" : difficulty;
     try {
       const m = await aiMoveAsync({
         board: liveBoard,
         side: side,
-        difficulty: difficulty === "easy" ? "normal" : difficulty,
+        difficulty: hintDiff,
         think: thinkLevel,
-        timeMs: budgetForDiff(difficulty === "easy" ? "normal" : difficulty),
+        timeMs: budgetForDiff(hintDiff),
       });
-      if (gen !== gameGen || histLen !== history.length) {
-        // discarded late result (new game or a stone was placed meanwhile)
+      if (gen !== gameGen || histLen !== history.length || !isLive()) {
+        // discarded late result (new game / stone placed / browsing replay)
       } else if (!m) {
         toast("没有可用提示");
         hintCell = null;
@@ -549,7 +551,6 @@
     }
   }
 
-  /** SGF: col a–o left→right; row a–o bottom→top (Go FF4). */
 
 
 
@@ -795,12 +796,25 @@
     }
   }
 
+  let panelAnimUntil = 0;
+  let panelAnimActive = false;
+
   function setPanelOpen(open) {
     appEl.classList.toggle("panel-open", open);
     appEl.classList.toggle("scrim-on", open && window.innerWidth < 900);
     Host.storageSet(PANEL_KEY, open ? "1" : "0");
-    requestAnimationFrame(() => { resizeCanvas(); draw(); });
-    setTimeout(() => { resizeCanvas(); draw(); }, 220);
+    // Follow the .28s CSS layout transition frame-by-frame, then settle —
+    // a single mid-transition resize left the canvas at a stale size.
+    panelAnimUntil = performance.now() + 340;
+    if (panelAnimActive) return;
+    panelAnimActive = true;
+    const tick = () => {
+      resizeCanvas();
+      draw();
+      if (performance.now() < panelAnimUntil) requestAnimationFrame(tick);
+      else panelAnimActive = false;
+    };
+    requestAnimationFrame(tick);
   }
 
   function togglePanel() {

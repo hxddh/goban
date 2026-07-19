@@ -92,6 +92,33 @@ function assert(cond, msg) {
   assert(Sgf.parseSgf("(;SZ[19];B[dd])").error.includes("19"), "size mismatch");
 }
 
+// sgf FF4 orientation: "aa" is the TOP-left corner (col, row from top)
+{
+  assert(Sgf.sgfCoord(0, 0) === "aa", "sgfCoord top-left aa");
+  assert(Sgf.sgfCoord(14, 14) === "oo", "sgfCoord bottom-right oo");
+  assert(Sgf.sgfCoord(0, 14) === "oa", "sgfCoord top-right oa");
+  const p0 = Sgf.parseSgfCoord("aa");
+  assert(p0 && p0.r === 0 && p0.c === 0, "parse aa = top-left");
+  const p1 = Sgf.parseSgfCoord("ao");
+  assert(p1 && p1.r === 14 && p1.c === 0, "parse ao = bottom-left");
+}
+
+// sgf: AB[] setup props and comment text must not read as moves
+{
+  const r = Sgf.parseSgf("(;FF[4]SZ[15]AB[hh]C[try B[ii] later];B[aa];W[bb])");
+  assert(!r.error && r.history.length === 2, "AB/comment not moves " + JSON.stringify(r));
+  assert(r.history[0].r === 0 && r.history[0].c === 0, "first move aa");
+  assert(r.history[1].r === 1 && r.history[1].c === 1, "second move bb");
+  const esc = Sgf.parseSgf("(;FF[4]SZ[15];B[aa]C[escaped \\] B[cc] more];W[bb])");
+  assert(!esc.error && esc.history.length === 2, "escaped ] in comment " + JSON.stringify(esc));
+}
+
+// sgf: local-time filename shape
+{
+  const name = Sgf.fileNameFromDate(new Date(2026, 0, 2, 3, 4, 5).getTime());
+  assert(name === "goban-20260102030405.sgf", "local filename " + name);
+}
+
 // state import helper does not imply AI; sets importPaused for continue
 {
   const hist = [
