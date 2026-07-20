@@ -9,6 +9,8 @@
   const SIZE = Core.SIZE;
   const WIN = Core.WIN;
   const SAVE_KEY = "goban.v12.save";
+  const SLOTS_KEY = "goban.v12.slots";
+  const SLOTS_MAX = 30;
   const SETTINGS_KEY = "goban.v11.settings";
   const PANEL_KEY = "goban.panelOpen";
 
@@ -1083,59 +1085,202 @@
     if (hint) hint.textContent = "无存档";
   }
 
+  /**
+   * Load a parsed snapshot (from autosave or a named slot) into live game
+   * state. Recomputes result/win-line from history — stale save fields are
+   * never trusted. @returns {boolean} true when applied.
+   */
+  function applySnapshot(s) {
+    if (!s || (s.v !== 1 && s.v !== 2 && s.v !== 3)) return false;
+    // Resume only with a move list — board-only snapshots cannot place safely.
+    const loadedHistory = Array.isArray(s.history) ? s.history : [];
+    if (!loadedHistory.length) return false;
+    // Validate move coords (strict: `undefined < 0` is false, so type-check too)
+    for (let i = 0; i < loadedHistory.length; i++) {
+      const p = loadedHistory[i];
+      if (
+        !p ||
+        !Number.isInteger(p.r) ||
+        !Number.isInteger(p.c) ||
+        p.r < 0 || p.r >= SIZE || p.c < 0 || p.c >= SIZE
+      ) return false;
+    }
+    history = loadedHistory;
+    mode = s.mode === "pvp" ? "pvp" : "ai";
+    difficulty = s.difficulty || "normal";
+    humanColor = s.humanColor === "w" ? "w" : "b";
+    viewIndex = history.length;
+    board = boardAfter(history.length);
+    // Recompute result / win line from history (do not trust stale save fields)
+    turn = history.length % 2 === 0 ? "b" : "w";
+    result = "play";
+    winLine = null;
+    if (history.length) {
+      const last = history[history.length - 1];
+      const lastColor = (history.length - 1) % 2 === 0 ? "b" : "w";
+      const line = Core.findWin(board, last.r, last.c, lastColor);
+      if (line) {
+        result = lastColor;
+        winLine = line;
+      } else if (Core.boardFull(board)) {
+        result = "draw";
+      }
+    }
+    elapsedBaseMs = typeof s.elapsedBaseMs === "number" ? s.elapsedBaseMs : 0;
+    originalStartedAt = typeof s.originalStartedAt === "number"
+      ? s.originalStartedAt
+      : (Date.now() - elapsedBaseMs);
+    startedAt = Date.now();
+    // v3+: restore import pause so AI does not auto-continue after import-only save.
+    importPaused = s.v >= 3 && !!s.importPaused && result === "play";
+    hoverCell = null;
+    clearHint();
+    return true;
+  }
+
   function tryLoadSave() {
     try {
       const raw = Host.storageGet(SAVE_KEY) || Host.storageGet("goban.v11.save");
       if (!raw) return false;
-      const s = JSON.parse(raw);
-      if (!s || (s.v !== 1 && s.v !== 2 && s.v !== 3)) return false;
-      // Resume only with a move list — board-only snapshots cannot place safely.
-      const loadedHistory = Array.isArray(s.history) ? s.history : [];
-      if (!loadedHistory.length) return false;
-      // Validate move coords (strict: `undefined < 0` is false, so type-check too)
-      for (let i = 0; i < loadedHistory.length; i++) {
-        const p = loadedHistory[i];
-        if (
-          !p ||
-          !Number.isInteger(p.r) ||
-          !Number.isInteger(p.c) ||
-          p.r < 0 || p.r >= SIZE || p.c < 0 || p.c >= SIZE
-        ) return false;
-      }
-      history = loadedHistory;
-      mode = s.mode === "pvp" ? "pvp" : "ai";
-      difficulty = s.difficulty || "normal";
-      humanColor = s.humanColor === "w" ? "w" : "b";
-      viewIndex = history.length;
-      board = boardAfter(history.length);
-      // Recompute result / win line from history (do not trust stale save fields)
-      turn = history.length % 2 === 0 ? "b" : "w";
-      result = "play";
-      winLine = null;
-      if (history.length) {
-        const last = history[history.length - 1];
-        const lastColor = (history.length - 1) % 2 === 0 ? "b" : "w";
-        const line = Core.findWin(board, last.r, last.c, lastColor);
-        if (line) {
-          result = lastColor;
-          winLine = line;
-        } else if (Core.boardFull(board)) {
-          result = "draw";
-        }
-      }
-      elapsedBaseMs = typeof s.elapsedBaseMs === "number" ? s.elapsedBaseMs : 0;
-      originalStartedAt = typeof s.originalStartedAt === "number"
-        ? s.originalStartedAt
-        : (Date.now() - elapsedBaseMs);
-      startedAt = Date.now();
-      // v3+: restore import pause so AI does not auto-continue after import-only save.
-      importPaused = s.v >= 3 && !!s.importPaused && result === "play";
-      hoverCell = null;
-      clearHint();
-      return true;
+      return applySnapshot(JSON.parse(raw));
     } catch (_) {
       return false;
     }
+  }
+
+  // --- named save slots (manual, alongside the single autosave) ---
+  function loadSlots() {
+    try {
+      const raw = Host.storageGet(SLOTS_KEY);
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter((s) => s && s.snap) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function persistSlots(arr) {
+    try {
+      Host.storageSet(SLOTS_KEY, JSON.stringify(arr.slice(0, SLOTS_MAX)));
+    } catch (_) {}
+  }
+
+  function resultLabel(r) {
+    return r === "b" ? "黑胜" : r === "w" ? "白胜" : r === "draw" ? "平局" : "进行中";
+  }
+
+  function slotDate(ts) {
+    const d = new Date(ts || Date.now());
+    const p = (n) => String(n).padStart(2, "0");
+    return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  function slotMetaText(snap) {
+    const moves = (snap.history && snap.history.length) || 0;
+    return moves + "手 · " + resultLabel(snap.result) + " · " + slotDate(snap.savedAt);
+  }
+
+  function genSlotId() {
+    return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6);
+  }
+
+  /** Save the current game as a new named slot. */
+  function saveCurrentAsSlot() {
+    if (!history.length) { toast("当前没有可保存的对局"); return; }
+    const snap = serialize();
+    const slot = {
+      id: genSlotId(),
+      name: "对局 " + slotDate(Date.now()),
+      savedAt: Date.now(),
+      snap,
+    };
+    const arr = loadSlots();
+    arr.unshift(slot);
+    persistSlots(arr);
+    renderSlots();
+    toast("已保存到存档");
+  }
+
+  async function loadSlotById(id) {
+    const arr = loadSlots();
+    const slot = arr.find((s) => s.id === id);
+    if (!slot) return;
+    if (history.length &&
+        !(await confirmNative("读取存档将替换当前对局，是否继续？", "读取存档", { ok: "读取", cancel: "取消" }))) {
+      return;
+    }
+    if (!applySnapshot(slot.snap)) { toast("存档已损坏，无法读取"); return; }
+    gameGen += 1;
+    clearAnalysis();
+    closeSlots();
+    sync();
+    saveGame();
+    maybeAiTurn();
+    toast("已读取存档");
+  }
+
+  async function deleteSlotById(id) {
+    const arr = loadSlots();
+    const slot = arr.find((s) => s.id === id);
+    if (!slot) return;
+    if (!(await confirmNative("删除存档「" + slot.name + "」？", "删除存档", { ok: "删除", cancel: "取消" }))) {
+      return;
+    }
+    persistSlots(arr.filter((s) => s.id !== id));
+    renderSlots();
+    toast("存档已删除");
+  }
+
+  function renameSlot(id, name) {
+    const arr = loadSlots();
+    const slot = arr.find((s) => s.id === id);
+    if (!slot) return;
+    const clean = (name || "").trim().slice(0, 40);
+    slot.name = clean || ("对局 " + slotDate(slot.savedAt));
+    persistSlots(arr);
+  }
+
+  function renderSlots() {
+    const list = document.getElementById("slots-list");
+    const empty = document.getElementById("slots-empty");
+    if (!list) return;
+    const arr = loadSlots();
+    if (empty) empty.hidden = arr.length > 0;
+    list.innerHTML = "";
+    for (const slot of arr) {
+      const row = document.createElement("div");
+      row.className = "slot-row";
+      row.dataset.id = slot.id;
+      const nameEl = document.createElement("input");
+      nameEl.className = "slot-name";
+      nameEl.value = slot.name;
+      nameEl.maxLength = 40;
+      nameEl.setAttribute("aria-label", "存档名");
+      const meta = document.createElement("div");
+      meta.className = "slot-meta";
+      meta.textContent = slotMetaText(slot.snap);
+      const ops = document.createElement("div");
+      ops.className = "slot-ops";
+      ops.innerHTML =
+        '<button type="button" class="text-link slot-load" data-id="' + slot.id + '">读取</button>' +
+        '<button type="button" class="text-link danger slot-del" data-id="' + slot.id + '">删除</button>';
+      row.appendChild(nameEl);
+      row.appendChild(meta);
+      row.appendChild(ops);
+      list.appendChild(row);
+    }
+  }
+
+  function openSlots() {
+    renderSlots();
+    const m = document.getElementById("slots-modal");
+    if (m) m.classList.add("show");
+  }
+
+  function closeSlots() {
+    const m = document.getElementById("slots-modal");
+    if (m) m.classList.remove("show");
   }
 
   let panelAnimUntil = 0;
@@ -1627,6 +1772,38 @@
   const pasteEl = document.getElementById("sgf-paste");
   if (pasteEl) pasteEl.onclick = () => { pasteSgfFromClipboard(); };
 
+  const slotsEl = document.getElementById("sgf-slots");
+  if (slotsEl) slotsEl.onclick = () => { openSlots(); };
+  const slotSaveEl = document.getElementById("slot-save-current");
+  if (slotSaveEl) slotSaveEl.onclick = () => { saveCurrentAsSlot(); };
+  const slotsCloseEl = document.getElementById("slots-close");
+  if (slotsCloseEl) slotsCloseEl.onclick = () => { closeSlots(); };
+  const slotsModalEl = document.getElementById("slots-modal");
+  if (slotsModalEl) slotsModalEl.onclick = (ev) => { if (ev.target === slotsModalEl) closeSlots(); };
+  const slotsListEl = document.getElementById("slots-list");
+  if (slotsListEl) {
+    slotsListEl.addEventListener("click", (ev) => {
+      const b = ev.target.closest("button[data-id]");
+      if (!b) return;
+      if (b.classList.contains("slot-load")) loadSlotById(b.dataset.id);
+      else if (b.classList.contains("slot-del")) deleteSlotById(b.dataset.id);
+    });
+    // rename persists on commit (Enter / blur), not on every keystroke
+    const commitRename = (ev) => {
+      const inp = ev.target.closest(".slot-name");
+      if (!inp) return;
+      const row = inp.closest(".slot-row");
+      if (row) renameSlot(row.dataset.id, inp.value);
+    };
+    slotsListEl.addEventListener("change", commitRename);
+    slotsListEl.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && ev.target.classList.contains("slot-name")) {
+        ev.preventDefault();
+        ev.target.blur();
+      }
+    });
+  }
+
   document.getElementById("mode-seg").onclick = async (ev) => {
     const b = ev.target.closest("button[data-mode]");
     if (!b) return;
@@ -1726,8 +1903,10 @@
 
   window.addEventListener("keydown", (ev) => {
     const k = ev.key.toLowerCase();
+    const slotsModal = document.getElementById("slots-modal");
     if (ev.key === "Escape") {
       if (confirmModal.classList.contains("show")) { finishConfirm(false); return; }
+      if (slotsModal && slotsModal.classList.contains("show")) { closeSlots(); return; }
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
       if (appEl.classList.contains("panel-open")) setPanelOpen(false);
       return;
@@ -1743,7 +1922,8 @@
       }
       return;
     }
-    // Ignore game shortcuts while help is open (Esc closes it above)
+    // Ignore game shortcuts while a modal is open (Esc closes it above)
+    if (slotsModal && slotsModal.classList.contains("show")) return;
     if (helpModal.classList.contains("show")) {
       if (ev.key === "?" || (ev.shiftKey && k === "/")) { closeHelp(); return; }
       return;
