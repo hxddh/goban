@@ -1283,6 +1283,155 @@
     if (m) m.classList.remove("show");
   }
 
+  // --- whole-game review (复盘 2.0): eval curve + blunder list ---
+  const REVIEW_SQUASH = 1200;   // static-eval scale → tanh spread
+  const REVIEW_BLUNDER_DROP = 0.3; // squashed-advantage loss that flags a mistake
+  let reviewData = null;
+
+  /** Signed advantage from Black's perspective at ply i, squashed to [-1,1]. */
+  function advAt(i) {
+    if (i > 0 && winLineAt(i)) return (i - 1) % 2 === 0 ? 1 : -1; // someone just won
+    const raw = Ai.evaluateBoard(boardAfter(i), "b");
+    return Math.tanh(raw / REVIEW_SQUASH);
+  }
+
+  /** Analyze the whole game: per-ply Black-advantage + flagged blunders. */
+  function computeReview() {
+    const N = history.length;
+    const adv = [];
+    for (let i = 0; i <= N; i++) adv.push(advAt(i));
+    const blunders = [];
+    let bCount = 0, wCount = 0;
+    for (let i = 1; i <= N; i++) {
+      const color = (i - 1) % 2 === 0 ? "b" : "w";
+      const hard = coachFacts(boardAfter(i - 1), color, history[i - 1]);
+      let reason = null;
+      if (hard && hard.grade === "blunder") reason = hard.text;
+      else {
+        // advantage from the mover's own perspective before vs after
+        const before = color === "b" ? adv[i - 1] : -adv[i - 1];
+        const after = color === "b" ? adv[i] : -adv[i];
+        if (before - after >= REVIEW_BLUNDER_DROP) reason = "评分下滑";
+      }
+      if (reason) {
+        blunders.push({ i, color, reason });
+        if (color === "b") bCount++; else wCount++;
+      }
+    }
+    reviewData = { adv, blunders, summary: { b: bCount, w: wCount } };
+    return reviewData;
+  }
+
+  function drawReviewCurve() {
+    const cv = document.getElementById("review-curve");
+    if (!cv || !reviewData) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = cv.clientWidth || 320;
+    const cssH = cv.clientHeight || 96;
+    cv.width = Math.round(cssW * dpr);
+    cv.height = Math.round(cssH * dpr);
+    const g = cv.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, cssW, cssH);
+    const adv = reviewData.adv;
+    const n = adv.length;
+    const pad = 6;
+    const w = cssW - pad * 2;
+    const h = cssH - pad * 2;
+    const x = (i) => pad + (n <= 1 ? 0 : (i / (n - 1)) * w);
+    const y = (v) => pad + (1 - (v + 1) / 2) * h; // +1 top (black), −1 bottom (white)
+    const css = getComputedStyle(document.documentElement);
+    const line = css.getPropertyValue("--accent").trim() || "#3b82f6";
+    const mid = css.getPropertyValue("--card-border").trim() || "#ccc";
+    // zero (even) midline
+    g.strokeStyle = mid; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(pad, y(0)); g.lineTo(pad + w, y(0)); g.stroke();
+    // advantage area
+    g.beginPath();
+    g.moveTo(x(0), y(adv[0]));
+    for (let i = 1; i < n; i++) g.lineTo(x(i), y(adv[i]));
+    g.lineTo(x(n - 1), y(0)); g.lineTo(x(0), y(0)); g.closePath();
+    g.fillStyle = (line || "#3b82f6") + "22";
+    g.fill();
+    // advantage line
+    g.beginPath();
+    g.moveTo(x(0), y(adv[0]));
+    for (let i = 1; i < n; i++) g.lineTo(x(i), y(adv[i]));
+    g.strokeStyle = line; g.lineWidth = 1.8; g.lineJoin = "round";
+    g.stroke();
+    // blunder dots
+    for (const b of reviewData.blunders) {
+      g.beginPath();
+      g.arc(x(b.i), y(adv[b.i]), 3, 0, Math.PI * 2);
+      g.fillStyle = css.getPropertyValue("--win").trim() || "#c0392b";
+      g.fill();
+    }
+    // current view marker
+    if (viewIndex >= 0 && viewIndex < n) {
+      g.strokeStyle = line; g.globalAlpha = 0.4; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x(viewIndex), pad); g.lineTo(x(viewIndex), pad + h); g.stroke();
+      g.globalAlpha = 1;
+    }
+  }
+
+  function reviewJump(i) {
+    setViewIndex(i);
+    closeReview();
+  }
+
+  function renderReview() {
+    const empty = document.getElementById("review-empty");
+    const body = document.getElementById("review-body");
+    if (history.length < 2) {
+      if (empty) empty.hidden = false;
+      if (body) body.hidden = true;
+      return;
+    }
+    computeReview();
+    if (empty) empty.hidden = true;
+    if (body) body.hidden = false;
+    const stat = document.getElementById("review-stat");
+    if (stat) {
+      const s = reviewData.summary;
+      stat.textContent = "失着 · 黑 " + s.b + " · 白 " + s.w +
+        (s.b + s.w === 0 ? " · 双方无明显失误" : "");
+    }
+    const list = document.getElementById("review-blunders");
+    if (list) {
+      list.innerHTML = "";
+      if (!reviewData.blunders.length) {
+        const p = document.createElement("div");
+        p.className = "muted review-none";
+        p.textContent = "没有检出明显失着 👍";
+        list.appendChild(p);
+      }
+      for (const b of reviewData.blunders) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "review-blunder-row";
+        row.dataset.i = b.i;
+        const who = b.color === "b" ? "黑" : "白";
+        row.innerHTML =
+          '<span class="rb-move">第' + b.i + '手 ' + who + '</span>' +
+          '<span class="rb-reason">' + b.reason + '</span>';
+        list.appendChild(row);
+      }
+    }
+    // draw after layout so clientWidth is real
+    requestAnimationFrame(drawReviewCurve);
+  }
+
+  function openReview() {
+    renderReview();
+    const m = document.getElementById("review-modal");
+    if (m) m.classList.add("show");
+  }
+
+  function closeReview() {
+    const m = document.getElementById("review-modal");
+    if (m) m.classList.remove("show");
+  }
+
   let panelAnimUntil = 0;
   let panelAnimActive = false;
 
@@ -1774,6 +1923,31 @@
 
   const slotsEl = document.getElementById("sgf-slots");
   if (slotsEl) slotsEl.onclick = () => { openSlots(); };
+
+  const reviewEl = document.getElementById("sgf-review");
+  if (reviewEl) reviewEl.onclick = () => { openReview(); };
+  const reviewCloseEl = document.getElementById("review-close");
+  if (reviewCloseEl) reviewCloseEl.onclick = () => { closeReview(); };
+  const reviewModalEl = document.getElementById("review-modal");
+  if (reviewModalEl) reviewModalEl.onclick = (ev) => { if (ev.target === reviewModalEl) closeReview(); };
+  const reviewBlundersEl = document.getElementById("review-blunders");
+  if (reviewBlundersEl) {
+    reviewBlundersEl.addEventListener("click", (ev) => {
+      const b = ev.target.closest("[data-i]");
+      if (b) reviewJump(Number(b.dataset.i));
+    });
+  }
+  const reviewCurveEl = document.getElementById("review-curve");
+  if (reviewCurveEl) {
+    reviewCurveEl.addEventListener("click", (ev) => {
+      if (!reviewData || reviewData.adv.length < 2) return;
+      const rect = reviewCurveEl.getBoundingClientRect();
+      const pad = 6;
+      const frac = (ev.clientX - rect.left - pad) / Math.max(1, rect.width - pad * 2);
+      const i = Math.round(Math.min(1, Math.max(0, frac)) * (reviewData.adv.length - 1));
+      reviewJump(i);
+    });
+  }
   const slotSaveEl = document.getElementById("slot-save-current");
   if (slotSaveEl) slotSaveEl.onclick = () => { saveCurrentAsSlot(); };
   const slotsCloseEl = document.getElementById("slots-close");
@@ -1904,9 +2078,11 @@
   window.addEventListener("keydown", (ev) => {
     const k = ev.key.toLowerCase();
     const slotsModal = document.getElementById("slots-modal");
+    const reviewModal = document.getElementById("review-modal");
     if (ev.key === "Escape") {
       if (confirmModal.classList.contains("show")) { finishConfirm(false); return; }
       if (slotsModal && slotsModal.classList.contains("show")) { closeSlots(); return; }
+      if (reviewModal && reviewModal.classList.contains("show")) { closeReview(); return; }
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
       if (appEl.classList.contains("panel-open")) setPanelOpen(false);
       return;
@@ -1924,6 +2100,7 @@
     }
     // Ignore game shortcuts while a modal is open (Esc closes it above)
     if (slotsModal && slotsModal.classList.contains("show")) return;
+    if (reviewModal && reviewModal.classList.contains("show")) return;
     if (helpModal.classList.contains("show")) {
       if (ev.key === "?" || (ev.shiftKey && k === "/")) { closeHelp(); return; }
       return;
