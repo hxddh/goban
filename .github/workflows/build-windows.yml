@@ -1,0 +1,71 @@
+name: build-windows
+
+# Builds goban.exe (x64) on a Windows runner using the system web engine
+# (Microsoft Edge WebView2, preinstalled on windows-latest). Native SDK comes
+# from npm (@native-sdk/cli), zig from ziglang.org. Optionally uploads the zip
+# to an existing release when release_tag is set. Exploratory: this is the
+# first non-macOS target — CI is the source of truth for whether it builds.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to upload the zip to (optional)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: unit tests
+        run: node scripts/test-game.mjs
+      - name: install Native SDK CLI
+        shell: bash
+        run: |
+          npm install -g @native-sdk/cli
+          native --version || true
+          echo "SDK_PATH=$(npm root -g)/@native-sdk/cli" >> "$GITHUB_ENV"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: sync frontend dist
+        shell: bash
+        run: |
+          rm -rf frontend/dist && mkdir -p frontend/dist/js
+          cp src/web/index.html src/web/styles.css frontend/dist/
+          cp src/web/js/*.js frontend/dist/js/
+          node scripts/gen-worker-src.mjs frontend/dist/js
+      - name: zig build
+        shell: bash
+        run: zig build -Doptimize=ReleaseFast -Dplatform=windows -Dnative-sdk-path="$SDK_PATH"
+      - name: package + zip
+        shell: bash
+        run: |
+          mkdir -p dist
+          native package --target windows --output dist/Goban --binary zig-out/bin/goban.exe
+          ls -R dist
+      - name: zip package
+        shell: pwsh
+        run: |
+          # Zip whatever native package produced under dist/ (a folder or a bare exe).
+          $src = if (Test-Path 'dist/Goban') { 'dist/Goban' } else { 'zig-out/bin/goban.exe' }
+          Compress-Archive -Path $src -DestinationPath 'dist/Goban-Windows-x64.zip' -Force
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Goban-Windows-x64
+          path: dist/Goban-Windows-x64.zip
+      - name: upload to release
+        if: ${{ inputs.release_tag != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: gh release upload "$TAG" dist/Goban-Windows-x64.zip --clobber
