@@ -1,13 +1,18 @@
 # 五子棋 Goban
 
-macOS 五子棋 — Native SDK WebView + Canvas。
+五子棋 — Native SDK WebView + Canvas，支持 macOS 与 Windows。
 
 ## 下载
 
-[Releases](https://github.com/hxddh/goban/releases) → **Goban-macOS-arm64.zip**（Apple Silicon）。
+[Releases](https://github.com/hxddh/goban/releases) 页任选：
+
+| 平台 | 产物 | 说明 |
+|------|------|------|
+| macOS（Apple Silicon） | **Goban-macOS-arm64.zip** | 解压后 `open ~/Applications/Goban.app`；首次右键「打开」过 Gatekeeper |
+| Windows（x64） | **Goban-Windows-x64.zip** | 解压后运行 `Goban/goban.exe`；需 WebView2 运行时（Win10/11 一般预装）；首次 SmartScreen 点「仍要运行」 |
 
 ```bash
-open ~/Applications/Goban.app   # 本地安装路径
+open ~/Applications/Goban.app   # macOS 本地安装路径
 ```
 
 ## 怎么玩
@@ -20,6 +25,8 @@ open ~/Applications/Goban.app   # 本地安装路径
 | 提示 | **H** / 顶栏「提示」：虚线十字建议点（不自动落子；**复盘中也可用**） |
 | 全屏 | **View → Enter Full Screen（⌘⌃F）**；绿键 Zoom |
 | 棋谱 | 手数列表点击跳转；复制 / 导出 / 导入 / **粘贴** SGF（可拖入 `.sgf`） |
+| 存档 | 侧栏·棋谱「**存档**」：命名保存当前对局、历史列表、读取 / 重命名 / 删除 |
+| 复盘 | 侧栏·棋谱「**复盘**」：一键全局分析 → **评分曲线 + 失着列表**，点曲线或失着跳转 |
 | 导入后 | 默认仅复盘；未终局可点 **续下** 继续（含 AI） |
 | 坐标 | 侧栏·外观：A–O / 15–1 标注开关 |
 | 复盘分析 | 侧栏·外观：开启后复盘逐手标注优劣（**制胜/错失胜着/漏防/最佳/更优**）；金色菱形指向引擎更优点 |

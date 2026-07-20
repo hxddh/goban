@@ -158,6 +158,8 @@
           <button type="button" class="text-link" id="sgf-download">导出</button>
           <button type="button" class="text-link" id="sgf-import">导入</button>
           <button type="button" class="text-link" id="sgf-paste" title="从剪贴板粘贴 SGF">粘贴</button>
+          <button type="button" class="text-link" id="sgf-slots" title="命名存档与历史对局">存档</button>
+          <button type="button" class="text-link" id="sgf-review" title="全局复盘：评分曲线与失着">复盘</button>
         </div>
         <button type="button" class="continue-btn" id="sgf-continue" hidden title="从导入局面继续对局">续下</button>
         <p class="hint">拖入 .sgf 或粘贴棋谱 · 导入后不自动续下</p>
@@ -201,6 +203,36 @@
         </table>
         <div class="close-row">
           <button type="button" class="tool-btn primary" id="help-close">知道了</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="slots-modal" role="dialog" aria-label="对局存档">
+      <div class="modal">
+        <h3>对局存档</h3>
+        <div class="slots-head">
+          <button type="button" class="tool-btn primary" id="slot-save-current">另存当前对局</button>
+          <span class="muted" id="slots-empty" hidden>还没有存档</span>
+        </div>
+        <div class="slots-list" id="slots-list"></div>
+        <div class="close-row">
+          <button type="button" class="tool-btn" id="slots-close">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="review-modal" role="dialog" aria-label="复盘分析">
+      <div class="modal review-modal">
+        <h3>复盘分析</h3>
+        <div id="review-empty" class="muted" hidden>先下几手再来复盘</div>
+        <div id="review-body" hidden>
+          <p class="review-hint">评分曲线（黑上 · 白下）· 红点为失着 · 点曲线或下方失着可跳转</p>
+          <canvas id="review-curve" class="review-curve" title="点击跳到对应手"></canvas>
+          <div class="review-stat" id="review-stat"></div>
+          <div class="review-blunders" id="review-blunders"></div>
+        </div>
+        <div class="close-row">
+          <button type="button" class="tool-btn" id="review-close">关闭</button>
         </div>
       </div>
     </div>
