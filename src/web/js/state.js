@@ -4,6 +4,20 @@
  */
 (function (global) {
   const Core = global.GobanCore;
+  const SIZE = Core.SIZE;
+
+  /** Scan the whole board for any five-in-a-row. @returns {{color,line}|null} */
+  function boardWinLine(board) {
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        const s = board[r][c];
+        if (!s) continue;
+        const line = Core.findWin(board, r, c, s);
+        if (line) return { color: s, line: line };
+      }
+    }
+    return null;
+  }
 
   function createSession() {
     const s = Core.createInitialState();
@@ -31,12 +45,14 @@
     session.gameGen = (session.gameGen || 0) + 1;
     session.importPaused = true;
 
-    const last = history[history.length - 1];
-    const lastColor = (history.length - 1) % 2 === 0 ? "b" : "w";
-    const line = Core.findWin(session.board, last.r, last.c, lastColor);
-    if (line) {
-      session.result = lastColor;
-      session.winLine = line;
+    // A five anywhere on the board ends the game — not only on the last move.
+    // Hand-edited or non-standard SGFs can carry a win mid-history followed by
+    // more stones; checking only the last move would import that as "playable"
+    // and let 续下 continue a decided position.
+    const won = boardWinLine(session.board);
+    if (won) {
+      session.result = won.color;
+      session.winLine = won.line;
       session.importPaused = false; // finished game: only review
     } else if (Core.boardFull(session.board)) {
       session.result = "draw";

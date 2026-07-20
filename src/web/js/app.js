@@ -438,6 +438,7 @@
     gameGen = s.gameGen;
     placeAnim = null;
     clearHint();
+    clearAnalysis();
     hoverCell = null;
     importPaused = !!s.importPaused;
     // Review-only: never maybeAiTurn after import until「续下」.
@@ -572,10 +573,98 @@
   let hintCell = null;
   let hintBusy = false;
 
+  // --- replay coach analysis ---
+  /** Show move-quality verdicts + a better-move marker while browsing replay. */
+  let analysisOn = false;
+  /** @type {{r:number,c:number}|null} engine's better move at the viewed position */
+  let analysisCell = null;
+  /** @type {{grade:string, text:string}|null} verdict for the move that led here */
+  let analysisVerdict = null;
+  /** viewIndex -> {cell, verdict} cache so revisiting a position is instant */
+  const analysisCache = new Map();
+  let analysisGen = 0;
+  let analysisTimer = null;
+
   function hasZero() { return Host.hasZero(); }
 
   function clearHint() {
     hintCell = null;
+  }
+
+  function clearAnalysis() {
+    analysisCell = null;
+    analysisVerdict = null;
+    if (analysisTimer) { clearTimeout(analysisTimer); analysisTimer = null; }
+    analysisGen++;
+    analysisCache.clear();
+  }
+
+  /**
+   * High-confidence verdict for the move that led to position `i`, computed
+   * instantly from tactical primitives (no engine think). Returns null when
+   * there's no hard call — the soft best/other verdict is decided async.
+   */
+  function coachFacts(preBoard, sColor, played) {
+    const oppC = opp(sColor);
+    const playedWins = Core.wouldWin(preBoard, played.r, played.c, sColor);
+    if (playedWins) return { grade: "best", text: "制胜一手" };
+    // missed win: a five was available but not taken
+    const myWins = Ai.listWinCells(preBoard, sColor);
+    if (myWins.length) return { grade: "blunder", text: "错失胜着", best: myWins[0] };
+    // allowed opponent win-in-1 the move failed to prevent
+    const after = preBoard.map((row) => row.slice());
+    after[played.r][played.c] = sColor;
+    if (Ai.listWinCells(after, oppC).length) return { grade: "blunder", text: "漏防·被反杀" };
+    return null;
+  }
+
+  /** Analyze the move that led to the currently-viewed replay position. */
+  function scheduleAnalysis() {
+    if (analysisTimer) { clearTimeout(analysisTimer); analysisTimer = null; }
+    analysisCell = null;
+    analysisVerdict = null;
+    if (!analysisOn || isLive() || viewIndex < 1) return;
+    const i = viewIndex;
+    if (analysisCache.has(i)) {
+      const c = analysisCache.get(i);
+      analysisCell = c.cell;
+      analysisVerdict = c.verdict;
+      return;
+    }
+    const played = history[i - 1];
+    const sColor = (i - 1) % 2 === 0 ? "b" : "w";
+    const preBoard = boardAfter(i - 1);
+    const hard = coachFacts(preBoard, sColor, played);
+    // show the instant verdict right away; the better-move marker fills in async
+    analysisVerdict = hard || { grade: "pending", text: "分析中…" };
+    analysisCell = hard && hard.best ? hard.best : null;
+    const gen = ++analysisGen;
+    const diff = difficulty === "easy" ? "normal" : difficulty === "extreme" ? "hard" : difficulty;
+    analysisTimer = setTimeout(() => {
+      analysisTimer = null;
+      aiMoveAsync({ board: preBoard, side: sColor, difficulty: diff, timeMs: 600 })
+        .then((best) => {
+          if (gen !== analysisGen || viewIndex !== i) return; // stale
+          let verdict = hard;
+          let cell = analysisCell;
+          if (!hard) {
+            if (best && (best.r !== played.r || best.c !== played.c)) {
+              cell = best;
+              verdict = { grade: "ok", text: "有更优 · 虚线处" };
+            } else {
+              cell = null;
+              verdict = { grade: "best", text: "最佳一手" };
+            }
+          } else if (!hard.best && best && (best.r !== played.r || best.c !== played.c)) {
+            cell = best; // pair a blunder verdict with the recommended move
+          }
+          analysisVerdict = verdict;
+          analysisCell = cell;
+          analysisCache.set(i, { cell: cell, verdict: verdict });
+          sync();
+        })
+        .catch(() => {});
+    }, 220);
   }
 
   let confirmResolver = null;
@@ -668,6 +757,7 @@
     winLine = viewIndex > 0 ? winLineAt(viewIndex) : null;
     hoverCell = null;
     clearHint();
+    scheduleAnalysis();
     sync();
   }
 
@@ -682,6 +772,7 @@
     }
     hoverCell = null;
     clearHint();
+    scheduleAnalysis();
     sync();
   }
 
@@ -808,13 +899,14 @@
         thinkLevel = s.thinkLevel;
       }
       if (typeof s.showCoords === "boolean") showCoords = s.showCoords;
+      if (typeof s.analysisOn === "boolean") analysisOn = s.analysisOn;
     } catch (_) {}
   }
 
   function saveSettings() {
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel, showCoords })
+      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel, showCoords, analysisOn })
     );
   }
 
@@ -865,45 +957,89 @@
     draw();
   }
 
+  function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  }
+
+  /** Cached short white-noise buffer — reused for every stone's "clack". */
+  let noiseBuf = null;
+  function noiseBuffer(ctx) {
+    if (noiseBuf) return noiseBuf;
+    const n = Math.floor(ctx.sampleRate * 0.06);
+    noiseBuf = ctx.createBuffer(1, n, ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    let seed = 0x2545f491; // deterministic — no Math.random needed
+    for (let i = 0; i < n; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      d[i] = (seed / 0x40000000 - 1) * (1 - i / n); // fade toward silence
+    }
+    return noiseBuf;
+  }
+
+  // A stone on a wooden board is a percussive click (bandpassed noise) plus a
+  // short woody body resonance — far more tactile than a bare sine beep.
   function playMoveSound(color) {
     if (!soundOn) return;
     try {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === "suspended") audioCtx.resume();
-      const t0 = audioCtx.currentTime;
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = color === "b" ? 320 : 420;
-      gain.gain.setValueAtTime(0.0001, t0);
-      gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.09);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start(t0);
-      osc.stop(t0 + 0.1);
+      const ctx = ensureAudio();
+      const t0 = ctx.currentTime;
+      // 1) the clack: brief bandpassed noise burst
+      const src = ctx.createBufferSource();
+      src.buffer = noiseBuffer(ctx);
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = color === "b" ? 1900 : 2300;
+      bp.Q.value = 0.9;
+      const ng = ctx.createGain();
+      ng.gain.setValueAtTime(0.22, t0);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.05);
+      src.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+      src.start(t0); src.stop(t0 + 0.06);
+      // 2) the body: fast-decaying woody tone, black lower than white
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(color === "b" ? 250 : 340, t0);
+      osc.frequency.exponentialRampToValueAtTime(color === "b" ? 180 : 250, t0 + 0.08);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.1, t0 + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(t0); osc.stop(t0 + 0.13);
     } catch (_) {}
   }
 
   function playWinSound() {
     if (!soundOn) return;
     try {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === "suspended") audioCtx.resume();
-      const notes = [523, 659, 784];
-      notes.forEach((f, i) => {
-        const t0 = audioCtx.currentTime + i * 0.08;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
+      const ctx = ensureAudio();
+      // rising major arpeggio, then a soft sustained chord to land on
+      const arp = [523.25, 659.25, 783.99, 1046.5];
+      arp.forEach((f, i) => {
+        const t0 = ctx.currentTime + i * 0.085;
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
         osc.type = "triangle";
         osc.frequency.value = f;
-        gain.gain.setValueAtTime(0.0001, t0);
-        gain.gain.exponentialRampToValueAtTime(0.1, t0 + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start(t0);
-        osc.stop(t0 + 0.22);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.11, t0 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.24);
+        osc.connect(g); g.connect(ctx.destination);
+        osc.start(t0); osc.stop(t0 + 0.26);
+      });
+      const tc = ctx.currentTime + arp.length * 0.085 + 0.02;
+      [523.25, 659.25, 783.99].forEach((f) => {
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, tc);
+        g.gain.exponentialRampToValueAtTime(0.06, tc + 0.04);
+        g.gain.exponentialRampToValueAtTime(0.0001, tc + 0.6);
+        osc.connect(g); g.connect(ctx.destination);
+        osc.start(tc); osc.stop(tc + 0.64);
       });
     } catch (_) {}
   }
@@ -1080,6 +1216,7 @@
     winFlashUntil: winFlashUntil,
     hover: hoverCell,
     hint: hintCell,
+    analysis: analysisCell,
     coords: showCoords,
     clearPlaceAnim: () => { placeAnim = null; },
   }));
@@ -1159,6 +1296,7 @@
     viewIndex = history.length;
     hoverCell = null;
     clearHint();
+    clearAnalysis();
     placeAnim = { r, c, t0: performance.now() };
     ensureAnimLoop();
     playMoveSound(turn);
@@ -1210,6 +1348,7 @@
     winLine = null;
     placeAnim = null;
     clearHint();
+    clearAnalysis();
     hoverCell = null;
     importPaused = false;
     viewIndex = history.length;
@@ -1236,6 +1375,7 @@
     importPaused = false;
     hoverCell = null;
     clearHint();
+    clearAnalysis();
     saveSettings();
     sync();
     saveGame();
@@ -1320,6 +1460,11 @@
       cdOn.classList.toggle("active", showCoords);
       cdOn.setAttribute("aria-pressed", showCoords ? "true" : "false");
     }
+    const anOn = document.getElementById("opt-analysis");
+    if (anOn) {
+      anOn.classList.toggle("active", analysisOn);
+      anOn.setAttribute("aria-pressed", analysisOn ? "true" : "false");
+    }
   }
 
   function sync() {
@@ -1335,6 +1480,16 @@
     document.getElementById("info-moves").textContent =
       history.length + (live ? "" : "·看" + viewIndex);
     document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
+    const verdictEl = document.getElementById("coach-verdict");
+    if (verdictEl) {
+      const show = analysisOn && !live && analysisVerdict;
+      verdictEl.hidden = !show;
+      if (show) {
+        const who = (viewIndex - 1) % 2 === 0 ? "黑" : "白";
+        verdictEl.textContent = "第" + viewIndex + "手 " + who + "：" + analysisVerdict.text;
+        verdictEl.className = "coach-verdict grade-" + (analysisVerdict.grade || "ok");
+      }
+    }
     renderMoveList();
     updateClock();
 
@@ -1529,6 +1684,18 @@
       syncSettingsUI();
       draw();
       toast(showCoords ? "坐标已开" : "坐标已关");
+    };
+  }
+  const analysisBtn = document.getElementById("opt-analysis");
+  if (analysisBtn) {
+    analysisBtn.onclick = () => {
+      analysisOn = !analysisOn;
+      saveSettings();
+      syncSettingsUI();
+      if (!analysisOn) clearAnalysis();
+      else scheduleAnalysis();
+      sync();
+      toast(analysisOn ? "复盘分析已开" : "复盘分析已关");
     };
   }
   document.getElementById("color-seg").onclick = async (ev) => {

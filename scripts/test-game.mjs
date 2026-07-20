@@ -170,6 +170,24 @@ function assert(cond, msg) {
   assert(!r.ok && r.error, "empty history rejected");
 }
 
+// import with a five MID-history (non-standard SGF continued past a win) must
+// register as finished, not "playable" — a full-board scan, not last-move only
+{
+  const hist = [
+    { r: 7, c: 0 }, { r: 0, c: 0 },
+    { r: 7, c: 1 }, { r: 0, c: 1 },
+    { r: 7, c: 2 }, { r: 0, c: 2 },
+    { r: 7, c: 3 }, { r: 0, c: 3 },
+    { r: 7, c: 4 },                 // black five at move 9
+    { r: 5, c: 5 }, { r: 8, c: 8 }, // stray continuation
+  ];
+  const r = State.sessionFromHistory(hist, { mode: "ai", humanColor: "b" });
+  assert(r.ok, "mid-win import ok");
+  assert(r.session.result === "b", "mid-win detected as black win, got " + r.session.result);
+  assert(r.session.importPaused === false, "mid-win not resumable");
+  assert(!State.canContinuePlay(r.session), "no 续下 on decided position");
+}
+
 // draw module loads (no canvas needed for THEMES)
 load("src/web/js/draw.js");
 {
@@ -188,7 +206,7 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.20]"), "SGF AP version");
+  assert(text.includes("AP[Goban:1.21]"), "SGF AP version");
 }
 
 // importPaused persists only when open game
