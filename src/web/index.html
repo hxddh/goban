@@ -123,6 +123,12 @@
             </button>
           </div>
           <div class="setting-row">
+            <span class="setting-k">复盘分析</span>
+            <button type="button" class="switch" id="opt-analysis" aria-pressed="false" title="复盘时标注手数优劣与更优点">
+              <span class="switch-knob"></span>
+            </button>
+          </div>
+          <div class="setting-row">
             <span class="setting-k">音效</span>
             <button type="button" class="switch" id="opt-sound" aria-pressed="true" title="落子音效">
               <span class="switch-knob"></span>
@@ -146,6 +152,7 @@
           <button type="button" id="rep-next" title="下一手 (→)">›</button>
           <button type="button" id="rep-end" title="终局 (End)">»</button>
         </div>
+        <div class="coach-verdict" id="coach-verdict" hidden aria-live="polite"></div>
         <div class="link-row">
           <button type="button" class="text-link" id="sgf-copy">复制</button>
           <button type="button" class="text-link" id="sgf-download">导出</button>
