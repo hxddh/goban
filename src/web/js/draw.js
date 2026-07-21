@@ -141,19 +141,30 @@
     ctx.stroke();
   }
 
-  function easeOutBack(t) {
-    const c = 1.2;
-    const t1 = t - 1;
-    return 1 + c * t1 * t1 * t1 + t1 * t1;
+  function easeOutCubic(t) {
+    const t1 = 1 - t;
+    return 1 - t1 * t1 * t1;
   }
 
+  function prefersReducedMotion() {
+    try {
+      return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Restrained place-in: a small monotonic scale-up (no overshoot/pop) over
+  // 120ms, only for the just-placed stone. Honors reduce-motion (no anim), so
+  // it never competes with reading the board mid-game.
   function stoneScale(r, c) {
     const m = getM();
     const placeAnim = m && m.placeAnim;
     if (!placeAnim || placeAnim.r !== r || placeAnim.c !== c) return 1;
+    if (prefersReducedMotion()) return 1;
     const t = Math.min(1, (performance.now() - placeAnim.t0) / 120);
     if (t >= 1) return 1;
-    return 0.78 + 0.22 * easeOutBack(t);
+    return 0.88 + 0.12 * easeOutCubic(t);
   }
 
   function ensureAnimLoop() {

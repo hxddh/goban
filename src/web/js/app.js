@@ -1837,6 +1837,12 @@
     moves.textContent = viewIndex + "/" + history.length;
     document.getElementById("info-moves").textContent =
       history.length + (live ? "" : "·看" + viewIndex);
+    const modeEl = document.getElementById("info-mode");
+    if (modeEl) {
+      modeEl.textContent = mode === "pvp"
+        ? "双人"
+        : ({ easy: "简单", normal: "普通", hard: "困难", extreme: "极难" }[difficulty] || difficulty);
+    }
     document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
     const verdictEl = document.getElementById("coach-verdict");
     if (verdictEl) {
