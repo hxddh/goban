@@ -505,6 +505,10 @@
       display: flex; flex-direction: column; gap: 6px;
       max-height: 34vh; overflow-y: auto;
     }
+    .review-actions {
+      display: flex; flex-wrap: wrap; gap: 4px 14px;
+      margin: 2px 0 12px;
+    }
     .review-none { font-size: 12.5px; padding: 4px 2px; }
     .review-blunder-row {
       appearance: none; text-align: left;

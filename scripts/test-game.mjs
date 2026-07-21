@@ -209,6 +209,26 @@ load("src/web/js/draw.js");
   assert(text.includes("AP[Goban:1.22]"), "SGF AP version");
 }
 
+// sgf comment annotations (复盘 3.0): per-move C[] + root comment, ] escaped,
+// and the result re-parses cleanly (comments ignored on import)
+{
+  const hist = [{ r: 7, c: 7 }, { r: 7, c: 8 }, { r: 8, c: 8 }];
+  const text = Sgf.buildSgf({
+    history: hist,
+    result: "play",
+    mode: "pvp",
+    humanColor: "b",
+    originalStartedAt: Date.UTC(2026, 0, 1),
+    comments: { 1: "失着 · 漏防 [x]" },
+    rootComment: "复盘评注 · 失着 黑0 白1",
+  });
+  assert(text.includes("C[复盘评注 · 失着 黑0 白1]"), "SGF root comment");
+  assert(text.includes("\\]"), "SGF ] escaped in comment");
+  const parsed = Sgf.parseSgf(text);
+  assert(!parsed.error && parsed.history.length === 3, "annotated SGF re-parses: " + (parsed.error || ""));
+  assert(parsed.history.every((p, i) => p.r === hist[i].r && p.c === hist[i].c), "annotated coords intact");
+}
+
 // importPaused persists only when open game
 {
   const open = State.sessionFromHistory([{ r: 7, c: 7 }], { mode: "ai", humanColor: "b" });

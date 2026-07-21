@@ -367,10 +367,7 @@
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
-  async function downloadSgf() {
-    if (!history.length) { toast("还没有棋谱可导出"); return; }
-    const sgf = buildSgf();
-    const name = sgfFileName();
+  async function exportSgfString(sgf, name) {
     if (Host.hasZero()) {
       try {
         const path = await Host.saveFileDialog({ title: "导出 SGF", defaultName: name });
@@ -388,6 +385,10 @@
       try { await copySgfText(sgf); toast("导出受限，SGF 已复制到剪贴板"); }
       catch (e2) { toast("导出失败"); }
     }
+  }
+  async function downloadSgf() {
+    if (!history.length) { toast("还没有棋谱可导出"); return; }
+    await exportSgfString(buildSgf(), sgfFileName());
   }
   async function copySgfText(sgf) { await Host.writeClipboard(sgf); }
   async function copySgf() {
@@ -441,6 +442,7 @@
     placeAnim = null;
     clearHint();
     clearAnalysis();
+    clearVariation();
     hoverCell = null;
     importPaused = !!s.importPaused;
     // Review-only: never maybeAiTurn after import until「续下」.
@@ -759,6 +761,7 @@
     winLine = viewIndex > 0 ? winLineAt(viewIndex) : null;
     hoverCell = null;
     clearHint();
+    clearVariation();
     scheduleAnalysis();
     sync();
   }
@@ -774,6 +777,7 @@
     }
     hoverCell = null;
     clearHint();
+    clearVariation();
     scheduleAnalysis();
     sync();
   }
@@ -1432,6 +1436,62 @@
     if (m) m.classList.remove("show");
   }
 
+  /** SGF with per-move 失着 comments + a summary root comment (复盘评注导出). */
+  function buildAnnotatedSgf() {
+    computeReview();
+    const comments = {};
+    for (const b of reviewData.blunders) comments[b.i - 1] = "失着 · " + b.reason;
+    const s = reviewData.summary;
+    const rootComment =
+      "复盘评注 · 失着 黑" + s.b + " 白" + s.w +
+      (s.b + s.w === 0 ? "（双方无明显失误）" : "") +
+      " · 共" + history.length + "手";
+    return SgfMod.buildSgf({
+      history, result, mode, humanColor, originalStartedAt,
+      comments, rootComment,
+    });
+  }
+
+  async function exportReviewSgf() {
+    if (history.length < 2) { toast("对局太短，无可评注内容"); return; }
+    await exportSgfString(buildAnnotatedSgf(), "review-" + sgfFileName());
+  }
+
+  // --- principal-variation preview (主变推演) ---
+  const PV_PLIES = 6;
+  const PV_NODE_BUDGET = 6000; // deterministic per-ply cap → snappy, repeatable
+  let variationCells = null; // [{r,c,color,n}] | null
+
+  function clearVariation() {
+    if (variationCells) { variationCells = null; }
+  }
+
+  /** Engine's best line forward from ply `fromIndex`, as ghost stones. */
+  function computePV(fromIndex) {
+    if (fromIndex > 0 && winLineAt(fromIndex)) return []; // already decided
+    const bd = boardAfter(fromIndex);
+    if (Core.boardFull(bd)) return [];
+    let side = fromIndex % 2 === 0 ? "b" : "w";
+    const pv = [];
+    for (let k = 0; k < PV_PLIES; k++) {
+      const mv = Ai.aiMove({ board: bd, side: side, difficulty: "hard", nodeBudget: PV_NODE_BUDGET });
+      if (!mv || bd[mv.r][mv.c]) break;
+      bd[mv.r][mv.c] = side;
+      pv.push({ r: mv.r, c: mv.c, color: side, n: k + 1 });
+      if (Core.findWin(bd, mv.r, mv.c, side)) break; // line reaches a five
+      side = opp(side);
+    }
+    return pv;
+  }
+
+  function runVariation() {
+    const pv = computePV(viewIndex);
+    variationCells = pv.length ? pv : null;
+    closeReview();
+    sync();
+    toast(pv.length ? "推演 " + pv.length + " 手（虚影）" : "此局面无可推演着法");
+  }
+
   let panelAnimUntil = 0;
   let panelAnimActive = false;
 
@@ -1511,6 +1571,7 @@
     hover: hoverCell,
     hint: hintCell,
     analysis: analysisCell,
+    variation: variationCells,
     coords: showCoords,
     clearPlaceAnim: () => { placeAnim = null; },
   }));
@@ -1591,6 +1652,7 @@
     hoverCell = null;
     clearHint();
     clearAnalysis();
+    clearVariation();
     placeAnim = { r, c, t0: performance.now() };
     ensureAnimLoop();
     playMoveSound(turn);
@@ -1643,6 +1705,7 @@
     placeAnim = null;
     clearHint();
     clearAnalysis();
+    clearVariation();
     hoverCell = null;
     importPaused = false;
     viewIndex = history.length;
@@ -1670,6 +1733,7 @@
     hoverCell = null;
     clearHint();
     clearAnalysis();
+    clearVariation();
     saveSettings();
     sync();
     saveGame();
@@ -1928,6 +1992,10 @@
   if (reviewEl) reviewEl.onclick = () => { openReview(); };
   const reviewCloseEl = document.getElementById("review-close");
   if (reviewCloseEl) reviewCloseEl.onclick = () => { closeReview(); };
+  const reviewExportEl = document.getElementById("review-export");
+  if (reviewExportEl) reviewExportEl.onclick = () => { exportReviewSgf(); };
+  const reviewPvEl = document.getElementById("review-pv");
+  if (reviewPvEl) reviewPvEl.onclick = () => { runVariation(); };
   const reviewModalEl = document.getElementById("review-modal");
   if (reviewModalEl) reviewModalEl.onclick = (ev) => { if (ev.target === reviewModalEl) closeReview(); };
   const reviewBlundersEl = document.getElementById("review-blunders");

@@ -502,6 +502,39 @@
       ctx.restore();
     }
 
+    // Principal-variation preview (推演): translucent numbered ghost stones
+    const variation = m.variation;
+    if (variation && variation.length) {
+      ctx.save();
+      const rr = step * 0.4;
+      const fontPx = Math.round(step * 0.34);
+      for (const v of variation) {
+        if (board[v.r] && board[v.r][v.c]) continue; // occupied — skip
+        const x = pad + v.c * step;
+        const y = pad + v.r * step;
+        ctx.globalAlpha = 0.5;
+        const sg = ctx.createRadialGradient(x - rr * 0.35, y - rr * 0.4, rr * 0.1, x, y, rr);
+        if (v.color === "b") { sg.addColorStop(0, "#5a5a5a"); sg.addColorStop(1, "#111"); }
+        else { sg.addColorStop(0, "#fff"); sg.addColorStop(1, "#c8c8c8"); }
+        ctx.beginPath();
+        ctx.arc(x, y, rr, 0, Math.PI * 2);
+        ctx.fillStyle = sg;
+        ctx.fill();
+        ctx.globalAlpha = 0.7;
+        ctx.strokeStyle = v.color === "b" ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.3)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        // move number
+        ctx.globalAlpha = 0.95;
+        ctx.fillStyle = v.color === "b" ? "#fff" : "#1a1a1a";
+        ctx.font = "600 " + fontPx + "px -apple-system, system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(v.n), x, y + step * 0.02);
+      }
+      ctx.restore();
+    }
+
     if (winLine && winLine.length) {
       ctx.save();
       ctx.globalAlpha = th.style === "pencil" ? 0.72 : 0.62;

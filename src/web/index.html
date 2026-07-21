@@ -229,6 +229,10 @@
           <p class="review-hint">评分曲线（黑上 · 白下）· 红点为失着 · 点曲线或下方失着可跳转</p>
           <canvas id="review-curve" class="review-curve" title="点击跳到对应手"></canvas>
           <div class="review-stat" id="review-stat"></div>
+          <div class="review-actions">
+            <button type="button" class="text-link" id="review-pv" title="从当前查看的一手起，引擎推演后续着法（虚影）">推演当前局面</button>
+            <button type="button" class="text-link" id="review-export">导出带评注 SGF</button>
+          </div>
           <div class="review-blunders" id="review-blunders"></div>
         </div>
         <div class="close-row">

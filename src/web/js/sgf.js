@@ -19,6 +19,11 @@
     return { r, c };
   }
 
+  /** Escape SGF text so ] and \ inside C[] don't terminate the property. */
+  function sgfText(s) {
+    return String(s).replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+  }
+
   /**
    * @param {object} opts
    * @param {{r:number,c:number}[]} opts.history
@@ -26,12 +31,16 @@
    * @param {string} opts.mode
    * @param {string} opts.humanColor
    * @param {number} opts.originalStartedAt
+   * @param {Object<number,string>} [opts.comments] 0-based move index → C[] note
+   * @param {string} [opts.rootComment] C[] note on the game-info (root) node
    */
   function buildSgf(opts) {
     const history = opts.history || [];
     const result = opts.result || "play";
     const mode = opts.mode || "ai";
     const humanColor = opts.humanColor || "b";
+    const comments = opts.comments || null;
+    const rootComment = opts.rootComment || "";
     const dt = new Date(opts.originalStartedAt || Date.now());
     const pad = (n) => String(n).padStart(2, "0");
     const dtStr =
@@ -52,10 +61,12 @@
     } else {
       s += "PB[Black]PW[White]";
     }
+    if (rootComment) s += "C[" + sgfText(rootComment) + "]";
     for (let i = 0; i < history.length; i++) {
       const p = history[i];
       const tag = i % 2 === 0 ? "B" : "W";
       s += ";" + tag + "[" + sgfCoord(p.r, p.c) + "]";
+      if (comments && comments[i] != null) s += "C[" + sgfText(comments[i]) + "]";
     }
     s += ")";
     return s;
