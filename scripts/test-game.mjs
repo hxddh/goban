@@ -206,7 +206,7 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.22]"), "SGF AP version");
+  assert(text.includes("AP[Goban:1.23]"), "SGF AP version");
 }
 
 // sgf comment annotations (复盘 3.0): per-move C[] + root comment, ] escaped,

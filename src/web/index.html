@@ -29,6 +29,10 @@
       <div id="board-wrap">
         <canvas id="board" width="900" height="900" aria-label="棋盘"></canvas>
         <div class="think-dot" id="think-dot" hidden aria-hidden="true"></div>
+        <div class="swap2-bar" id="swap2-bar" hidden role="group" aria-label="平衡开局选择">
+          <span class="swap2-msg" id="swap2-msg"></span>
+          <div class="swap2-btns" id="swap2-btns"></div>
+        </div>
       </div>
     </div>
 
@@ -101,6 +105,13 @@
             <div class="pill" id="color-seg" role="group" aria-label="执子">
               <button type="button" data-human="b" class="active">黑</button>
               <button type="button" data-human="w">白</button>
+            </div>
+          </div>
+          <div class="setting-row" id="opening-field">
+            <span class="setting-k">开局</span>
+            <div class="pill" id="opening-seg" role="group" aria-label="开局规则">
+              <button type="button" data-opening="standard" class="active" title="标准开局">标准</button>
+              <button type="button" data-opening="swap2" title="平衡开局：先手放 3 子，对手选边或加两手">swap2</button>
             </div>
           </div>
         </div>
