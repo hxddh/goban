@@ -367,10 +367,7 @@
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
-  async function downloadSgf() {
-    if (!history.length) { toast("还没有棋谱可导出"); return; }
-    const sgf = buildSgf();
-    const name = sgfFileName();
+  async function exportSgfString(sgf, name) {
     if (Host.hasZero()) {
       try {
         const path = await Host.saveFileDialog({ title: "导出 SGF", defaultName: name });
@@ -388,6 +385,10 @@
       try { await copySgfText(sgf); toast("导出受限，SGF 已复制到剪贴板"); }
       catch (e2) { toast("导出失败"); }
     }
+  }
+  async function downloadSgf() {
+    if (!history.length) { toast("还没有棋谱可导出"); return; }
+    await exportSgfString(buildSgf(), sgfFileName());
   }
   async function copySgfText(sgf) { await Host.writeClipboard(sgf); }
   async function copySgf() {
@@ -441,6 +442,7 @@
     placeAnim = null;
     clearHint();
     clearAnalysis();
+    clearVariation();
     hoverCell = null;
     importPaused = !!s.importPaused;
     // Review-only: never maybeAiTurn after import until「续下」.
@@ -545,6 +547,16 @@
   let difficulty = "normal";
   /** @type {'b' | 'w'} human color in AI mode */
   let humanColor = "b";
+  /** @type {'standard' | 'swap2'} opening protocol */
+  let openingRule = "standard";
+  /**
+   * swap2 opening state, null outside the opening.
+   * phase: 'place' (P1 lays 3) → 'p2choose' → ('place2' P2 lays 2 → 'p1choose') → done.
+   * Board stones stay strictly alternating (B,W,B,…) — swap2 only decides who
+   * places the opening and which color each player controls afterward.
+   * @type {{phase:string}|null}
+   */
+  let swap2 = null;
   /** @type {{r:number,c:number}[]} */
   let history = [];
   /** @type {{r:number,c:number}[] | null} */
@@ -759,6 +771,7 @@
     winLine = viewIndex > 0 ? winLineAt(viewIndex) : null;
     hoverCell = null;
     clearHint();
+    clearVariation();
     scheduleAnalysis();
     sync();
   }
@@ -774,11 +787,13 @@
     }
     hoverCell = null;
     clearHint();
+    clearVariation();
     scheduleAnalysis();
     sync();
   }
 
   async function requestHint() {
+    if (swap2) { toast("开局选择阶段"); return; }
     if (aiThinking || hintBusy) {
       toast("请稍候…");
       return;
@@ -902,13 +917,14 @@
       }
       if (typeof s.showCoords === "boolean") showCoords = s.showCoords;
       if (typeof s.analysisOn === "boolean") analysisOn = s.analysisOn;
+      if (s.openingRule === "standard" || s.openingRule === "swap2") openingRule = s.openingRule;
     } catch (_) {}
   }
 
   function saveSettings() {
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel, showCoords, analysisOn })
+      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel, showCoords, analysisOn, openingRule })
     );
   }
 
@@ -1432,6 +1448,62 @@
     if (m) m.classList.remove("show");
   }
 
+  /** SGF with per-move 失着 comments + a summary root comment (复盘评注导出). */
+  function buildAnnotatedSgf() {
+    computeReview();
+    const comments = {};
+    for (const b of reviewData.blunders) comments[b.i - 1] = "失着 · " + b.reason;
+    const s = reviewData.summary;
+    const rootComment =
+      "复盘评注 · 失着 黑" + s.b + " 白" + s.w +
+      (s.b + s.w === 0 ? "（双方无明显失误）" : "") +
+      " · 共" + history.length + "手";
+    return SgfMod.buildSgf({
+      history, result, mode, humanColor, originalStartedAt,
+      comments, rootComment,
+    });
+  }
+
+  async function exportReviewSgf() {
+    if (history.length < 2) { toast("对局太短，无可评注内容"); return; }
+    await exportSgfString(buildAnnotatedSgf(), "review-" + sgfFileName());
+  }
+
+  // --- principal-variation preview (主变推演) ---
+  const PV_PLIES = 6;
+  const PV_NODE_BUDGET = 6000; // deterministic per-ply cap → snappy, repeatable
+  let variationCells = null; // [{r,c,color,n}] | null
+
+  function clearVariation() {
+    if (variationCells) { variationCells = null; }
+  }
+
+  /** Engine's best line forward from ply `fromIndex`, as ghost stones. */
+  function computePV(fromIndex) {
+    if (fromIndex > 0 && winLineAt(fromIndex)) return []; // already decided
+    const bd = boardAfter(fromIndex);
+    if (Core.boardFull(bd)) return [];
+    let side = fromIndex % 2 === 0 ? "b" : "w";
+    const pv = [];
+    for (let k = 0; k < PV_PLIES; k++) {
+      const mv = Ai.aiMove({ board: bd, side: side, difficulty: "hard", nodeBudget: PV_NODE_BUDGET });
+      if (!mv || bd[mv.r][mv.c]) break;
+      bd[mv.r][mv.c] = side;
+      pv.push({ r: mv.r, c: mv.c, color: side, n: k + 1 });
+      if (Core.findWin(bd, mv.r, mv.c, side)) break; // line reaches a five
+      side = opp(side);
+    }
+    return pv;
+  }
+
+  function runVariation() {
+    const pv = computePV(viewIndex);
+    variationCells = pv.length ? pv : null;
+    closeReview();
+    sync();
+    toast(pv.length ? "推演 " + pv.length + " 手（虚影）" : "此局面无可推演着法");
+  }
+
   let panelAnimUntil = 0;
   let panelAnimActive = false;
 
@@ -1511,6 +1583,7 @@
     hover: hoverCell,
     hint: hintCell,
     analysis: analysisCell,
+    variation: variationCells,
     coords: showCoords,
     clearPlaceAnim: () => { placeAnim = null; },
   }));
@@ -1526,7 +1599,7 @@
   }
 
   function maybeAiTurn() {
-    if (importPaused) return;
+    if (importPaused || swap2) return;
     if (mode !== "ai" || result !== "play" || isHumanTurn() || aiThinking) return;
     aiThinking = true;
     hoverCell = null;
@@ -1566,7 +1639,127 @@
     });
   }
 
+  // --- swap2 balanced opening ---
+  function startSwap2() {
+    swap2 = { phase: "place" };
+    renderSwap2Bar();
+  }
+
+  function hideSwap2Bar() {
+    const bar = document.getElementById("swap2-bar");
+    if (bar) bar.hidden = true;
+  }
+
+  function renderSwap2Bar() {
+    const bar = document.getElementById("swap2-bar");
+    const msg = document.getElementById("swap2-msg");
+    const btns = document.getElementById("swap2-btns");
+    if (!bar || !msg || !btns) return;
+    if (!swap2) { bar.hidden = true; return; }
+    if (swap2.phase === "place" || swap2.phase === "place2") {
+      const target = swap2.phase === "place" ? 3 : 5;
+      btns.innerHTML = "";
+      msg.textContent = "平衡开局 · 请落第 " + (history.length + 1) + " 子（共 " + target + "）";
+      bar.hidden = false;
+      return;
+    }
+    let items;
+    if (swap2.phase === "p2choose") {
+      msg.textContent = "开局已布 3 子 · 由你选择：";
+      items = [["black", "执黑"], ["white", "执白"], ["add2", "加两手"]];
+    } else { // p1choose
+      msg.textContent = "对手已加两手 · 请选择执子：";
+      items = [["black", "执黑"], ["white", "执白"]];
+    }
+    btns.innerHTML = "";
+    for (const it of items) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "swap2-btn";
+      b.dataset.kind = it[0];
+      b.textContent = it[1];
+      btns.appendChild(b);
+    }
+    bar.hidden = false;
+  }
+
+  /** Lay one opening stone (strictly alternating by parity). */
+  function swap2PlaceStone(r, c, fromAi) {
+    if (!swap2) return;
+    if (fromAi) return; // AI's 加两手 stones are placed programmatically
+    board = boardAfter(history.length);
+    if (board[r][c]) return;
+    const color = history.length % 2 === 0 ? "b" : "w";
+    board[r][c] = color;
+    history.push({ r: r, c: c });
+    viewIndex = history.length;
+    hoverCell = null;
+    placeAnim = { r: r, c: c, t0: performance.now() };
+    ensureAnimLoop();
+    playMoveSound(color);
+    const target = swap2.phase === "place" ? 3 : 5;
+    if (history.length >= target) {
+      swap2.phase = swap2.phase === "place" ? "p2choose" : "p1choose";
+      if (swap2.phase === "p2choose" && mode === "ai") {
+        renderSwap2Bar();
+        sync();
+        setTimeout(aiSwap2Choose, 350); // AI (P2) decides its side
+        return;
+      }
+    }
+    renderSwap2Bar();
+    sync();
+  }
+
+  /** AI (P2) takes whichever side its static eval values higher. */
+  function aiSwap2Choose() {
+    if (!swap2 || swap2.phase !== "p2choose") return;
+    const bd = boardAfter(history.length);
+    const evalB = Ai.evaluateBoard(bd, "b");
+    const evalW = Ai.evaluateBoard(bd, "w");
+    const aiTakesWhite = evalW >= evalB; // white also moves next → tempo
+    toast(aiTakesWhite ? "电脑选择执白" : "电脑选择执黑");
+    settleSwap2(aiTakesWhite ? "b" : "w"); // human gets the other side
+  }
+
+  /** Human clicked a swap2 choice button. */
+  function swap2Choose(kind) {
+    if (!swap2) return;
+    if (swap2.phase === "p2choose") {
+      if (kind === "add2") {
+        swap2.phase = "place2";
+        renderSwap2Bar();
+        sync();
+        return;
+      }
+      const p2Color = kind === "black" ? "b" : "w";
+      settleSwap2(opp(p2Color)); // P1 (human, in AI mode) gets the opposite side
+      return;
+    }
+    if (swap2.phase === "p1choose") {
+      settleSwap2(kind === "black" ? "b" : "w"); // P1 chooses own side
+    }
+  }
+
+  function settleSwap2(humanColorAfter) {
+    if (mode === "ai") humanColor = humanColorAfter;
+    swap2 = null;
+    hideSwap2Bar();
+    turn = history.length % 2 === 0 ? "b" : "w"; // white to move after opening
+    result = "play";
+    winLine = null;
+    viewIndex = history.length;
+    board = boardAfter(history.length);
+    saveGame();
+    sync();
+    maybeAiTurn();
+  }
+
   function place(r, c, fromAi) {
+    if (swap2) {
+      if (swap2.phase === "place" || swap2.phase === "place2") swap2PlaceStone(r, c, fromAi);
+      return; // choice phases: board clicks do nothing
+    }
     if (result !== "play") return;
     if (!isLive()) {
       if (!fromAi) {
@@ -1591,6 +1784,7 @@
     hoverCell = null;
     clearHint();
     clearAnalysis();
+    clearVariation();
     placeAnim = { r, c, t0: performance.now() };
     ensureAnimLoop();
     playMoveSound(turn);
@@ -1624,6 +1818,7 @@
   }
 
   function undo() {
+    if (swap2) return; // no undo mid-opening
     if (!history.length || aiThinking || hintBusy) return;
     // Always return to the live tip before undoing moves.
     if (!isLive()) {
@@ -1643,6 +1838,7 @@
     placeAnim = null;
     clearHint();
     clearAnalysis();
+    clearVariation();
     hoverCell = null;
     importPaused = false;
     viewIndex = history.length;
@@ -1670,6 +1866,9 @@
     hoverCell = null;
     clearHint();
     clearAnalysis();
+    clearVariation();
+    swap2 = null;
+    if (openingRule === "swap2") startSwap2();
     saveSettings();
     sync();
     saveGame();
@@ -1735,6 +1934,9 @@
     document.querySelectorAll("#theme-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.theme === themeId);
     });
+    document.querySelectorAll("#opening-seg button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.opening === openingRule);
+    });
     const aiOnly = mode === "ai";
     const diffField = document.getElementById("diff-field");
     const thinkField = document.getElementById("think-field");
@@ -1743,7 +1945,8 @@
     if (thinkField) {
       thinkField.hidden = !(aiOnly && (difficulty === "hard" || difficulty === "extreme"));
     }
-    if (colorField) colorField.hidden = !aiOnly;
+    // swap2 decides the human's color via the opening protocol, so hide 执子 then
+    if (colorField) colorField.hidden = !aiOnly || openingRule === "swap2";
     const sbOn = document.getElementById("opt-sound");
     if (sbOn) {
       sbOn.classList.toggle("active", soundOn);
@@ -1773,6 +1976,12 @@
     moves.textContent = viewIndex + "/" + history.length;
     document.getElementById("info-moves").textContent =
       history.length + (live ? "" : "·看" + viewIndex);
+    const modeEl = document.getElementById("info-mode");
+    if (modeEl) {
+      modeEl.textContent = mode === "pvp"
+        ? "双人"
+        : ({ easy: "简单", normal: "普通", hard: "困难", extreme: "极难" }[difficulty] || difficulty);
+    }
     document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
     const verdictEl = document.getElementById("coach-verdict");
     if (verdictEl) {
@@ -1833,7 +2042,12 @@
     status.classList.toggle("win", live && (result === "b" || result === "w"));
     status.classList.toggle("thinking", live && result === "play" && aiThinking);
     status.classList.toggle("replay", !live);
-    if (!live) {
+    if (swap2) {
+      status.textContent =
+        swap2.phase === "place" || swap2.phase === "place2"
+          ? "平衡开局 · 布子中"
+          : "平衡开局 · 待选边";
+    } else if (!live) {
       status.textContent = "复盘 " + viewIndex + "/" + history.length;
       if (winLine) status.textContent += " · 已成五";
     } else if (result === "b") status.textContent = "黑棋胜";
@@ -1928,6 +2142,10 @@
   if (reviewEl) reviewEl.onclick = () => { openReview(); };
   const reviewCloseEl = document.getElementById("review-close");
   if (reviewCloseEl) reviewCloseEl.onclick = () => { closeReview(); };
+  const reviewExportEl = document.getElementById("review-export");
+  if (reviewExportEl) reviewExportEl.onclick = () => { exportReviewSgf(); };
+  const reviewPvEl = document.getElementById("review-pv");
+  if (reviewPvEl) reviewPvEl.onclick = () => { runVariation(); };
   const reviewModalEl = document.getElementById("review-modal");
   if (reviewModalEl) reviewModalEl.onclick = (ev) => { if (ev.target === reviewModalEl) closeReview(); };
   const reviewBlundersEl = document.getElementById("review-blunders");
@@ -2063,6 +2281,30 @@
       syncSettingsUI();
     }
   };
+
+  const openingSeg = document.getElementById("opening-seg");
+  if (openingSeg) {
+    openingSeg.onclick = async (ev) => {
+      const b = ev.target.closest("button[data-opening]");
+      if (!b) return;
+      const val = b.dataset.opening;
+      if (val !== "standard" && val !== "swap2") return;
+      if (val === openingRule) return;
+      if (history.length && !(await confirmNative("切换开局规则将开始新局，是否继续？", "切换开局", { ok: "切换", cancel: "取消" }))) return;
+      openingRule = val;
+      saveSettings();
+      reset({ keepSettings: true });
+      toast(val === "swap2" ? "平衡开局 swap2" : "标准开局");
+    };
+  }
+
+  const swap2Btns = document.getElementById("swap2-btns");
+  if (swap2Btns) {
+    swap2Btns.addEventListener("click", (ev) => {
+      const b = ev.target.closest("button[data-kind]");
+      if (b) swap2Choose(b.dataset.kind);
+    });
+  }
 
   const helpModal = document.getElementById("help-modal");
   const confirmModal = document.getElementById("confirm-modal");
@@ -2207,6 +2449,7 @@
     startedAt = Date.now();
     originalStartedAt = startedAt;
     elapsedBaseMs = 0;
+    if (openingRule === "swap2") startSwap2(); // fresh game opens with swap2
   }
 
   // Build the Blob worker up-front so the first computer reply has no

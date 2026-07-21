@@ -29,6 +29,10 @@
       <div id="board-wrap">
         <canvas id="board" width="900" height="900" aria-label="棋盘"></canvas>
         <div class="think-dot" id="think-dot" hidden aria-hidden="true"></div>
+        <div class="swap2-bar" id="swap2-bar" hidden role="group" aria-label="平衡开局选择">
+          <span class="swap2-msg" id="swap2-msg"></span>
+          <div class="swap2-btns" id="swap2-btns"></div>
+        </div>
       </div>
     </div>
 
@@ -62,6 +66,8 @@
           <span><strong class="num" id="info-moves">0</strong> 手</span>
           <span class="sep"></span>
           <span class="num" id="info-time">00:00</span>
+          <span class="sep"></span>
+          <span id="info-mode"></span>
           <span class="sep"></span>
           <span id="save-hint" class="save-hint">自动存档</span>
         </div>
@@ -99,6 +105,13 @@
             <div class="pill" id="color-seg" role="group" aria-label="执子">
               <button type="button" data-human="b" class="active">黑</button>
               <button type="button" data-human="w">白</button>
+            </div>
+          </div>
+          <div class="setting-row" id="opening-field">
+            <span class="setting-k">开局</span>
+            <div class="pill" id="opening-seg" role="group" aria-label="开局规则">
+              <button type="button" data-opening="standard" class="active" title="标准开局">标准</button>
+              <button type="button" data-opening="swap2" title="平衡开局：先手放 3 子，对手选边或加两手">swap2</button>
             </div>
           </div>
         </div>
@@ -229,6 +242,10 @@
           <p class="review-hint">评分曲线（黑上 · 白下）· 红点为失着 · 点曲线或下方失着可跳转</p>
           <canvas id="review-curve" class="review-curve" title="点击跳到对应手"></canvas>
           <div class="review-stat" id="review-stat"></div>
+          <div class="review-actions">
+            <button type="button" class="text-link" id="review-pv" title="从当前查看的一手起，引擎推演后续着法（虚影）">推演当前局面</button>
+            <button type="button" class="text-link" id="review-export">导出带评注 SGF</button>
+          </div>
           <div class="review-blunders" id="review-blunders"></div>
         </div>
         <div class="close-row">

@@ -141,19 +141,30 @@
     ctx.stroke();
   }
 
-  function easeOutBack(t) {
-    const c = 1.2;
-    const t1 = t - 1;
-    return 1 + c * t1 * t1 * t1 + t1 * t1;
+  function easeOutCubic(t) {
+    const t1 = 1 - t;
+    return 1 - t1 * t1 * t1;
   }
 
+  function prefersReducedMotion() {
+    try {
+      return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Restrained place-in: a small monotonic scale-up (no overshoot/pop) over
+  // 120ms, only for the just-placed stone. Honors reduce-motion (no anim), so
+  // it never competes with reading the board mid-game.
   function stoneScale(r, c) {
     const m = getM();
     const placeAnim = m && m.placeAnim;
     if (!placeAnim || placeAnim.r !== r || placeAnim.c !== c) return 1;
+    if (prefersReducedMotion()) return 1;
     const t = Math.min(1, (performance.now() - placeAnim.t0) / 120);
     if (t >= 1) return 1;
-    return 0.78 + 0.22 * easeOutBack(t);
+    return 0.88 + 0.12 * easeOutCubic(t);
   }
 
   function ensureAnimLoop() {
@@ -499,6 +510,39 @@
       ctx.lineTo(x - rr, y);
       ctx.closePath();
       ctx.stroke();
+      ctx.restore();
+    }
+
+    // Principal-variation preview (推演): translucent numbered ghost stones
+    const variation = m.variation;
+    if (variation && variation.length) {
+      ctx.save();
+      const rr = step * 0.4;
+      const fontPx = Math.round(step * 0.34);
+      for (const v of variation) {
+        if (board[v.r] && board[v.r][v.c]) continue; // occupied — skip
+        const x = pad + v.c * step;
+        const y = pad + v.r * step;
+        ctx.globalAlpha = 0.5;
+        const sg = ctx.createRadialGradient(x - rr * 0.35, y - rr * 0.4, rr * 0.1, x, y, rr);
+        if (v.color === "b") { sg.addColorStop(0, "#5a5a5a"); sg.addColorStop(1, "#111"); }
+        else { sg.addColorStop(0, "#fff"); sg.addColorStop(1, "#c8c8c8"); }
+        ctx.beginPath();
+        ctx.arc(x, y, rr, 0, Math.PI * 2);
+        ctx.fillStyle = sg;
+        ctx.fill();
+        ctx.globalAlpha = 0.7;
+        ctx.strokeStyle = v.color === "b" ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.3)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        // move number
+        ctx.globalAlpha = 0.95;
+        ctx.fillStyle = v.color === "b" ? "#fff" : "#1a1a1a";
+        ctx.font = "600 " + fontPx + "px -apple-system, system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(v.n), x, y + step * 0.02);
+      }
       ctx.restore();
     }
 
