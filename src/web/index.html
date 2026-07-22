@@ -179,6 +179,7 @@
       </section>
 
       <div class="side-foot">
+        <button type="button" class="text-link" id="open-stats" title="对局统计">统计</button>
         <button type="button" class="text-link danger" id="clear-save">清除存档</button>
         <button type="button" class="text-link" id="collapse">收起</button>
       </div>
@@ -234,6 +235,18 @@
       </div>
     </div>
 
+    <div class="modal-bg" id="stats-modal" role="dialog" aria-label="对局统计">
+      <div class="modal">
+        <h3>对局统计</h3>
+        <div id="stats-empty" class="muted" hidden>还没有完成的对局</div>
+        <div id="stats-body" hidden></div>
+        <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" class="tool-btn" id="stats-clear">清空</button>
+          <button type="button" class="tool-btn primary" id="stats-close">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="review-modal" role="dialog" aria-label="复盘分析">
       <div class="modal review-modal">
         <h3>复盘分析</h3>
@@ -265,6 +278,7 @@
   <script src="js/audio.js"></script>
   <script src="js/slots.js"></script>
   <script src="js/review.js"></script>
+  <script src="js/stats.js"></script>
   <script src="js/worker-src.js"></script>
   <script src="js/app.js"></script>
 </body>

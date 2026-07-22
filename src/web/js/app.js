@@ -9,6 +9,7 @@
   const Audio2 = window.GobanAudio; // "Audio" would shadow the DOM constructor
   const Slots = window.GobanSlots;
   const Review = window.GobanReview;
+  const Stats = window.GobanStats;
   const SIZE = Core.SIZE;
   const WIN = Core.WIN;
   const SAVE_KEY = "goban.v12.save";
@@ -1497,6 +1498,35 @@
     maybeAiTurn();
   }
 
+  // --- game statistics (store/aggregate/render in GobanStats) ---
+  /** Guard: one stats entry per game — undo-after-win + re-win must not double-count. */
+  let statsRecordedGen = -1;
+
+  function recordGameEnd() {
+    if (gameGen === statsRecordedGen) return;
+    statsRecordedGen = gameGen;
+    Stats.record({
+      mode,
+      difficulty: mode === "ai" ? difficulty : null,
+      humanColor: mode === "ai" ? humanColor : null,
+      result,
+      moves: history.length,
+      durationMs: nowElapsed(),
+      endedAt: Date.now(),
+    });
+  }
+
+  function openStats() {
+    Stats.render();
+    const m = document.getElementById("stats-modal");
+    if (m) m.classList.add("show");
+  }
+
+  function closeStats() {
+    const m = document.getElementById("stats-modal");
+    if (m) m.classList.remove("show");
+  }
+
   function place(r, c, fromAi) {
     if (swap2) {
       if (swap2.phase === "place" || swap2.phase === "place2") swap2PlaceStone(r, c, fromAi);
@@ -1536,6 +1566,7 @@
       winLine = line;
       elapsedBaseMs = nowElapsed();
       startedAt = Date.now();
+      recordGameEnd();
       playWinSound();
       triggerWinFlash();
       ensureAnimLoop();
@@ -1548,6 +1579,7 @@
       winLine = null;
       elapsedBaseMs = nowElapsed();
       startedAt = Date.now();
+      recordGameEnd();
       sync();
       saveGame();
       return;
@@ -1881,6 +1913,22 @@
   const slotsEl = document.getElementById("sgf-slots");
   if (slotsEl) slotsEl.onclick = () => { openSlots(); };
 
+  const statsEl = document.getElementById("open-stats");
+  if (statsEl) statsEl.onclick = () => { openStats(); };
+  const statsCloseEl = document.getElementById("stats-close");
+  if (statsCloseEl) statsCloseEl.onclick = () => { closeStats(); };
+  const statsModalEl = document.getElementById("stats-modal");
+  if (statsModalEl) statsModalEl.onclick = (ev) => { if (ev.target === statsModalEl) closeStats(); };
+  const statsClearEl = document.getElementById("stats-clear");
+  if (statsClearEl) {
+    statsClearEl.onclick = async () => {
+      if (!(await confirmNative("清空全部对局统计？", "清空统计", { ok: "清空", cancel: "取消" }))) return;
+      Stats.clear();
+      Stats.render();
+      toast("统计已清空");
+    };
+  }
+
   const reviewEl = document.getElementById("sgf-review");
   if (reviewEl) reviewEl.onclick = () => { openReview(); };
   const reviewCloseEl = document.getElementById("review-close");
@@ -2065,10 +2113,12 @@
     const k = ev.key.toLowerCase();
     const slotsModal = document.getElementById("slots-modal");
     const reviewModal = document.getElementById("review-modal");
+    const statsModal = document.getElementById("stats-modal");
     if (ev.key === "Escape") {
       if (confirmModal.classList.contains("show")) { finishConfirm(false); return; }
       if (slotsModal && slotsModal.classList.contains("show")) { closeSlots(); return; }
       if (reviewModal && reviewModal.classList.contains("show")) { closeReview(); return; }
+      if (statsModal && statsModal.classList.contains("show")) { closeStats(); return; }
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
       if (appEl.classList.contains("panel-open")) setPanelOpen(false);
       return;
@@ -2087,6 +2137,7 @@
     // Ignore game shortcuts while a modal is open (Esc closes it above)
     if (slotsModal && slotsModal.classList.contains("show")) return;
     if (reviewModal && reviewModal.classList.contains("show")) return;
+    if (statsModal && statsModal.classList.contains("show")) return;
     if (helpModal.classList.contains("show")) {
       if (ev.key === "?" || (ev.shiftKey && k === "/")) { closeHelp(); return; }
       return;

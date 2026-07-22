@@ -541,6 +541,20 @@
       border-color: color-mix(in srgb, var(--accent) 60%, var(--card-border));
     }
 
+    .stats-table {
+      width: 100%; border-collapse: collapse;
+      margin: 4px 0 12px;
+      font-size: 12.5px;
+    }
+    .stats-table th, .stats-table td {
+      padding: 6px 8px; text-align: left;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .stats-table th { color: var(--muted); font-weight: 600; }
+    .stats-table td.num, .stats-table th.num { text-align: right; }
+    .stats-line { font-size: 12.5px; margin: 8px 0; color: var(--fg); }
+    .stats-line.muted2 { color: var(--muted); }
+
     .review-actions {
       display: flex; flex-wrap: wrap; gap: 4px 14px;
       margin: 2px 0 12px;
