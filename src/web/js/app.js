@@ -6,11 +6,14 @@
   const Host = window.GobanHost;
   const GameState = window.GobanState;
   const Draw = window.GobanDraw;
+  const Audio2 = window.GobanAudio; // "Audio" would shadow the DOM constructor
+  const Slots = window.GobanSlots;
+  const Review = window.GobanReview;
+  const Stats = window.GobanStats;
+  const Practice = window.GobanPractice;
   const SIZE = Core.SIZE;
   const WIN = Core.WIN;
   const SAVE_KEY = "goban.v12.save";
-  const SLOTS_KEY = "goban.v12.slots";
-  const SLOTS_MAX = 30;
   const SETTINGS_KEY = "goban.v11.settings";
   const PANEL_KEY = "goban.panelOpen";
 
@@ -575,7 +578,6 @@
   /** Bumps on reset/load so late AI timeouts cannot place on a new game. */
   let gameGen = 0;
   let soundOn = true;
-  let audioCtx = null;
   /** @type {'wood' | 'night' | 'day' | 'notebook'} */
   let themeId = "wood";
   /** Board coordinate labels (A-O / 15-1). */
@@ -617,7 +619,7 @@
     analysisCache.clear();
     // Whole-game review shares the same lifetime: every board mutation runs
     // through here, and (gameGen, length) alone would collide after undo+replay.
-    reviewData = null;
+    Review.invalidate();
   }
 
   /**
@@ -982,92 +984,10 @@
     draw();
   }
 
-  function ensureAudio() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === "suspended") audioCtx.resume();
-    return audioCtx;
-  }
-
-  /** Cached short white-noise buffer — reused for every stone's "clack". */
-  let noiseBuf = null;
-  function noiseBuffer(ctx) {
-    if (noiseBuf) return noiseBuf;
-    const n = Math.floor(ctx.sampleRate * 0.06);
-    noiseBuf = ctx.createBuffer(1, n, ctx.sampleRate);
-    const d = noiseBuf.getChannelData(0);
-    let seed = 0x2545f491; // deterministic — no Math.random needed
-    for (let i = 0; i < n; i++) {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      d[i] = (seed / 0x40000000 - 1) * (1 - i / n); // fade toward silence
-    }
-    return noiseBuf;
-  }
-
-  // A stone on a wooden board is a percussive click (bandpassed noise) plus a
-  // short woody body resonance — far more tactile than a bare sine beep.
-  function playMoveSound(color) {
-    if (!soundOn) return;
-    try {
-      const ctx = ensureAudio();
-      const t0 = ctx.currentTime;
-      // 1) the clack: brief bandpassed noise burst
-      const src = ctx.createBufferSource();
-      src.buffer = noiseBuffer(ctx);
-      const bp = ctx.createBiquadFilter();
-      bp.type = "bandpass";
-      bp.frequency.value = color === "b" ? 1900 : 2300;
-      bp.Q.value = 0.9;
-      const ng = ctx.createGain();
-      ng.gain.setValueAtTime(0.22, t0);
-      ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.05);
-      src.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
-      src.start(t0); src.stop(t0 + 0.06);
-      // 2) the body: fast-decaying woody tone, black lower than white
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(color === "b" ? 250 : 340, t0);
-      osc.frequency.exponentialRampToValueAtTime(color === "b" ? 180 : 250, t0 + 0.08);
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.1, t0 + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
-      osc.connect(g); g.connect(ctx.destination);
-      osc.start(t0); osc.stop(t0 + 0.13);
-    } catch (_) {}
-  }
-
-  function playWinSound() {
-    if (!soundOn) return;
-    try {
-      const ctx = ensureAudio();
-      // rising major arpeggio, then a soft sustained chord to land on
-      const arp = [523.25, 659.25, 783.99, 1046.5];
-      arp.forEach((f, i) => {
-        const t0 = ctx.currentTime + i * 0.085;
-        const osc = ctx.createOscillator();
-        const g = ctx.createGain();
-        osc.type = "triangle";
-        osc.frequency.value = f;
-        g.gain.setValueAtTime(0.0001, t0);
-        g.gain.exponentialRampToValueAtTime(0.11, t0 + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.24);
-        osc.connect(g); g.connect(ctx.destination);
-        osc.start(t0); osc.stop(t0 + 0.26);
-      });
-      const tc = ctx.currentTime + arp.length * 0.085 + 0.02;
-      [523.25, 659.25, 783.99].forEach((f) => {
-        const osc = ctx.createOscillator();
-        const g = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.value = f;
-        g.gain.setValueAtTime(0.0001, tc);
-        g.gain.exponentialRampToValueAtTime(0.06, tc + 0.04);
-        g.gain.exponentialRampToValueAtTime(0.0001, tc + 0.6);
-        osc.connect(g); g.connect(ctx.destination);
-        osc.start(tc); osc.stop(tc + 0.64);
-      });
-    } catch (_) {}
-  }
+  // Sound synthesis lives in GobanAudio (js/audio.js); it reads soundOn lazily.
+  Audio2.init(() => soundOn);
+  function playMoveSound(color) { Audio2.playMove(color); }
+  function playWinSound() { Audio2.playWin(); }
 
   /** Point users at real macOS window chrome — not web Fullscreen API. */
   function toggleFullscreen() {
@@ -1194,67 +1114,16 @@
     }
   }
 
-  // --- named save slots (manual, alongside the single autosave) ---
-  function loadSlots() {
-    try {
-      const raw = Host.storageGet(SLOTS_KEY);
-      if (!raw) return [];
-      const arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr.filter((s) => s && s.snap) : [];
-    } catch (_) {
-      return [];
-    }
-  }
-
-  /** @returns {boolean} false when the write failed (e.g. storage quota). */
-  function persistSlots(arr) {
-    try {
-      Host.storageSet(SLOTS_KEY, JSON.stringify(arr.slice(0, SLOTS_MAX)));
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function resultLabel(r) {
-    return r === "b" ? "黑胜" : r === "w" ? "白胜" : r === "draw" ? "平局" : "进行中";
-  }
-
-  function slotDate(ts) {
-    const d = new Date(ts || Date.now());
-    const p = (n) => String(n).padStart(2, "0");
-    return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
-  }
-
-  function slotMetaText(snap) {
-    const moves = (snap.history && snap.history.length) || 0;
-    return moves + "手 · " + resultLabel(snap.result) + " · " + slotDate(snap.savedAt);
-  }
-
-  function genSlotId() {
-    return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6);
-  }
-
-  /** Save the current game as a new named slot. */
+  // --- named save slots: store/render in GobanSlots, game-flow glue here ---
   function saveCurrentAsSlot() {
     if (!history.length) { toast("当前没有可保存的对局"); return; }
-    const snap = serialize();
-    const slot = {
-      id: genSlotId(),
-      name: "对局 " + slotDate(Date.now()),
-      savedAt: Date.now(),
-      snap,
-    };
-    const arr = loadSlots();
-    arr.unshift(slot);
-    const ok = persistSlots(arr);
-    renderSlots();
+    const ok = Slots.add(serialize());
+    Slots.render();
     toast(ok ? "已保存到存档" : "保存失败：本地存储空间不足，请删除旧存档");
   }
 
   async function loadSlotById(id) {
-    const arr = loadSlots();
-    const slot = arr.find((s) => s.id === id);
+    const slot = Slots.get(id);
     if (!slot) return;
     if (history.length &&
         !(await confirmNative("读取存档将替换当前对局，是否继续？", "读取存档", { ok: "读取", cancel: "取消" }))) {
@@ -1271,59 +1140,18 @@
   }
 
   async function deleteSlotById(id) {
-    const arr = loadSlots();
-    const slot = arr.find((s) => s.id === id);
+    const slot = Slots.get(id);
     if (!slot) return;
     if (!(await confirmNative("删除存档「" + slot.name + "」？", "删除存档", { ok: "删除", cancel: "取消" }))) {
       return;
     }
-    persistSlots(arr.filter((s) => s.id !== id));
-    renderSlots();
+    Slots.remove(id);
+    Slots.render();
     toast("存档已删除");
   }
 
-  function renameSlot(id, name) {
-    const arr = loadSlots();
-    const slot = arr.find((s) => s.id === id);
-    if (!slot) return;
-    const clean = (name || "").trim().slice(0, 40);
-    slot.name = clean || ("对局 " + slotDate(slot.savedAt));
-    persistSlots(arr);
-  }
-
-  function renderSlots() {
-    const list = document.getElementById("slots-list");
-    const empty = document.getElementById("slots-empty");
-    if (!list) return;
-    const arr = loadSlots();
-    if (empty) empty.hidden = arr.length > 0;
-    list.innerHTML = "";
-    for (const slot of arr) {
-      const row = document.createElement("div");
-      row.className = "slot-row";
-      row.dataset.id = slot.id;
-      const nameEl = document.createElement("input");
-      nameEl.className = "slot-name";
-      nameEl.value = slot.name;
-      nameEl.maxLength = 40;
-      nameEl.setAttribute("aria-label", "存档名");
-      const meta = document.createElement("div");
-      meta.className = "slot-meta";
-      meta.textContent = slotMetaText(slot.snap);
-      const ops = document.createElement("div");
-      ops.className = "slot-ops";
-      ops.innerHTML =
-        '<button type="button" class="text-link slot-load" data-id="' + slot.id + '">读取</button>' +
-        '<button type="button" class="text-link danger slot-del" data-id="' + slot.id + '">删除</button>';
-      row.appendChild(nameEl);
-      row.appendChild(meta);
-      row.appendChild(ops);
-      list.appendChild(row);
-    }
-  }
-
   function openSlots() {
-    renderSlots();
+    Slots.render();
     const m = document.getElementById("slots-modal");
     if (m) m.classList.add("show");
   }
@@ -1333,152 +1161,24 @@
     if (m) m.classList.remove("show");
   }
 
-  // --- whole-game review (复盘 2.0): eval curve + blunder list ---
-  const REVIEW_SQUASH = 1200;   // static-eval scale → tanh spread
-  const REVIEW_BLUNDER_DROP = 0.3; // squashed-advantage loss that flags a mistake
-  let reviewData = null;
-
-  /** Signed advantage from Black's perspective at ply i, squashed to [-1,1]. */
-  function advAt(i) {
-    if (i > 0 && winLineAt(i)) return (i - 1) % 2 === 0 ? 1 : -1; // someone just won
-    const raw = Ai.evaluateBoard(boardAfter(i), "b");
-    return Math.tanh(raw / REVIEW_SQUASH);
-  }
-
-  /** Analyze the whole game: per-ply Black-advantage + flagged blunders. */
-  function computeReview() {
-    const N = history.length;
-    // Static-eval sweep over every ply is O(N × evaluateBoard) — noticeable on
-    // long games. The result only depends on the game identity, so reuse it
-    // when neither the game nor its length changed since last computed.
-    if (reviewData && reviewData.gen === gameGen && reviewData.len === N) {
-      return reviewData;
-    }
-    const adv = [];
-    for (let i = 0; i <= N; i++) adv.push(advAt(i));
-    const blunders = [];
-    let bCount = 0, wCount = 0;
-    for (let i = 1; i <= N; i++) {
-      const color = (i - 1) % 2 === 0 ? "b" : "w";
-      const hard = coachFacts(boardAfter(i - 1), color, history[i - 1]);
-      let reason = null;
-      if (hard && hard.grade === "blunder") reason = hard.text;
-      else {
-        // advantage from the mover's own perspective before vs after
-        const before = color === "b" ? adv[i - 1] : -adv[i - 1];
-        const after = color === "b" ? adv[i] : -adv[i];
-        if (before - after >= REVIEW_BLUNDER_DROP) reason = "评分下滑";
-      }
-      if (reason) {
-        blunders.push({ i, color, reason });
-        if (color === "b") bCount++; else wCount++;
-      }
-    }
-    reviewData = { adv, blunders, summary: { b: bCount, w: wCount }, gen: gameGen, len: N };
-    return reviewData;
-  }
-
-  function drawReviewCurve() {
-    const cv = document.getElementById("review-curve");
-    if (!cv || !reviewData) return;
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = cv.clientWidth || 320;
-    const cssH = cv.clientHeight || 96;
-    cv.width = Math.round(cssW * dpr);
-    cv.height = Math.round(cssH * dpr);
-    const g = cv.getContext("2d");
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, cssW, cssH);
-    const adv = reviewData.adv;
-    const n = adv.length;
-    const pad = 6;
-    const w = cssW - pad * 2;
-    const h = cssH - pad * 2;
-    const x = (i) => pad + (n <= 1 ? 0 : (i / (n - 1)) * w);
-    const y = (v) => pad + (1 - (v + 1) / 2) * h; // +1 top (black), −1 bottom (white)
-    const css = getComputedStyle(document.documentElement);
-    const line = css.getPropertyValue("--accent").trim() || "#3b82f6";
-    const mid = css.getPropertyValue("--card-border").trim() || "#ccc";
-    // zero (even) midline
-    g.strokeStyle = mid; g.lineWidth = 1;
-    g.beginPath(); g.moveTo(pad, y(0)); g.lineTo(pad + w, y(0)); g.stroke();
-    // advantage area
-    g.beginPath();
-    g.moveTo(x(0), y(adv[0]));
-    for (let i = 1; i < n; i++) g.lineTo(x(i), y(adv[i]));
-    g.lineTo(x(n - 1), y(0)); g.lineTo(x(0), y(0)); g.closePath();
-    g.fillStyle = (line || "#3b82f6") + "22";
-    g.fill();
-    // advantage line
-    g.beginPath();
-    g.moveTo(x(0), y(adv[0]));
-    for (let i = 1; i < n; i++) g.lineTo(x(i), y(adv[i]));
-    g.strokeStyle = line; g.lineWidth = 1.8; g.lineJoin = "round";
-    g.stroke();
-    // blunder dots
-    for (const b of reviewData.blunders) {
-      g.beginPath();
-      g.arc(x(b.i), y(adv[b.i]), 3, 0, Math.PI * 2);
-      g.fillStyle = css.getPropertyValue("--win").trim() || "#c0392b";
-      g.fill();
-    }
-    // current view marker
-    if (viewIndex >= 0 && viewIndex < n) {
-      g.strokeStyle = line; g.globalAlpha = 0.4; g.lineWidth = 1;
-      g.beginPath(); g.moveTo(x(viewIndex), pad); g.lineTo(x(viewIndex), pad + h); g.stroke();
-      g.globalAlpha = 1;
-    }
-  }
+  // --- whole-game review: analysis/curve/list in GobanReview, glue here ---
+  Review.init({
+    getHistory: () => history,
+    getGameGen: () => gameGen,
+    getViewIndex: () => viewIndex,
+    boardAfter,
+    winLineAt,
+    coachFacts,
+    evaluateBoard: Ai.evaluateBoard,
+  });
 
   function reviewJump(i) {
     setViewIndex(i);
     closeReview();
   }
 
-  function renderReview() {
-    const empty = document.getElementById("review-empty");
-    const body = document.getElementById("review-body");
-    if (history.length < 2) {
-      if (empty) empty.hidden = false;
-      if (body) body.hidden = true;
-      return;
-    }
-    computeReview();
-    if (empty) empty.hidden = true;
-    if (body) body.hidden = false;
-    const stat = document.getElementById("review-stat");
-    if (stat) {
-      const s = reviewData.summary;
-      stat.textContent = "失着 · 黑 " + s.b + " · 白 " + s.w +
-        (s.b + s.w === 0 ? " · 双方无明显失误" : "");
-    }
-    const list = document.getElementById("review-blunders");
-    if (list) {
-      list.innerHTML = "";
-      if (!reviewData.blunders.length) {
-        const p = document.createElement("div");
-        p.className = "muted review-none";
-        p.textContent = "没有检出明显失着 👍";
-        list.appendChild(p);
-      }
-      for (const b of reviewData.blunders) {
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "review-blunder-row";
-        row.dataset.i = b.i;
-        const who = b.color === "b" ? "黑" : "白";
-        row.innerHTML =
-          '<span class="rb-move">第' + b.i + '手 ' + who + '</span>' +
-          '<span class="rb-reason">' + b.reason + '</span>';
-        list.appendChild(row);
-      }
-    }
-    // draw after layout so clientWidth is real
-    requestAnimationFrame(drawReviewCurve);
-  }
-
   function openReview() {
-    renderReview();
+    Review.render();
     const m = document.getElementById("review-modal");
     if (m) m.classList.add("show");
   }
@@ -1490,10 +1190,10 @@
 
   /** SGF with per-move 失着 comments + a summary root comment (复盘评注导出). */
   function buildAnnotatedSgf() {
-    computeReview();
+    const rd = Review.compute();
     const comments = {};
-    for (const b of reviewData.blunders) comments[b.i - 1] = "失着 · " + b.reason;
-    const s = reviewData.summary;
+    for (const b of rd.blunders) comments[b.i - 1] = "失着 · " + b.reason;
+    const s = rd.summary;
     const rootComment =
       "复盘评注 · 失着 黑" + s.b + " 白" + s.w +
       (s.b + s.w === 0 ? "（双方无明显失误）" : "") +
@@ -1799,6 +1499,35 @@
     maybeAiTurn();
   }
 
+  // --- game statistics (store/aggregate/render in GobanStats) ---
+  /** Guard: one stats entry per game — undo-after-win + re-win must not double-count. */
+  let statsRecordedGen = -1;
+
+  function recordGameEnd() {
+    if (gameGen === statsRecordedGen) return;
+    statsRecordedGen = gameGen;
+    Stats.record({
+      mode,
+      difficulty: mode === "ai" ? difficulty : null,
+      humanColor: mode === "ai" ? humanColor : null,
+      result,
+      moves: history.length,
+      durationMs: nowElapsed(),
+      endedAt: Date.now(),
+    });
+  }
+
+  function openStats() {
+    Stats.render();
+    const m = document.getElementById("stats-modal");
+    if (m) m.classList.add("show");
+  }
+
+  function closeStats() {
+    const m = document.getElementById("stats-modal");
+    if (m) m.classList.remove("show");
+  }
+
   function place(r, c, fromAi) {
     if (swap2) {
       if (swap2.phase === "place" || swap2.phase === "place2") swap2PlaceStone(r, c, fromAi);
@@ -1838,6 +1567,7 @@
       winLine = line;
       elapsedBaseMs = nowElapsed();
       startedAt = Date.now();
+      recordGameEnd();
       playWinSound();
       triggerWinFlash();
       ensureAnimLoop();
@@ -1850,6 +1580,7 @@
       winLine = null;
       elapsedBaseMs = nowElapsed();
       startedAt = Date.now();
+      recordGameEnd();
       sync();
       saveGame();
       return;
@@ -2183,6 +1914,33 @@
   const slotsEl = document.getElementById("sgf-slots");
   if (slotsEl) slotsEl.onclick = () => { openSlots(); };
 
+  const statsEl = document.getElementById("open-stats");
+  if (statsEl) statsEl.onclick = () => { openStats(); };
+
+  // Practice pulls puzzle material from the live game + saved slots; it plays
+  // entirely inside its own modal/board and never touches game state.
+  Practice.init({
+    getHistories: () => [history].concat(
+      Slots.load().map((s) => s.snap && s.snap.history).filter(Boolean)
+    ),
+  });
+  Practice.wire();
+  const practiceEl = document.getElementById("open-practice");
+  if (practiceEl) practiceEl.onclick = () => { Practice.open(); };
+  const statsCloseEl = document.getElementById("stats-close");
+  if (statsCloseEl) statsCloseEl.onclick = () => { closeStats(); };
+  const statsModalEl = document.getElementById("stats-modal");
+  if (statsModalEl) statsModalEl.onclick = (ev) => { if (ev.target === statsModalEl) closeStats(); };
+  const statsClearEl = document.getElementById("stats-clear");
+  if (statsClearEl) {
+    statsClearEl.onclick = async () => {
+      if (!(await confirmNative("清空全部对局统计？", "清空统计", { ok: "清空", cancel: "取消" }))) return;
+      Stats.clear();
+      Stats.render();
+      toast("统计已清空");
+    };
+  }
+
   const reviewEl = document.getElementById("sgf-review");
   if (reviewEl) reviewEl.onclick = () => { openReview(); };
   const reviewCloseEl = document.getElementById("review-close");
@@ -2203,11 +1961,12 @@
   const reviewCurveEl = document.getElementById("review-curve");
   if (reviewCurveEl) {
     reviewCurveEl.addEventListener("click", (ev) => {
-      if (!reviewData || reviewData.adv.length < 2) return;
+      const rd = Review.getData();
+      if (!rd || rd.adv.length < 2) return;
       const rect = reviewCurveEl.getBoundingClientRect();
       const pad = 6;
       const frac = (ev.clientX - rect.left - pad) / Math.max(1, rect.width - pad * 2);
-      const i = Math.round(Math.min(1, Math.max(0, frac)) * (reviewData.adv.length - 1));
+      const i = Math.round(Math.min(1, Math.max(0, frac)) * (rd.adv.length - 1));
       reviewJump(i);
     });
   }
@@ -2230,7 +1989,7 @@
       const inp = ev.target.closest(".slot-name");
       if (!inp) return;
       const row = inp.closest(".slot-row");
-      if (row) renameSlot(row.dataset.id, inp.value);
+      if (row) Slots.rename(row.dataset.id, inp.value);
     };
     slotsListEl.addEventListener("change", commitRename);
     slotsListEl.addEventListener("keydown", (ev) => {
@@ -2366,10 +2125,13 @@
     const k = ev.key.toLowerCase();
     const slotsModal = document.getElementById("slots-modal");
     const reviewModal = document.getElementById("review-modal");
+    const statsModal = document.getElementById("stats-modal");
     if (ev.key === "Escape") {
       if (confirmModal.classList.contains("show")) { finishConfirm(false); return; }
       if (slotsModal && slotsModal.classList.contains("show")) { closeSlots(); return; }
       if (reviewModal && reviewModal.classList.contains("show")) { closeReview(); return; }
+      if (statsModal && statsModal.classList.contains("show")) { closeStats(); return; }
+      if (Practice.isOpen()) { Practice.close(); return; }
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
       if (appEl.classList.contains("panel-open")) setPanelOpen(false);
       return;
@@ -2388,6 +2150,8 @@
     // Ignore game shortcuts while a modal is open (Esc closes it above)
     if (slotsModal && slotsModal.classList.contains("show")) return;
     if (reviewModal && reviewModal.classList.contains("show")) return;
+    if (statsModal && statsModal.classList.contains("show")) return;
+    if (Practice.isOpen()) return;
     if (helpModal.classList.contains("show")) {
       if (ev.key === "?" || (ev.shiftKey && k === "/")) { closeHelp(); return; }
       return;
