@@ -179,6 +179,7 @@
       </section>
 
       <div class="side-foot">
+        <button type="button" class="text-link" id="open-practice" title="战术练习：找制胜一手 / 找防守点">练习</button>
         <button type="button" class="text-link" id="open-stats" title="对局统计">统计</button>
         <button type="button" class="text-link danger" id="clear-save">清除存档</button>
         <button type="button" class="text-link" id="collapse">收起</button>
@@ -235,6 +236,25 @@
       </div>
     </div>
 
+    <div class="modal-bg" id="practice-modal" role="dialog" aria-label="战术练习">
+      <div class="modal practice-modal">
+        <h3>战术练习</h3>
+        <div class="practice-head">
+          <span id="practice-task" class="practice-task"></span>
+          <span id="practice-progress" class="muted practice-progress"></span>
+        </div>
+        <canvas id="practice-board" class="practice-board" title="点击落子作答"></canvas>
+        <div class="practice-foot">
+          <span id="practice-source" class="muted practice-source"></span>
+          <div id="practice-feedback" class="practice-feedback"></div>
+        </div>
+        <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" class="tool-btn primary" id="practice-next" hidden>下一题</button>
+          <button type="button" class="tool-btn" id="practice-close">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-bg" id="stats-modal" role="dialog" aria-label="对局统计">
       <div class="modal">
         <h3>对局统计</h3>
@@ -279,6 +299,7 @@
   <script src="js/slots.js"></script>
   <script src="js/review.js"></script>
   <script src="js/stats.js"></script>
+  <script src="js/practice.js"></script>
   <script src="js/worker-src.js"></script>
   <script src="js/app.js"></script>
 </body>

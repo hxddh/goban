@@ -24,6 +24,7 @@ test -f frontend/dist/js/audio.js
 test -f frontend/dist/js/slots.js
 test -f frontend/dist/js/review.js
 test -f frontend/dist/js/stats.js
+test -f frontend/dist/js/practice.js
 test -f frontend/dist/js/ai.js
 test -f frontend/dist/js/ai2.js
 test -f frontend/dist/js/ai-worker.js

@@ -10,6 +10,7 @@
   const Slots = window.GobanSlots;
   const Review = window.GobanReview;
   const Stats = window.GobanStats;
+  const Practice = window.GobanPractice;
   const SIZE = Core.SIZE;
   const WIN = Core.WIN;
   const SAVE_KEY = "goban.v12.save";
@@ -1915,6 +1916,17 @@
 
   const statsEl = document.getElementById("open-stats");
   if (statsEl) statsEl.onclick = () => { openStats(); };
+
+  // Practice pulls puzzle material from the live game + saved slots; it plays
+  // entirely inside its own modal/board and never touches game state.
+  Practice.init({
+    getHistories: () => [history].concat(
+      Slots.load().map((s) => s.snap && s.snap.history).filter(Boolean)
+    ),
+  });
+  Practice.wire();
+  const practiceEl = document.getElementById("open-practice");
+  if (practiceEl) practiceEl.onclick = () => { Practice.open(); };
   const statsCloseEl = document.getElementById("stats-close");
   if (statsCloseEl) statsCloseEl.onclick = () => { closeStats(); };
   const statsModalEl = document.getElementById("stats-modal");
@@ -2119,6 +2131,7 @@
       if (slotsModal && slotsModal.classList.contains("show")) { closeSlots(); return; }
       if (reviewModal && reviewModal.classList.contains("show")) { closeReview(); return; }
       if (statsModal && statsModal.classList.contains("show")) { closeStats(); return; }
+      if (Practice.isOpen()) { Practice.close(); return; }
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
       if (appEl.classList.contains("panel-open")) setPanelOpen(false);
       return;
@@ -2138,6 +2151,7 @@
     if (slotsModal && slotsModal.classList.contains("show")) return;
     if (reviewModal && reviewModal.classList.contains("show")) return;
     if (statsModal && statsModal.classList.contains("show")) return;
+    if (Practice.isOpen()) return;
     if (helpModal.classList.contains("show")) {
       if (ev.key === "?" || (ev.shiftKey && k === "/")) { closeHelp(); return; }
       return;
