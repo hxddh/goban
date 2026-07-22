@@ -443,6 +443,10 @@
     clearHint();
     clearAnalysis();
     clearVariation();
+    // An import replaces the game outright — cancel any in-progress swap2
+    // opening, or its overlay would keep hijacking board clicks.
+    swap2 = null;
+    hideSwap2Bar();
     hoverCell = null;
     importPaused = !!s.importPaused;
     // Review-only: never maybeAiTurn after import until「续下」.
@@ -611,6 +615,9 @@
     if (analysisTimer) { clearTimeout(analysisTimer); analysisTimer = null; }
     analysisGen++;
     analysisCache.clear();
+    // Whole-game review shares the same lifetime: every board mutation runs
+    // through here, and (gameGen, length) alone would collide after undo+replay.
+    reviewData = null;
   }
 
   /**
@@ -1082,6 +1089,9 @@
       elapsedBaseMs: nowElapsed(),
       originalStartedAt,
       importPaused: !!importPaused,
+      // mid-swap2 quits must resume inside the opening protocol, not as a
+      // normal game — otherwise the side-choice step is silently swallowed
+      swap2Phase: swap2 ? swap2.phase : null,
       savedAt: Date.now(),
     };
   }
@@ -1149,6 +1159,26 @@
     startedAt = Date.now();
     // v3+: restore import pause so AI does not auto-continue after import-only save.
     importPaused = s.v >= 3 && !!s.importPaused && result === "play";
+    // Loading any snapshot leaves whatever opening protocol was on screen —
+    // then restore the saved swap2 phase when it is consistent with history
+    // (mid-opening save/restore must resume the choice flow, not skip it).
+    swap2 = null;
+    hideSwap2Bar();
+    if (result === "play" && typeof s.swap2Phase === "string") {
+      const len = history.length;
+      const phaseOk =
+        (s.swap2Phase === "place" && len <= 2) ||
+        (s.swap2Phase === "p2choose" && len === 3) ||
+        (s.swap2Phase === "place2" && (len === 3 || len === 4)) ||
+        (s.swap2Phase === "p1choose" && len === 5);
+      if (phaseOk) {
+        swap2 = { phase: s.swap2Phase };
+        renderSwap2Bar();
+        if (s.swap2Phase === "p2choose" && mode === "ai") {
+          setTimeout(aiSwap2Choose, 500); // the pending AI side-choice resumes
+        }
+      }
+    }
     hoverCell = null;
     clearHint();
     return true;
@@ -1176,10 +1206,14 @@
     }
   }
 
+  /** @returns {boolean} false when the write failed (e.g. storage quota). */
   function persistSlots(arr) {
     try {
       Host.storageSet(SLOTS_KEY, JSON.stringify(arr.slice(0, SLOTS_MAX)));
-    } catch (_) {}
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   function resultLabel(r) {
@@ -1213,9 +1247,9 @@
     };
     const arr = loadSlots();
     arr.unshift(slot);
-    persistSlots(arr);
+    const ok = persistSlots(arr);
     renderSlots();
-    toast("已保存到存档");
+    toast(ok ? "已保存到存档" : "保存失败：本地存储空间不足，请删除旧存档");
   }
 
   async function loadSlotById(id) {
@@ -1314,6 +1348,12 @@
   /** Analyze the whole game: per-ply Black-advantage + flagged blunders. */
   function computeReview() {
     const N = history.length;
+    // Static-eval sweep over every ply is O(N × evaluateBoard) — noticeable on
+    // long games. The result only depends on the game identity, so reuse it
+    // when neither the game nor its length changed since last computed.
+    if (reviewData && reviewData.gen === gameGen && reviewData.len === N) {
+      return reviewData;
+    }
     const adv = [];
     for (let i = 0; i <= N; i++) adv.push(advAt(i));
     const blunders = [];
@@ -1334,7 +1374,7 @@
         if (color === "b") bCount++; else wCount++;
       }
     }
-    reviewData = { adv, blunders, summary: { b: bCount, w: wCount } };
+    reviewData = { adv, blunders, summary: { b: bCount, w: wCount }, gen: gameGen, len: N };
     return reviewData;
   }
 
@@ -1694,6 +1734,8 @@
     history.push({ r: r, c: c });
     viewIndex = history.length;
     hoverCell = null;
+    clearAnalysis();
+    clearVariation();
     placeAnim = { r: r, c: c, t0: performance.now() };
     ensureAnimLoop();
     playMoveSound(color);
@@ -1703,12 +1745,14 @@
       if (swap2.phase === "p2choose" && mode === "ai") {
         renderSwap2Bar();
         sync();
+        saveGame();
         setTimeout(aiSwap2Choose, 350); // AI (P2) decides its side
         return;
       }
     }
     renderSwap2Bar();
     sync();
+    saveGame(); // opening stones + phase persist even on abrupt quit
   }
 
   /** AI (P2) takes whichever side its static eval values higher. */
@@ -1997,7 +2041,7 @@
     updateClock();
 
     undoBtns.forEach((b) => {
-      if (b) b.disabled = history.length === 0 || aiThinking || hintBusy || !live;
+      if (b) b.disabled = history.length === 0 || aiThinking || hintBusy || !live || !!swap2;
     });
     document.getElementById("rep-start").disabled = viewIndex <= 0;
     document.getElementById("rep-prev").disabled = viewIndex <= 0;
@@ -2017,6 +2061,7 @@
       const canHint =
         !aiThinking &&
         !hintBusy &&
+        !swap2 &&
         (isLive()
           ? result === "play" && !(mode === "ai" && !isHumanTurn())
           : true);
