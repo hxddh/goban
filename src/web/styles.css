@@ -1,4 +1,10 @@
 
+    /* The hidden attribute must always win: author display rules (e.g.
+       .swap2-bar { display: flex }) otherwise override the UA's
+       [hidden] → display:none, leaving "hidden" elements visible — this
+       exact conflict shipped an empty pill onto the board in v1.23. */
+    [hidden] { display: none !important; }
+
     :root, [data-theme="wood"] {
       --bg: #14100e;
       --panel: #241c18;

@@ -114,6 +114,37 @@ async function enableSwap2Pvp(page) {
   await dismissConfirm(page);
 }
 
+// ---- Test 0: [hidden] elements must be VISUALLY hidden in every theme ----
+// The v1.23 swap2-bar leak passed attribute-level checks (el.hidden was true)
+// while author CSS display rules kept it rendered — assert computed display.
+{
+  const page = await newPage();
+  const leaks = [];
+  for (const theme of ["wood", "night", "day", "notebook"]) {
+    await page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
+    await page.waitForTimeout(60);
+    const found = await page.evaluate(() =>
+      [...document.querySelectorAll("[hidden]")].filter((el) => {
+        const r = el.getBoundingClientRect();
+        return getComputedStyle(el).display !== "none" || r.width > 0 || r.height > 0;
+      }).map((el) => el.id || el.className));
+    if (found.length) leaks.push(theme + ":" + found.join(","));
+  }
+  // positive path: the swap2 bar still SHOWS once the opening is active
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "wood"));
+  await enableSwap2Pvp(page);
+  const bar = await page.evaluate(() => {
+    const el = document.getElementById("swap2-bar");
+    const r = el.getBoundingClientRect();
+    return { hidden: el.hidden, display: getComputedStyle(el).display, w: r.width };
+  });
+  report("0 [hidden] visually hidden in all themes (+bar shows when active)",
+    leaks.length === 0 && !bar.hidden && bar.display !== "none" && bar.w > 100 &&
+      page.__errors.length === 0,
+    JSON.stringify({ leaks, bar, errs: page.__errors }));
+  await page.close();
+}
+
 // ---- Test A: mid-'place' save/restore (the v1.23 bug) ----
 {
   const page = await newPage();
