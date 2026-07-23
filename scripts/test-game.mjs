@@ -486,6 +486,41 @@ load("src/web/js/draw.js");
   b[m.r][m.c] = "";
 }
 
+// --- 每日挑战: pure daily helpers from practice.js (no DOM touched) ---
+load("src/web/js/practice.js");
+const Practice = ctx.GobanPractice;
+
+// deterministic date-seeded pick
+{
+  const cands = [];
+  for (let i = 0; i < 9; i++) cands.push({ id: i });
+  const a = Practice.daily.pickForDate(cands, "2026-07-23", 5);
+  const b = Practice.daily.pickForDate(cands, "2026-07-23", 5);
+  assert(JSON.stringify(a) === JSON.stringify(b), "daily pick deterministic for same date");
+  assert(a.length === 5, "daily pick returns 5");
+  assert(a.every((p) => cands.includes(p)), "daily pick is a subset of candidates");
+  assert(new Set(a.map((p) => p.id)).size === 5, "daily pick has no duplicates");
+  const c = Practice.daily.pickForDate(cands, "2026-07-24", 5);
+  assert(JSON.stringify(a) !== JSON.stringify(c), "different date picks differently");
+  const few = Practice.daily.pickForDate(cands.slice(0, 3), "2026-07-23", 5);
+  assert(few.length === 3, "daily pick caps at pool size");
+}
+
+// check-in streak state machine
+{
+  let st = Practice.daily.advanceDaily(null, "2026-07-23", 4, 5);
+  assert(st.streak === 1 && st.daysDone === 1 && st.bestStreak === 1, "first completion starts streak");
+  const replay = Practice.daily.advanceDaily(st, "2026-07-23", 5, 5);
+  assert(replay.streak === 1 && replay.daysDone === 1 && replay.lastScore === 4,
+    "same-day replay never re-counts");
+  st = Practice.daily.advanceDaily(st, "2026-07-24", 3, 5);
+  assert(st.streak === 2 && st.bestStreak === 2 && st.daysDone === 2, "next day extends streak");
+  st = Practice.daily.advanceDaily(st, "2026-07-27", 5, 5);
+  assert(st.streak === 1 && st.bestStreak === 2 && st.daysDone === 3, "gap resets streak, keeps best");
+  assert(Practice.daily.prevDayStr("2026-03-01") === "2026-02-28", "prevDay crosses month");
+  assert(Practice.daily.prevDayStr("2026-01-01") === "2025-12-31", "prevDay crosses year");
+}
+
 if (failed) {
   console.error("\n" + failed + " failed");
   process.exit(1);
