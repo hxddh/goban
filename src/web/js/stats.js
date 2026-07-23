@@ -84,15 +84,30 @@
     return (m / 60).toFixed(1) + " 小时";
   }
 
+  /** 每日挑战 line from practice.js (loaded before us; render runs on click). */
+  function dailyLine() {
+    const P = global.GobanPractice;
+    const d = P && P.dailySummary ? P.dailySummary() : null;
+    if (!d) return "";
+    return (
+      "<div class='stats-line'>每日挑战 打卡 " + d.daysDone + " 天 · 连续 <strong>" +
+      d.streak + "</strong> · 最长 <strong>" + d.bestStreak + "</strong>" +
+      (d.todayDone ? " · 今日已完成" : "") + "</div>"
+    );
+  }
+
   /** Fill #stats-body with the aggregate tables. */
   function render() {
     const body = document.getElementById("stats-body");
     const empty = document.getElementById("stats-empty");
     if (!body) return;
     const a = aggregate();
-    if (empty) empty.hidden = a.games > 0;
-    body.hidden = a.games === 0;
-    if (a.games === 0) { body.innerHTML = ""; return; }
+    const daily = dailyLine();
+    const hasAny = a.games > 0 || !!daily;
+    if (empty) empty.hidden = hasAny;
+    body.hidden = !hasAny;
+    if (!hasAny) { body.innerHTML = ""; return; }
+    if (a.games === 0) { body.innerHTML = daily; return; }
     const names = { easy: "简单", normal: "普通", hard: "困难", extreme: "极难" };
     let rows = "";
     for (const d of ["easy", "normal", "hard", "extreme"]) {
@@ -113,6 +128,7 @@
     body.innerHTML =
       aiTable + pvpLine +
       "<div class='stats-line'>连胜（人机）当前 <strong>" + a.curStreak + "</strong> · 最佳 <strong>" + a.bestStreak + "</strong></div>" +
+      daily +
       "<div class='stats-line muted2'>共 " + a.games + " 局 · " + a.totalMoves + " 手 · " + fmtDuration(a.totalMs) + "</div>";
   }
 

@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Goban app icon — wood board, five-in-a-row diagonal. Source of truth for assets/icon.png. -->
+  <defs>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#eccda2"/>
+      <stop offset="0.5" stop-color="#d8a878"/>
+      <stop offset="1" stop-color="#bd8449"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="0.32" cy="0.22" r="0.9">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="black" cx="0.35" cy="0.3" r="0.85">
+      <stop offset="0" stop-color="#5a5a5a"/>
+      <stop offset="0.45" stop-color="#1c1c1c"/>
+      <stop offset="1" stop-color="#050505"/>
+    </radialGradient>
+    <radialGradient id="white" cx="0.35" cy="0.3" r="0.85">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#f0efec"/>
+      <stop offset="1" stop-color="#c9c5bd"/>
+    </radialGradient>
+    <filter id="boardShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#000000" flood-opacity="0.30"/>
+    </filter>
+    <filter id="stoneShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="7" stdDeviation="9" flood-color="#3a2410" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+
+  <!-- Board -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#wood)" filter="url(#boardShadow)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#sheen)"/>
+
+  <!-- Grid: 5 x 5 lines, 252..772 step 130 -->
+  <g stroke="#3d2914" stroke-opacity="0.42" stroke-width="6" stroke-linecap="round">
+    <path d="M252 252H772M252 382H772M252 512H772M252 642H772M252 772H772"/>
+    <path d="M252 252V772M382 252V772M512 252V772M642 252V772M772 252V772"/>
+  </g>
+
+  <!-- White stones (the losing side) -->
+  <g filter="url(#stoneShadow)">
+    <circle cx="642" cy="382" r="59" fill="url(#white)"/>
+    <circle cx="382" cy="642" r="59" fill="url(#white)"/>
+  </g>
+
+  <!-- Black stones: five in a row on the main diagonal -->
+  <g filter="url(#stoneShadow)">
+    <circle cx="252" cy="252" r="59" fill="url(#black)"/>
+    <circle cx="382" cy="382" r="59" fill="url(#black)"/>
+    <circle cx="512" cy="512" r="59" fill="url(#black)"/>
+    <circle cx="642" cy="642" r="59" fill="url(#black)"/>
+    <circle cx="772" cy="772" r="59" fill="url(#black)"/>
+  </g>
+</svg>

@@ -1927,6 +1927,8 @@
   Practice.wire();
   const practiceEl = document.getElementById("open-practice");
   if (practiceEl) practiceEl.onclick = () => { Practice.open(); };
+  const dailyEl = document.getElementById("open-daily");
+  if (dailyEl) dailyEl.onclick = () => { Practice.openDaily(); };
   const statsCloseEl = document.getElementById("stats-close");
   if (statsCloseEl) statsCloseEl.onclick = () => { closeStats(); };
   const statsModalEl = document.getElementById("stats-modal");

@@ -29,6 +29,7 @@ open ~/Applications/Goban.app   # macOS 本地安装路径
 | 复盘 | 侧栏·棋谱「**复盘**」：一键全局分析 → **评分曲线 + 失着列表**，点曲线或失着跳转；可**导出带评注 SGF**、**推演**当前局面（虚影主变） |
 | 开局 | 侧栏·对局「**开局**」：标准 / **swap2 平衡开局**（先手布 3 子，对手选边或加两手；人机下电脑按局面自动选边） |
 | 练习 | 侧栏底部「**练习**」：战术做题——**找制胜一手 / 挡住成五威胁**；内置题 + 从你对局的失着自动生成，答错给正解讲解 |
+| 每日 | 侧栏底部「**每日**」：每日挑战——每天固定 **5 题**（当天重进同一套题），完成打卡；**连续打卡天数**进统计 |
 | 统计 | 侧栏底部「**统计**」：分难度胜负与胜率、连胜、总局数/手数/用时 |
 | 导入后 | 默认仅复盘；未终局可点 **续下** 继续（含 AI） |
 | 坐标 | 侧栏·外观：A–O / 15–1 标注开关 |
@@ -61,14 +62,14 @@ src/web/
   js/slots.js      # 命名存档槽（存取 + 列表渲染）
   js/review.js     # 复盘：评分曲线 / 失着检出
   js/stats.js      # 对局统计
-  js/practice.js   # 战术练习（独立小棋盘）
+  js/practice.js   # 战术练习 + 每日挑战（独立小棋盘）
   js/app.js        # UI 编排
 src/main.zig
 scripts/package.sh
 scripts/test-game.mjs
 ```
 
-`frontend/dist` 由脚本从 `src/web` 生成。测试：`node scripts/test-game.mjs`
+`frontend/dist` 由脚本从 `src/web` 生成。测试：`node scripts/test-game.mjs`；浏览器回归：`node scripts/test-cross.mjs`、`node scripts/test-daily.mjs`
 
 ## 许可
 
