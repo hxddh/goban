@@ -544,6 +544,95 @@ const Practice = ctx.GobanPractice;
   assert(sets >= 1, "Slots.add attempted a write");
 }
 
+// SGF: main line only — branches / multi-game collections must not stitch
+{
+  const branched = Sgf.parseSgf(
+    "(;FF[4]SZ[15];B[aa];W[bb](;B[cc];W[dd])(;B[ee];W[ff]))"
+  );
+  assert(!branched.error, "branched sgf parses");
+  assert(branched.history.length === 4, "branched takes first variation only (got " +
+    branched.history.length + ")");
+  assert(
+    branched.history[2].r === 2 && branched.history[2].c === 2 &&
+    branched.history[3].r === 3 && branched.history[3].c === 3,
+    "branched first path is aa bb cc dd"
+  );
+  const twoGames = Sgf.parseSgf(
+    "(;FF[4]SZ[15];B[aa];W[bb])(;FF[4]SZ[15];B[cc];W[dd])"
+  );
+  assert(!twoGames.error, "collection parses");
+  assert(twoGames.history.length === 2, "collection takes first game only");
+}
+
+// mid-history five: last-move winLineAt misses; resultFromBoard catches
+{
+  function coord(r, c) {
+    return String.fromCharCode(97 + c) + String.fromCharCode(97 + r);
+  }
+  const seq = [
+    [7, 0, "b"], [8, 0, "w"], [7, 1, "b"], [8, 1, "w"], [7, 2, "b"],
+    [8, 2, "w"], [7, 3, "b"], [8, 3, "w"], [7, 4, "b"], // black wins
+    [0, 0, "w"], // continues after win
+  ];
+  let sgf = "(;SZ[15]";
+  for (const [r, c, color] of seq) {
+    sgf += ";" + (color === "b" ? "B" : "W") + "[" + coord(r, c) + "]";
+  }
+  sgf += ")";
+  const parsed = Sgf.parseSgf(sgf);
+  assert(parsed.history.length === 10, "mid-win continue length");
+  assert(Core.winLineAt(parsed.history, parsed.history.length) === null,
+    "winLineAt(end) null when last move is not the five");
+  assert(Core.winLineAt(parsed.history, 9) != null, "winLineAt(9) finds black five");
+  const board = Core.emptyBoard();
+  parsed.history.forEach((m, i) => {
+    board[m.r][m.c] = i % 2 === 0 ? "b" : "w";
+  });
+  const outcome = State.resultFromBoard(board);
+  assert(outcome.result === "b" && outcome.winLine, "resultFromBoard finds mid-win");
+}
+
+// stats: unrecordByEndedAt removes the matching entry (undo-after-win)
+{
+  load("src/web/js/host.js");
+  const store = { "goban.v12.stats": "[]" };
+  ctx.GobanHost.storageGet = (k) => (k in store ? store[k] : null);
+  ctx.GobanHost.storageSet = (k, v) => {
+    store[k] = v;
+    return true;
+  };
+  ctx.GobanHost.storageRemove = (k) => {
+    delete store[k];
+  };
+  load("src/web/js/stats.js");
+  const Stats = ctx.GobanStats;
+  const endedAt = 1_700_000_000_000;
+  Stats.record({
+    mode: "ai",
+    difficulty: "normal",
+    humanColor: "b",
+    result: "b",
+    moves: 9,
+    durationMs: 1000,
+    endedAt,
+  });
+  Stats.record({
+    mode: "ai",
+    difficulty: "normal",
+    humanColor: "b",
+    result: "w",
+    moves: 12,
+    durationMs: 2000,
+    endedAt: endedAt + 1,
+  });
+  assert(Stats.aggregate().games === 2, "two stats recorded");
+  assert(Stats.unrecordByEndedAt(endedAt) === true, "unrecord win entry");
+  const a = Stats.aggregate();
+  assert(a.games === 1, "one stats entry remains");
+  assert(a.ai.normal.l === 1 && a.ai.normal.w === 0, "remaining entry is the loss");
+  assert(Stats.unrecordByEndedAt(endedAt) === false, "already removed");
+}
+
 if (failed) {
   console.error("\n" + failed + " failed");
   process.exit(1);

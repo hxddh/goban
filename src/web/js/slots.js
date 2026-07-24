@@ -62,13 +62,14 @@
     return persist(load().filter((s) => s.id !== id));
   }
 
+  /** @returns {boolean} false when missing id or persist failed. */
   function rename(id, name) {
     const arr = load();
     const slot = arr.find((s) => s.id === id);
-    if (!slot) return;
+    if (!slot) return false;
     const clean = (name || "").trim().slice(0, 40);
     slot.name = clean || ("对局 " + slotDate(slot.savedAt));
-    persist(arr);
+    return persist(arr);
   }
 
   /** Rebuild #slots-list rows (+#slots-empty visibility) from the store. */

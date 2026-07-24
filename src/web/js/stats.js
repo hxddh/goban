@@ -33,7 +33,20 @@
   function record(e) {
     const arr = load();
     arr.unshift(e);
-    persist(arr);
+    return persist(arr);
+  }
+
+  /**
+   * Remove the newest entry with matching endedAt (undo-after-win / resume).
+   * @returns {boolean} true when an entry was removed and persisted.
+   */
+  function unrecordByEndedAt(endedAt) {
+    if (typeof endedAt !== "number") return false;
+    const arr = load();
+    const idx = arr.findIndex((e) => e && e.endedAt === endedAt);
+    if (idx < 0) return false;
+    arr.splice(idx, 1);
+    return persist(arr);
   }
 
   function clear() {
@@ -128,5 +141,5 @@
       "<div class='stats-line muted2'>共 " + a.games + " 局 · " + a.totalMoves + " 手 · " + fmtDuration(a.totalMs) + "</div>";
   }
 
-  global.GobanStats = { record, clear, aggregate, render };
+  global.GobanStats = { record, unrecordByEndedAt, clear, aggregate, render };
 })(typeof window !== "undefined" ? window : globalThis);
