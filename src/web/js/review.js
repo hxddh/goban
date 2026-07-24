@@ -154,9 +154,14 @@
         row.className = "review-blunder-row";
         row.dataset.i = b.i;
         const who = b.color === "b" ? "黑" : "白";
-        row.innerHTML =
-          '<span class="rb-move">第' + b.i + '手 ' + who + '</span>' +
-          '<span class="rb-reason">' + b.reason + '</span>';
+        const reason = document.createElement("span");
+        reason.className = "rb-reason";
+        reason.textContent = b.reason; // textContent — never HTML-inject reasons
+        const move = document.createElement("span");
+        move.className = "rb-move";
+        move.textContent = "第" + b.i + "手 " + who;
+        row.appendChild(move);
+        row.appendChild(reason);
         list.appendChild(row);
       }
     }

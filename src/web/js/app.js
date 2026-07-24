@@ -686,7 +686,15 @@
           analysisCache.set(i, { cell: cell, verdict: verdict });
           sync();
         })
-        .catch(() => {});
+        .catch(() => {
+          if (gen !== analysisGen || viewIndex !== i) return;
+          // Don't leave the UI wedged on「分析中…」when the engine path fails
+          if (!hard) {
+            analysisVerdict = { grade: "ok", text: "分析未完成" };
+            analysisCell = null;
+            sync();
+          }
+        });
     }, 220);
   }
 
@@ -1042,6 +1050,8 @@
     const loadedHistory = Array.isArray(s.history) ? s.history : [];
     if (!loadedHistory.length) return false;
     // Validate move coords (strict: `undefined < 0` is false, so type-check too)
+    // and reject overlapping stones (corrupt / hand-edited saves).
+    const seen = Core.emptyBoard();
     for (let i = 0; i < loadedHistory.length; i++) {
       const p = loadedHistory[i];
       if (
@@ -1050,6 +1060,8 @@
         !Number.isInteger(p.c) ||
         p.r < 0 || p.r >= SIZE || p.c < 0 || p.c >= SIZE
       ) return false;
+      if (seen[p.r][p.c]) return false;
+      seen[p.r][p.c] = 1;
     }
     history = loadedHistory;
     mode = s.mode === "pvp" ? "pvp" : "ai";
@@ -1057,26 +1069,20 @@
     humanColor = s.humanColor === "w" ? "w" : "b";
     viewIndex = history.length;
     board = boardAfter(history.length);
-    // Recompute result / win line from history (do not trust stale save fields)
     turn = history.length % 2 === 0 ? "b" : "w";
-    result = "play";
-    winLine = null;
-    if (history.length) {
-      const last = history[history.length - 1];
-      const lastColor = (history.length - 1) % 2 === 0 ? "b" : "w";
-      const line = Core.findWin(board, last.r, last.c, lastColor);
-      if (line) {
-        result = lastColor;
-        winLine = line;
-      } else if (Core.boardFull(board)) {
-        result = "draw";
-      }
-    }
+    // Full-board outcome (same as import): last-move-only missed mid-history
+    // fives and could restore a decided game as "play" → AI continues.
+    const outcome = GameState.resultFromBoard(board);
+    result = outcome.result;
+    winLine = outcome.winLine;
     elapsedBaseMs = typeof s.elapsedBaseMs === "number" ? s.elapsedBaseMs : 0;
     originalStartedAt = typeof s.originalStartedAt === "number"
       ? s.originalStartedAt
       : (Date.now() - elapsedBaseMs);
     startedAt = Date.now();
+    // Drop any in-flight AI: callers bump gameGen, and a stale thinker must
+    // not leave aiThinking wedged true (load-during-think deadlock).
+    aiThinking = false;
     // v3+: restore import pause so AI does not auto-continue after import-only save.
     importPaused = s.v >= 3 && !!s.importPaused && result === "play";
     // Loading any snapshot leaves whatever opening protocol was on screen —
@@ -1153,7 +1159,11 @@
   function openSlots() {
     Slots.render();
     const m = document.getElementById("slots-modal");
-    if (m) m.classList.add("show");
+    if (m) {
+      m.classList.add("show");
+      const focusEl = document.getElementById("slot-save-current") || document.getElementById("slots-close");
+      if (focusEl) setTimeout(() => focusEl.focus(), 0);
+    }
   }
 
   function closeSlots() {
@@ -1180,7 +1190,11 @@
   function openReview() {
     Review.render();
     const m = document.getElementById("review-modal");
-    if (m) m.classList.add("show");
+    if (m) {
+      m.classList.add("show");
+      const focusEl = document.getElementById("review-close");
+      if (focusEl) setTimeout(() => focusEl.focus(), 0);
+    }
   }
 
   function closeReview() {
@@ -1388,6 +1402,7 @@
   function hideSwap2Bar() {
     const bar = document.getElementById("swap2-bar");
     if (bar) bar.hidden = true;
+    appEl.classList.remove("swap2-on");
   }
 
   function renderSwap2Bar() {
@@ -1395,7 +1410,12 @@
     const msg = document.getElementById("swap2-msg");
     const btns = document.getElementById("swap2-btns");
     if (!bar || !msg || !btns) return;
-    if (!swap2) { bar.hidden = true; return; }
+    if (!swap2) {
+      bar.hidden = true;
+      appEl.classList.remove("swap2-on");
+      return;
+    }
+    appEl.classList.add("swap2-on");
     if (swap2.phase === "place" || swap2.phase === "place2") {
       const target = swap2.phase === "place" ? 3 : 5;
       btns.innerHTML = "";
@@ -1520,7 +1540,11 @@
   function openStats() {
     Stats.render();
     const m = document.getElementById("stats-modal");
-    if (m) m.classList.add("show");
+    if (m) {
+      m.classList.add("show");
+      const focusEl = document.getElementById("stats-close");
+      if (focusEl) setTimeout(() => focusEl.focus(), 0);
+    }
   }
 
   function closeStats() {
@@ -1719,6 +1743,22 @@
     if (diffField) diffField.hidden = !aiOnly;
     if (thinkField) {
       thinkField.hidden = !(aiOnly && (difficulty === "hard" || difficulty === "extreme"));
+      // Titles track the active difficulty budget (hard ≠ extreme wall times)
+      const titles =
+        difficulty === "extreme"
+          ? { fast: "约 2.5 秒", normal: "约 5 秒", deep: "约 8 秒" }
+          : { fast: "约 0.8 秒", normal: "约 2 秒", deep: "约 3.5 秒" };
+      document.querySelectorAll("#think-seg button[data-think]").forEach((b) => {
+        const t = titles[b.dataset.think];
+        if (t) b.title = t;
+      });
+      const thinkGroup = document.getElementById("think-seg");
+      if (thinkGroup) {
+        thinkGroup.setAttribute(
+          "aria-label",
+          difficulty === "extreme" ? "极难思考时间" : "困难思考时间"
+        );
+      }
     }
     // swap2 decides the human's color via the opening protocol, so hide 执子 then
     if (colorField) colorField.hidden = !aiOnly || openingRule === "swap2";
@@ -1800,7 +1840,11 @@
       hintBtn.classList.toggle("busy", hintBusy);
     }
 
-    if (mode === "ai") {
+    if (swap2) {
+      // Colors are undecided until settleSwap2 — don't show stale 你/电脑
+      document.getElementById("black-role").textContent = "待定";
+      document.getElementById("white-role").textContent = "待定";
+    } else if (mode === "ai") {
       document.getElementById("black-role").textContent = humanColor === "b" ? "你" : "电脑";
       document.getElementById("white-role").textContent = humanColor === "w" ? "你" : "电脑";
     } else {
@@ -1808,12 +1852,16 @@
       document.getElementById("white-role").textContent = "玩家 2";
     }
 
-    const showTurn = live && result === "play";
+    const showTurn = live && result === "play" && !swap2;
     blackTurn.hidden = !(showTurn && turn === "b");
     whiteTurn.hidden = !(showTurn && turn === "w");
 
     const thinkDot = document.getElementById("think-dot");
     if (thinkDot) thinkDot.hidden = !(aiThinking && result === "play");
+
+    // Crosshair only when a click can place; otherwise default (AI/replay/end)
+    const placePhase = !!(swap2 && (swap2.phase === "place" || swap2.phase === "place2"));
+    canvas.style.cursor = canHoverPlace() || placePhase ? "crosshair" : "default";
 
     status.classList.toggle("win", live && (result === "b" || result === "w"));
     status.classList.toggle("thinking", live && result === "play" && aiThinking);
@@ -1869,7 +1917,6 @@
     });
   });
   canvas.addEventListener("mouseleave", () => { clearHover(); });
-  canvas.style.cursor = "crosshair";
 
   document.getElementById("undo").onclick = undo;
   const undo2 = document.getElementById("undo2");
@@ -2033,7 +2080,9 @@
       syncSettingsUI();
       toast(
         "思考：" +
-          ({ fast: "快 ~0.8s", normal: "标准 ~2s", deep: "深 ~3.5s" })[id]
+          (difficulty === "extreme"
+            ? { fast: "快 ~2.5s", normal: "标准 ~5s", deep: "深 ~8s" }
+            : { fast: "快 ~0.8s", normal: "标准 ~2s", deep: "深 ~3.5s" })[id]
       );
     };
   }
@@ -2114,7 +2163,11 @@
 
   const helpModal = document.getElementById("help-modal");
   const confirmModal = document.getElementById("confirm-modal");
-  function openHelp() { helpModal.classList.add("show"); }
+  function openHelp() {
+    helpModal.classList.add("show");
+    const close = document.getElementById("help-close");
+    if (close) setTimeout(() => close.focus(), 0);
+  }
   function closeHelp() { helpModal.classList.remove("show"); }
   document.getElementById("help-btn").onclick = openHelp;
   document.getElementById("help-close").onclick = closeHelp;
@@ -2123,11 +2176,39 @@
   document.getElementById("confirm-cancel").onclick = () => finishConfirm(false);
   confirmModal.onclick = (ev) => { if (ev.target === confirmModal) finishConfirm(false); };
 
+  function openModalFocusables(modal) {
+    if (!modal) return [];
+    return Array.from(
+      modal.querySelectorAll(
+        'button:not([disabled]):not([hidden]), [href], input:not([disabled]):not([hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter((el) => {
+      if (el.closest("[hidden]")) return false;
+      const s = window.getComputedStyle(el);
+      return s.display !== "none" && s.visibility !== "hidden";
+    });
+  }
+
+  /** Keep Tab inside the topmost open dialog (confirm has its own 2-button cycle). */
+  function trapModalTab(ev, modal) {
+    if (ev.key !== "Tab" || !modal) return false;
+    const list = openModalFocusables(modal);
+    if (!list.length) return false;
+    ev.preventDefault();
+    const i = list.indexOf(document.activeElement);
+    let next;
+    if (ev.shiftKey) next = i <= 0 ? list[list.length - 1] : list[i - 1];
+    else next = i < 0 || i >= list.length - 1 ? list[0] : list[i + 1];
+    next.focus();
+    return true;
+  }
+
   window.addEventListener("keydown", (ev) => {
     const k = ev.key.toLowerCase();
     const slotsModal = document.getElementById("slots-modal");
     const reviewModal = document.getElementById("review-modal");
     const statsModal = document.getElementById("stats-modal");
+    const practiceModal = document.getElementById("practice-modal");
     if (ev.key === "Escape") {
       if (confirmModal.classList.contains("show")) { finishConfirm(false); return; }
       if (slotsModal && slotsModal.classList.contains("show")) { closeSlots(); return; }
@@ -2149,13 +2230,26 @@
       }
       return;
     }
-    // Ignore game shortcuts while a modal is open (Esc closes it above)
-    if (slotsModal && slotsModal.classList.contains("show")) return;
-    if (reviewModal && reviewModal.classList.contains("show")) return;
-    if (statsModal && statsModal.classList.contains("show")) return;
-    if (Practice.isOpen()) return;
+    // Tab stays inside whichever modal is open; other game shortcuts are blocked
+    if (slotsModal && slotsModal.classList.contains("show")) {
+      trapModalTab(ev, slotsModal);
+      return;
+    }
+    if (reviewModal && reviewModal.classList.contains("show")) {
+      trapModalTab(ev, reviewModal);
+      return;
+    }
+    if (statsModal && statsModal.classList.contains("show")) {
+      trapModalTab(ev, statsModal);
+      return;
+    }
+    if (practiceModal && practiceModal.classList.contains("show")) {
+      trapModalTab(ev, practiceModal);
+      return;
+    }
     if (helpModal.classList.contains("show")) {
       if (ev.key === "?" || (ev.shiftKey && k === "/")) { closeHelp(); return; }
+      trapModalTab(ev, helpModal);
       return;
     }
     if (ev.key === "?" || (ev.shiftKey && k === "/")) { openHelp(); return; }

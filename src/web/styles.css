@@ -10,6 +10,9 @@
       --panel: #241c18;
       --panel-border: #3a2f28;
       --text: #f3e9dc;
+      /* Alias: several rules historically used --fg; keep in sync with --text
+         or color-mix(..., var(--fg)) becomes invalid and grade colors vanish. */
+      --fg: var(--text);
       --muted: #b8a48c;
       --accent: #e8c39e;
       --btn: #3d322a;
@@ -36,6 +39,7 @@
       --panel: #121a18;
       --panel-border: #24332e;
       --text: #dce8e3;
+      --fg: var(--text);
       --muted: #8aa399;
       --accent: #7dcea0;
       --btn: #1c2a25;
@@ -53,6 +57,7 @@
       --panel: #f4f0e8;
       --panel-border: #d4cdc0;
       --text: #2c261e;
+      --fg: var(--text);
       --muted: #7a7164;
       --accent: #b8894a;
       --btn: #e0d9cc;
@@ -70,6 +75,7 @@
       --panel: #f7f8fb;
       --panel-border: #c5cdd8;
       --text: #2a3140;
+      --fg: var(--text);
       --muted: #6b7585;
       --accent: #3b6ea5;
       --btn: #e8ecf2;
@@ -109,6 +115,7 @@
     .brand {
       font-weight: 650; font-size: 13px; letter-spacing: 0.06em;
       opacity: 0.92;
+      flex-shrink: 0;
     }
     .status-pill {
       font-size: 12px; font-weight: 500; color: var(--text);
@@ -117,6 +124,17 @@
       border: 1px solid var(--card-border);
       backdrop-filter: blur(8px);
       transition: color .2s var(--ease), border-color .2s var(--ease), background .2s var(--ease);
+      /* Long status strings (导入复盘…) must not shove chrome actions off-screen */
+      max-width: min(42vw, 280px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex-shrink: 1;
+      min-width: 0;
+    }
+    @media (max-width: 560px) {
+      .meta-chip { display: none; }
+      .status-pill { max-width: min(36vw, 160px); }
     }
     .status-pill.win {
       color: var(--win);
@@ -136,8 +154,8 @@
       padding: 4px 8px; border-radius: 999px;
       background: transparent;
     }
-    .spacer { flex: 1; }
-    .chrome-actions { display: flex; align-items: center; gap: 6px; }
+    .spacer { flex: 1; min-width: 4px; }
+    .chrome-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
     .icon-btn, .tool-btn {
       appearance: none; border: 0; border-radius: var(--radius-sm);
       background: var(--btn-ghost); color: var(--text);
@@ -159,6 +177,7 @@
       box-shadow: 0 1px 2px rgba(0,0,0,.12);
     }
     .tool-btn:disabled, .icon-btn:disabled { opacity: .35; cursor: default; transform: none; }
+    .tool-btn.busy:not(:disabled) { opacity: .55; }
 
     .stage {
       position: absolute; inset: 0;
@@ -642,10 +661,10 @@
       margin-top: auto;
       padding-top: 16px;
       border-top: 1px solid var(--card-border);
-      display: flex; justify-content: space-between; align-items: center;
-      gap: 16px;
+      display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center;
+      gap: 4px 10px;
     }
-    .side-foot .text-link { color: var(--muted); font-size: 11px; padding: 8px 2px; }
+    .side-foot .text-link { color: var(--muted); font-size: 11px; padding: 6px 2px; }
     .side-foot .text-link:hover { color: var(--text); }
 
     .stone {
@@ -680,7 +699,9 @@
     .seg { display: contents; }
     .pill, .theme-row { /* segment hosts also matched as #mode-seg etc */ }
     .toast {
-      position: absolute; left: 50%; bottom: 24px; z-index: 40;
+      position: absolute; left: 50%; bottom: 24px;
+      /* Above every modal (confirm is 60) so saves/errors remain readable */
+      z-index: 70;
       transform: translateX(-50%) translateY(10px);
       background: color-mix(in srgb, var(--panel) 94%, #000);
       color: var(--text);
@@ -688,9 +709,13 @@
       padding: 10px 16px; border-radius: 999px; font-size: 13px; font-weight: 500;
       box-shadow: 0 10px 30px rgba(0,0,0,.25);
       opacity: 0; pointer-events: none;
-      transition: opacity .22s var(--ease), transform .22s var(--ease);
+      transition: opacity .22s var(--ease), transform .22s var(--ease), bottom .22s var(--ease);
+      max-width: min(90vw, 420px);
+      text-align: center;
     }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    /* Lift above the swap2 choice bar so the two bottom-center surfaces don't collide */
+    #app.swap2-on .toast { bottom: 96px; }
 
     .modal-bg {
       display: none; position: absolute; inset: 0; z-index: 50;

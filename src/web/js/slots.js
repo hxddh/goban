@@ -22,12 +22,10 @@
 
   /** @returns {boolean} false when the write failed (e.g. storage quota). */
   function persist(arr) {
-    try {
-      Host.storageSet(SLOTS_KEY, JSON.stringify(arr.slice(0, SLOTS_MAX)));
-      return true;
-    } catch (_) {
-      return false;
-    }
+    // Host.storageSet already swallows QuotaExceeded and returns false —
+    // do not treat a false return as success (that regenerated the v1.23
+    // "已保存" lie after the toast was fixed to check this boolean).
+    return !!Host.storageSet(SLOTS_KEY, JSON.stringify(arr.slice(0, SLOTS_MAX)));
   }
 
   function resultLabel(r) {

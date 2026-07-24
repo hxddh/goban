@@ -99,10 +99,41 @@ fn jsonStringField(payload: []const u8, key: []const u8) ?[]const u8 {
     return null;
 }
 
+/// Decode a JSON string slice (contents between quotes) into `out`.
+/// Handles \\ \" \/ \n \r \t — enough for file paths from the bridge.
+fn jsonUnescape(raw: []const u8, out: []u8) ?[]const u8 {
+    var wi: usize = 0;
+    var i: usize = 0;
+    while (i < raw.len) : (i += 1) {
+        if (wi >= out.len) return null;
+        if (raw[i] != '\\') {
+            out[wi] = raw[i];
+            wi += 1;
+            continue;
+        }
+        i += 1;
+        if (i >= raw.len) return null;
+        const c: u8 = switch (raw[i]) {
+            '"', '\\', '/' => raw[i],
+            'n' => '\n',
+            'r' => '\r',
+            't' => '\t',
+            else => return null,
+        };
+        out[wi] = c;
+        wi += 1;
+    }
+    return out[0..wi];
+}
+
 fn writeTextFile(context: *anyopaque, invocation: native_sdk.bridge.Invocation, output: []u8) anyerror![]const u8 {
     const self: *App = @ptrCast(@alignCast(context));
-    const path = jsonStringField(invocation.request.payload, "path") orelse return error.InvalidRequest;
+    const path_raw = jsonStringField(invocation.request.payload, "path") orelse return error.InvalidRequest;
     const b64 = jsonStringField(invocation.request.payload, "b64") orelse return error.InvalidRequest;
+    // Paths need JSON unescape (Windows `C:\…` arrives as `C:\\…`); base64 is
+    // ASCII without escapes under JSON.stringify, so the raw slice is fine.
+    var path_buf: [4096]u8 = undefined;
+    const path = jsonUnescape(path_raw, &path_buf) orelse return error.InvalidRequest;
     if (path.len == 0 or path.len > 4096) return error.InvalidRequest;
     if (b64.len == 0 or b64.len > 512 * 1024) return error.InvalidRequest;
 
@@ -121,7 +152,9 @@ fn writeTextFile(context: *anyopaque, invocation: native_sdk.bridge.Invocation, 
 
 fn readTextFile(context: *anyopaque, invocation: native_sdk.bridge.Invocation, output: []u8) anyerror![]const u8 {
     const self: *App = @ptrCast(@alignCast(context));
-    const path = jsonStringField(invocation.request.payload, "path") orelse return error.InvalidRequest;
+    const path_raw = jsonStringField(invocation.request.payload, "path") orelse return error.InvalidRequest;
+    var path_buf: [4096]u8 = undefined;
+    const path = jsonUnescape(path_raw, &path_buf) orelse return error.InvalidRequest;
     if (path.len == 0 or path.len > 4096) return error.InvalidRequest;
 
     var file = std.Io.Dir.openFileAbsolute(self.io, path, .{}) catch return error.HandlerFailed;
@@ -161,4 +194,18 @@ test "production source uses frontend assets" {
     const source = native_sdk.frontend.productionSource(.{ .dist = "frontend/dist" });
     try std.testing.expectEqual(native_sdk.WebViewSourceKind.assets, source.kind);
     try std.testing.expectEqualStrings("frontend/dist", source.asset_options.?.root_path);
+}
+
+test "jsonUnescape windows path" {
+    var buf: [64]u8 = undefined;
+    // JSON payload slice for "C:\\Users\\x" (two backslash chars per separator)
+    const raw = "C:\\\\Users\\\\x";
+    const got = jsonUnescape(raw, &buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("C:\\Users\\x", got);
+}
+
+test "jsonUnescape plain path unchanged" {
+    var buf: [64]u8 = undefined;
+    const got = jsonUnescape("/tmp/goban.sgf", &buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("/tmp/goban.sgf", got);
 }

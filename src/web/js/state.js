@@ -19,6 +19,19 @@
     return null;
   }
 
+  /**
+   * Outcome of a static board (import / save restore). Full-board scan — not
+   * last-move-only — so a five mid-history with stray continuations still
+   * counts as finished.
+   * @returns {{ result: 'play'|'b'|'w'|'draw', winLine: object[]|null }}
+   */
+  function resultFromBoard(board) {
+    const won = boardWinLine(board);
+    if (won) return { result: won.color, winLine: won.line };
+    if (Core.boardFull(board)) return { result: "draw", winLine: null };
+    return { result: "play", winLine: null };
+  }
+
   function createSession() {
     const s = Core.createInitialState();
     s.panelOpen = false;
@@ -49,14 +62,11 @@
     // Hand-edited or non-standard SGFs can carry a win mid-history followed by
     // more stones; checking only the last move would import that as "playable"
     // and let 续下 continue a decided position.
-    const won = boardWinLine(session.board);
-    if (won) {
-      session.result = won.color;
-      session.winLine = won.line;
+    const outcome = resultFromBoard(session.board);
+    session.result = outcome.result;
+    session.winLine = outcome.winLine;
+    if (outcome.result !== "play") {
       session.importPaused = false; // finished game: only review
-    } else if (Core.boardFull(session.board)) {
-      session.result = "draw";
-      session.importPaused = false;
     }
     session.turn = history.length % 2 === 0 ? "b" : "w";
     session.elapsedBaseMs = 0;
@@ -104,6 +114,8 @@
   global.GobanState = {
     createSession,
     sessionFromHistory,
+    boardWinLine,
+    resultFromBoard,
     isLive,
     isHumanTurn,
     canContinuePlay,

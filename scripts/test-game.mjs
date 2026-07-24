@@ -186,6 +186,12 @@ function assert(cond, msg) {
   assert(r.session.result === "b", "mid-win detected as black win, got " + r.session.result);
   assert(r.session.importPaused === false, "mid-win not resumable");
   assert(!State.canContinuePlay(r.session), "no 续下 on decided position");
+  // save/restore path must use the same full-board scan (last-move-only
+  // would see white at 8,8 and wrongly reopen the game as "play")
+  const board = Core.boardAfter(hist, hist.length);
+  const outcome = State.resultFromBoard(board);
+  assert(outcome.result === "b", "resultFromBoard mid-win for applySnapshot");
+  assert(outcome.winLine && outcome.winLine.length >= 5, "resultFromBoard winLine");
 }
 
 // draw module loads (no canvas needed for THEMES)
@@ -519,6 +525,23 @@ const Practice = ctx.GobanPractice;
   assert(st.streak === 1 && st.bestStreak === 2 && st.daysDone === 3, "gap resets streak, keeps best");
   assert(Practice.daily.prevDayStr("2026-03-01") === "2026-02-28", "prevDay crosses month");
   assert(Practice.daily.prevDayStr("2026-01-01") === "2025-12-31", "prevDay crosses year");
+}
+
+// slots: persist must surface Host.storageSet failure (quota) — not always true
+{
+  load("src/web/js/host.js");
+  // Replace storage with a quota-failing stub BEFORE loading slots
+  let sets = 0;
+  ctx.GobanHost.storageGet = () => "[]";
+  ctx.GobanHost.storageSet = () => {
+    sets++;
+    return false; // quota / security — Host never throws
+  };
+  load("src/web/js/slots.js");
+  const Slots = ctx.GobanSlots;
+  const ok = Slots.add({ history: [{ r: 7, c: 7 }], result: "play", savedAt: Date.now() });
+  assert(ok === false, "Slots.add reports false when storageSet fails");
+  assert(sets >= 1, "Slots.add attempted a write");
 }
 
 if (failed) {

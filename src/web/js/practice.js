@@ -337,7 +337,15 @@
 
   function setProgress() {
     const el = document.getElementById("practice-progress");
-    if (el) el.textContent = "第 " + (idx + 1) + " / " + pool.length + " 题 · 答对 " + score;
+    if (el) {
+      if (!cur) {
+        el.textContent = pool.length
+          ? "共 " + pool.length + " 题 · 答对 " + score
+          : "";
+      } else {
+        el.textContent = "第 " + (idx + 1) + " / " + pool.length + " 题 · 答对 " + score;
+      }
+    }
     const src = document.getElementById("practice-source");
     if (src) src.textContent = cur ? (cur.source === "对局" ? "来自你的对局" : "内置题") : "";
   }
@@ -345,6 +353,16 @@
   function setTitle(text) {
     const el = document.getElementById("practice-title");
     if (el) el.textContent = text;
+  }
+
+  function setModalLabel(label) {
+    const m = document.getElementById("practice-modal");
+    if (m) m.setAttribute("aria-label", label || "战术练习");
+  }
+
+  function focusPracticeClose() {
+    const closeBtn = document.getElementById("practice-close");
+    if (closeBtn) setTimeout(() => closeBtn.focus(), 0);
   }
 
   function showPuzzle() {
@@ -383,6 +401,7 @@
       setFeedback("答对 " + score + " / " + pool.length + " 题 🎉", "good");
       if (next) { next.hidden = false; next.textContent = "再来一轮"; }
     }
+    setProgress(); // reflects score with cur=null ("共 N 题 · 答对 X")
     clearMiniBoard();
   }
 
@@ -463,6 +482,7 @@
     if (r.state.lastDoneDate === dailyDate) {
       // already checked in today: summary first, replay on demand
       cur = null;
+      score = r.state.lastScore != null ? r.state.lastScore : 0;
       const task = document.getElementById("practice-task");
       if (task) task.textContent = "今日挑战已完成";
       setFeedback(
@@ -482,14 +502,18 @@
     const m = document.getElementById("practice-modal");
     if (m) m.classList.add("show");
     setTitle("战术练习");
+    setModalLabel("战术练习");
     start();
+    focusPracticeClose();
   }
 
   function openDaily() {
     const m = document.getElementById("practice-modal");
     if (m) m.classList.add("show");
     setTitle("每日挑战");
+    setModalLabel("每日挑战");
     startDaily();
+    focusPracticeClose();
   }
 
   function close() {
