@@ -48,13 +48,14 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes-file "$notes"
-      - name: chain macOS build + asset upload
+      - name: chain platform builds + asset upload
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
-        run: gh workflow run build-macos.yml --ref "$GITHUB_REF_NAME" -f release_tag="$TAG"
-      - name: chain Windows build + asset upload
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
-        run: gh workflow run build-windows.yml --ref "$GITHUB_REF_NAME" -f release_tag="$TAG"
+        # Prefer repository_dispatch: workflow_dispatch is often denied to
+        # automation tokens (403), while dispatches with contents:write succeed.
+        # One event starts both build-macos and build-windows (shared type).
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/dispatches" \
+            -f event_type=build-release \
+            -f "client_payload[tag]=$TAG"

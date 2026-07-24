@@ -3,6 +3,10 @@ name: build-macos
 # Builds Goban.app (arm64, adhoc-signed) on a macOS runner: Native SDK comes
 # from npm (@native-sdk/cli), zig from ziglang.org. Optionally uploads the
 # zip to an existing release when release_tag is set.
+#
+# Triggers:
+#   - workflow_dispatch (manual / release.yml chain)
+#   - repository_dispatch type=build-release (agent / API; client_payload.tag)
 on:
   workflow_dispatch:
     inputs:
@@ -10,6 +14,8 @@ on:
         description: "Existing release tag to upload the zip to (optional)"
         required: false
         default: ""
+  repository_dispatch:
+    types: [build-release]
 
 permissions:
   contents: write
@@ -19,6 +25,15 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      - name: resolve release tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.release_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="${{ github.event.client_payload.tag }}"
+          fi
+          echo "value=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: '${TAG:-<none>}'"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -51,8 +66,8 @@ jobs:
           name: Goban-macOS-arm64
           path: dist/Goban-macOS-arm64.zip
       - name: upload to release
-        if: ${{ inputs.release_tag != '' }}
+        if: ${{ steps.tag.outputs.value != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.release_tag }}
+          TAG: ${{ steps.tag.outputs.value }}
         run: gh release upload "$TAG" dist/Goban-macOS-arm64.zip --clobber
