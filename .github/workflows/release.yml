@@ -25,6 +25,18 @@ jobs:
           node-version: 22
       - name: unit tests
         run: node scripts/test-game.mjs
+      - name: version guard — app.zon must match the tag
+        env:
+          TAG: ${{ inputs.tag }}
+        # v1.25.0 shipped an installer stamped 1.24.0 because app.zon was not
+        # bumped; fail the release up front instead of shipping the mismatch.
+        run: |
+          want="${TAG#v}"
+          have="$(sed -n 's/^ *\.version = "\(.*\)",$/\1/p' app.zon)"
+          if [ "$have" != "$want" ]; then
+            echo "app.zon .version is '$have' but tag wants '$want' — bump app.zon first"
+            exit 1
+          fi
       - name: create release
         env:
           GH_TOKEN: ${{ github.token }}
