@@ -21,12 +21,8 @@
   }
 
   function persist(arr) {
-    try {
-      Host.storageSet(KEY, JSON.stringify(arr.slice(0, MAX)));
-      return true;
-    } catch (_) {
-      return false;
-    }
+    // Host.storageSet returns false on quota/security errors (does not throw).
+    return !!Host.storageSet(KEY, JSON.stringify(arr.slice(0, MAX)));
   }
 
   /**

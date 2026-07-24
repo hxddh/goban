@@ -1042,6 +1042,8 @@
     const loadedHistory = Array.isArray(s.history) ? s.history : [];
     if (!loadedHistory.length) return false;
     // Validate move coords (strict: `undefined < 0` is false, so type-check too)
+    // and reject overlapping stones (corrupt / hand-edited saves).
+    const seen = Core.emptyBoard();
     for (let i = 0; i < loadedHistory.length; i++) {
       const p = loadedHistory[i];
       if (
@@ -1050,6 +1052,8 @@
         !Number.isInteger(p.c) ||
         p.r < 0 || p.r >= SIZE || p.c < 0 || p.c >= SIZE
       ) return false;
+      if (seen[p.r][p.c]) return false;
+      seen[p.r][p.c] = 1;
     }
     history = loadedHistory;
     mode = s.mode === "pvp" ? "pvp" : "ai";
@@ -1057,26 +1061,20 @@
     humanColor = s.humanColor === "w" ? "w" : "b";
     viewIndex = history.length;
     board = boardAfter(history.length);
-    // Recompute result / win line from history (do not trust stale save fields)
     turn = history.length % 2 === 0 ? "b" : "w";
-    result = "play";
-    winLine = null;
-    if (history.length) {
-      const last = history[history.length - 1];
-      const lastColor = (history.length - 1) % 2 === 0 ? "b" : "w";
-      const line = Core.findWin(board, last.r, last.c, lastColor);
-      if (line) {
-        result = lastColor;
-        winLine = line;
-      } else if (Core.boardFull(board)) {
-        result = "draw";
-      }
-    }
+    // Full-board outcome (same as import): last-move-only missed mid-history
+    // fives and could restore a decided game as "play" → AI continues.
+    const outcome = GameState.resultFromBoard(board);
+    result = outcome.result;
+    winLine = outcome.winLine;
     elapsedBaseMs = typeof s.elapsedBaseMs === "number" ? s.elapsedBaseMs : 0;
     originalStartedAt = typeof s.originalStartedAt === "number"
       ? s.originalStartedAt
       : (Date.now() - elapsedBaseMs);
     startedAt = Date.now();
+    // Drop any in-flight AI: callers bump gameGen, and a stale thinker must
+    // not leave aiThinking wedged true (load-during-think deadlock).
+    aiThinking = false;
     // v3+: restore import pause so AI does not auto-continue after import-only save.
     importPaused = s.v >= 3 && !!s.importPaused && result === "play";
     // Loading any snapshot leaves whatever opening protocol was on screen —
@@ -2033,7 +2031,9 @@
       syncSettingsUI();
       toast(
         "思考：" +
-          ({ fast: "快 ~0.8s", normal: "标准 ~2s", deep: "深 ~3.5s" })[id]
+          (difficulty === "extreme"
+            ? { fast: "快 ~2.5s", normal: "标准 ~5s", deep: "深 ~8s" }
+            : { fast: "快 ~0.8s", normal: "标准 ~2s", deep: "深 ~3.5s" })[id]
       );
     };
   }
