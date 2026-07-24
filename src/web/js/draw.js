@@ -92,12 +92,15 @@
   }
 
   function resizeCanvas() {
-    const wrap = document.getElementById("board-wrap");
-    if (!wrap || !_canvas) return;
-    const rect = wrap.getBoundingClientRect();
+    if (!_canvas) return;
+    // Measure the canvas itself, not #board-wrap: the wrap's rect includes
+    // the wooden frame padding, so sizing the backing store from it left the
+    // bitmap ~16px larger than the display size — a fractional downscale
+    // that blurred every line and stone.
+    const rect = _canvas.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const css = Math.max(200, Math.floor(Math.min(rect.width, rect.height)));
-    const px = Math.floor(css * dpr);
+    const css = Math.max(200, Math.min(rect.width, rect.height));
+    const px = Math.round(css * dpr);
     if (_canvas.width !== px) {
       _canvas.width = px;
       _canvas.height = px;
