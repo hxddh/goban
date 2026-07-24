@@ -50,7 +50,7 @@
     let s =
       "(;FF[4]GM[4]SZ[" +
       SIZE +
-      "]AP[Goban:1.24]DT[" +
+      "]AP[Goban:1.25.3]DT[" +
       dtStr +
       "]RE[" +
       re +
