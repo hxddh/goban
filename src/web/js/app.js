@@ -321,13 +321,18 @@
         }
         // safety net: budget + margin. If it fires the worker is wedged on
         // this job — rebuild so the NEXT move is full-strength again.
+        // Detach this id BEFORE restartWorker: restart resolves remaining
+        // pendings with null, which would settle us first and drop the
+        // Safe fallback (AI turn stranded with no stone).
         setTimeout(() => {
           if (settled) return;
           syncFallbacks++;
-          restartWorker();
-          finish(
-            aiMoveSyncSafe(Object.assign({}, payload, { timeMs: cappedMs, think: think }))
+          aiPending.delete(id);
+          const fallback = aiMoveSyncSafe(
+            Object.assign({}, payload, { timeMs: cappedMs, think: think })
           );
+          restartWorker();
+          finish(fallback);
         }, timeMs + 2000);
       });
     }
@@ -443,6 +448,7 @@
     aiThinking = false;
     gameGen = s.gameGen;
     placeAnim = null;
+    hintBusy = false;
     clearHint();
     clearAnalysis();
     clearVariation();
@@ -646,7 +652,9 @@
     if (analysisTimer) { clearTimeout(analysisTimer); analysisTimer = null; }
     analysisCell = null;
     analysisVerdict = null;
-    if (!analysisOn || isLive() || viewIndex < 1) return;
+    // Never kick off analysis while the live AI is thinking — aiMoveAsync
+    // rebuilds a busy worker and would resolve the game move as null.
+    if (!analysisOn || isLive() || viewIndex < 1 || aiThinking) return;
     const i = viewIndex;
     if (analysisCache.has(i)) {
       const c = analysisCache.get(i);
@@ -671,7 +679,14 @@
           let verdict = hard;
           let cell = analysisCell;
           if (!hard) {
-            if (best && (best.r !== played.r || best.c !== played.c)) {
+            if (!best) {
+              // Worker cancel/timeout → null; do not cache as "最佳一手".
+              analysisVerdict = { grade: "ok", text: "分析未完成" };
+              analysisCell = null;
+              sync();
+              return;
+            }
+            if (best.r !== played.r || best.c !== played.c) {
               cell = best;
               verdict = { grade: "ok", text: "有更优 · 虚线处" };
             } else {
@@ -782,10 +797,21 @@
   /** Board state after the first `n` moves. */
 
 
+  /** Win line for a viewed prefix — last-move findWin misses mid-history fives. */
+  function winLineForView(n) {
+    if (n <= 0) return null;
+    const lastOnly = winLineAt(n);
+    if (lastOnly) return lastOnly;
+    // Live games end at five; only imports/saves with post-win moves keep
+    // result≠play while the last stone is not the winning one.
+    if (result === "play") return null;
+    return GameState.resultFromBoard(boardAfter(n)).winLine;
+  }
+
   function setViewIndex(n) {
     viewIndex = Math.max(0, Math.min(n, history.length));
     board = boardAfter(viewIndex);
-    winLine = viewIndex > 0 ? winLineAt(viewIndex) : null;
+    winLine = winLineForView(viewIndex);
     hoverCell = null;
     clearHint();
     clearVariation();
@@ -800,7 +826,7 @@
       turn = history.length % 2 === 0 ? "b" : "w";
       winLine = null;
     } else {
-      winLine = winLineAt(history.length);
+      winLine = winLineForView(history.length);
     }
     hoverCell = null;
     clearHint();
@@ -947,6 +973,7 @@
 
   /** True when human may place on the live board (hover preview allowed). */
   function canHoverPlace() {
+    if (swap2) return swap2.phase === "place" || swap2.phase === "place2";
     if (result !== "play" || !isLive() || aiThinking) return false;
     if (importPaused && mode === "ai" && !isHumanTurn()) return false;
     return isHumanTurn();
@@ -1020,15 +1047,21 @@
       // mid-swap2 quits must resume inside the opening protocol, not as a
       // normal game — otherwise the side-choice step is silently swallowed
       swap2Phase: swap2 ? swap2.phase : null,
+      // Sticky id so a resumed finished game can unrecord on undo and not
+      // double-count if somehow re-finalized without undo.
+      statsEndedAt:
+        result !== "play" && statsRecordedGen === gameGen && lastStatsEndedAt
+          ? lastStatsEndedAt
+          : null,
       savedAt: Date.now(),
     };
   }
 
   function saveGame() {
     try {
-      Host.storageSet(SAVE_KEY, JSON.stringify(serialize()));
+      const ok = Host.storageSet(SAVE_KEY, JSON.stringify(serialize()));
       const hint = document.getElementById("save-hint");
-      if (hint) hint.textContent = "已存 " + formatTime(Date.now());
+      if (hint) hint.textContent = ok ? "已存 " + formatTime(Date.now()) : "存档失败";
     } catch (_) {}
   }
 
@@ -1065,7 +1098,14 @@
     }
     history = loadedHistory;
     mode = s.mode === "pvp" ? "pvp" : "ai";
-    difficulty = s.difficulty || "normal";
+    if (
+      s.difficulty === "easy" || s.difficulty === "normal" ||
+      s.difficulty === "hard" || s.difficulty === "extreme"
+    ) {
+      difficulty = s.difficulty;
+    } else {
+      difficulty = "normal";
+    }
     humanColor = s.humanColor === "w" ? "w" : "b";
     viewIndex = history.length;
     board = boardAfter(history.length);
@@ -1080,9 +1120,11 @@
       ? s.originalStartedAt
       : (Date.now() - elapsedBaseMs);
     startedAt = Date.now();
+    lastStatsEndedAt = typeof s.statsEndedAt === "number" ? s.statsEndedAt : null;
     // Drop any in-flight AI: callers bump gameGen, and a stale thinker must
     // not leave aiThinking wedged true (load-during-think deadlock).
     aiThinking = false;
+    hintBusy = false;
     // v3+: restore import pause so AI does not auto-continue after import-only save.
     importPaused = s.v >= 3 && !!s.importPaused && result === "play";
     // Loading any snapshot leaves whatever opening protocol was on screen —
@@ -1137,6 +1179,7 @@
     }
     if (!applySnapshot(slot.snap)) { toast("存档已损坏，无法读取"); return; }
     gameGen += 1;
+    if (result !== "play" && lastStatsEndedAt) statsRecordedGen = gameGen;
     clearAnalysis();
     closeSlots();
     sync();
@@ -1151,9 +1194,9 @@
     if (!(await confirmNative("删除存档「" + slot.name + "」？", "删除存档", { ok: "删除", cancel: "取消" }))) {
       return;
     }
-    Slots.remove(id);
+    const ok = Slots.remove(id);
     Slots.render();
-    toast("存档已删除");
+    toast(ok ? "存档已删除" : "删除失败：本地存储异常");
   }
 
   function openSlots() {
@@ -1380,15 +1423,32 @@
       setTimeout(() => {
         if (gen !== gameGen) return;
         aiThinking = false;
-        if (m) place(m.r, m.c, true);
+        let move = m;
+        // Worker cancel (analysis/hint restart) or a lost race can yield null
+        // while it is still the computer's turn — never leave the side stranded.
+        if (!move) {
+          move = aiMoveSyncSafe({
+            board: boardAfter(history.length),
+            humanColor: humanColor,
+            difficulty: difficulty,
+            think: thinkLevel,
+            timeMs: Math.min(600, budgetForDiff(difficulty)),
+          });
+        }
+        if (move) place(move.r, move.c, true);
         else sync();
       }, wait);
     }).catch(() => {
       if (gen !== gameGen) return;
       aiThinking = false;
-      // fallback sync path
-      const m = aiMoveSync({ humanColor: humanColor, difficulty: difficulty });
-      if (m) place(m.r, m.c, true);
+      const move = aiMoveSyncSafe({
+        board: boardAfter(history.length),
+        humanColor: humanColor,
+        difficulty: difficulty,
+        think: thinkLevel,
+        timeMs: Math.min(600, budgetForDiff(difficulty)),
+      });
+      if (move) place(move.r, move.c, true);
       else sync();
     });
   }
@@ -1494,6 +1554,7 @@
         swap2.phase = "place2";
         renderSwap2Bar();
         sync();
+        saveGame(); // phase must persist before place2 stones land
         return;
       }
       const p2Color = kind === "black" ? "b" : "w";
@@ -1522,10 +1583,13 @@
   // --- game statistics (store/aggregate/render in GobanStats) ---
   /** Guard: one stats entry per game — undo-after-win + re-win must not double-count. */
   let statsRecordedGen = -1;
+  /** Matches Stats.record endedAt so undo / resume can unrecord precisely. */
+  let lastStatsEndedAt = null;
 
   function recordGameEnd() {
     if (gameGen === statsRecordedGen) return;
     statsRecordedGen = gameGen;
+    lastStatsEndedAt = Date.now();
     Stats.record({
       mode,
       difficulty: mode === "ai" ? difficulty : null,
@@ -1533,7 +1597,7 @@
       result,
       moves: history.length,
       durationMs: nowElapsed(),
-      endedAt: Date.now(),
+      endedAt: lastStatsEndedAt,
     });
   }
 
@@ -1623,6 +1687,9 @@
     if (!isLive()) {
       goLive();
     }
+    const wasOver = result !== "play";
+    const wasRecorded = wasOver && statsRecordedGen === gameGen;
+    const endedAt = lastStatsEndedAt;
     if (mode === "ai") {
       // Pop until it is the human's turn again (undo AI reply + human move).
       do {
@@ -1642,6 +1709,14 @@
     importPaused = false;
     viewIndex = history.length;
     board = boardAfter(history.length);
+    if (wasRecorded) {
+      Stats.unrecordByEndedAt(endedAt);
+      statsRecordedGen = -1;
+      lastStatsEndedAt = null;
+    }
+    // End-game froze elapsedBaseMs and reset startedAt; returning to play
+    // without refreshing startedAt would add post-game idle into the clock.
+    if (wasOver) startedAt = Date.now();
     sync();
     saveGame();
     // e.g. human plays white: undo to empty → black (AI) must move
@@ -1660,9 +1735,12 @@
     startedAt = Date.now();
     originalStartedAt = startedAt;
     aiThinking = false;
+    hintBusy = false;
     placeAnim = null;
     importPaused = false;
     hoverCell = null;
+    statsRecordedGen = -1;
+    lastStatsEndedAt = null;
     clearHint();
     clearAnalysis();
     clearVariation();
@@ -2349,6 +2427,7 @@
   const resumed = tryLoadSave();
   if (resumed) {
     gameGen += 1;
+    if (result !== "play" && lastStatsEndedAt) statsRecordedGen = gameGen;
     toast("已恢复上次对局");
   } else {
     startedAt = Date.now();

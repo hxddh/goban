@@ -164,8 +164,8 @@
 
   function saveDaily(st) {
     const h = hostStorage();
-    if (!h) return;
-    try { h.storageSet(DAILY_KEY, JSON.stringify(st)); } catch (_) {}
+    if (!h) return false;
+    return !!h.storageSet(DAILY_KEY, JSON.stringify(st));
   }
 
   /** Local calendar day, e.g. "2026-07-23". */

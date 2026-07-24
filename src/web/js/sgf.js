@@ -73,7 +73,62 @@
   }
 
   /**
-   * Minimal SGF parser: collect B[]/W[] in order. Ignores branches (takes first path).
+   * Keep only the first game's main line. Sibling variations and later games
+   * in a collection are dropped so a flat B[]/W[] scan cannot stitch branches.
+   */
+  function extractMainline(src) {
+    let i = 0;
+    while (i < src.length && src[i] !== "(") i++;
+    if (i >= src.length) return src;
+    let out = "";
+    function skipPropValue() {
+      i++; // past '['
+      while (i < src.length) {
+        if (src[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (src[i] === "]") {
+          i++;
+          return;
+        }
+        i++;
+      }
+    }
+    function walkTree(emit) {
+      if (src[i] !== "(") return;
+      if (emit) out += "(";
+      i++;
+      while (i < src.length) {
+        const c = src[i];
+        if (c === ";") {
+          const start = i;
+          i++;
+          while (i < src.length && src[i] !== ";" && src[i] !== "(" && src[i] !== ")") {
+            if (src[i] === "[") skipPropValue();
+            else i++;
+          }
+          if (emit) out += src.slice(start, i);
+        } else if (c === "(") {
+          walkTree(emit);
+          while (i < src.length && src[i] === "(") walkTree(false);
+        } else if (c === ")") {
+          if (emit) out += ")";
+          i++;
+          return;
+        } else {
+          if (emit) out += c;
+          i++;
+        }
+      }
+    }
+    walkTree(true);
+    return out || src;
+  }
+
+  /**
+   * Minimal SGF parser: collect B[]/W[] along the main line only
+   * (first variation at each fork; first game in a collection).
    * @returns {{ history: {r:number,c:number}[], error?: string }}
    */
   function parseSgf(text) {
@@ -85,6 +140,7 @@
     // Drop comment-style text properties first — their free text can contain
     // move lookalikes such as "B[ii]" (escaped \] respected).
     src = src.replace(/(^|[^A-Za-z])(?:GC|C)\[(?:\\[\s\S]|[^\]\\])*\]/g, "$1 ");
+    src = extractMainline(src);
     if (!/[;\s]*[BW]\s*\[/i.test(src) && !/\(/.test(src)) {
       return { history: [], error: "不像 SGF 文件（未找到 B[]/W[] 落子）" };
     }
