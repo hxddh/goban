@@ -52,10 +52,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
-        # Prefer repository_dispatch: workflow_dispatch is often denied to
-        # automation tokens (403), while dispatches with contents:write succeed.
-        # One event starts both build-macos and build-windows (shared type).
+        # Prefer the original workflow_dispatch chain (human / tokens with
+        # actions:write). If that fails (typical agent token → 403), fall back
+        # to repository_dispatch; build-macos/windows listen for build-release.
         run: |
-          gh api -X POST "repos/${{ github.repository }}/dispatches" \
-            -f event_type=build-release \
-            -f "client_payload[tag]=$TAG"
+          if gh workflow run build-macos.yml --ref "$GITHUB_REF_NAME" -f release_tag="$TAG" \
+            && gh workflow run build-windows.yml --ref "$GITHUB_REF_NAME" -f release_tag="$TAG"; then
+            echo "Chained builds via workflow_dispatch"
+          else
+            echo "workflow_dispatch failed; falling back to repository_dispatch"
+            gh api -X POST "repos/${{ github.repository }}/dispatches" \
+              -f event_type=build-release \
+              -f "client_payload[tag]=$TAG"
+          fi
