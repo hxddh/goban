@@ -7,6 +7,9 @@
   const GameState = window.GobanState;
   const Draw = window.GobanDraw;
   const Audio2 = window.GobanAudio; // "Audio" would shadow the DOM constructor
+  const Ui = window.GobanUi;
+  const SgfIo = window.GobanSgfIo;
+  const Engine = window.GobanEngine;
   const Slots = window.GobanSlots;
   const Review = window.GobanReview;
   const Stats = window.GobanStats;
@@ -56,356 +59,22 @@
     return (diff === "hard" || diff === "extreme") && window.GobanAi2 ? window.GobanAi2 : Ai;
   }
 
-  function aiMoveSync(opts) {
-    const diff = (opts && opts.difficulty) || difficulty;
-    const timeMs =
-      typeof (opts && opts.timeMs) === "number" ? opts.timeMs : budgetForDiff(diff);
-    return engineFor(diff).aiMove({
-      board: (opts && opts.board) || board,
-      humanColor: (opts && opts.humanColor) || humanColor,
-      side: opts && opts.side,
-      difficulty: diff,
-      timeMs: timeMs,
-      think: thinkLevel,
-    });
-  }
+  // Worker lifecycle + degraded fallback live in GobanEngine (v1.28 split).
+  function aiMoveSync(opts) { return Engine.moveSync(opts); }
+  function aiMoveSyncSafe(opts) { return Engine.moveSyncSafe(opts); }
+  function aiMoveAsync(opts) { return Engine.moveAsync(opts); }
+  function restartWorker() { Engine.restartWorker(); }
+  function initAiWorker() { return Engine.warmup(); }
 
-  let aiWorker = null;
-  let aiReqId = 0;
-  const aiPending = new Map();
-
-  /**
-   * aiMoveSync that can never throw: an exception here previously left the
-   * caller's promise unsettled — aiThinking stayed true forever.
-   */
-  function aiMoveSyncSafe(opts) {
-    try {
-      return aiMoveSync(opts);
-    } catch (e) {
-      try {
-        return Ai.aiMove({
-          board: (opts && opts.board) || board,
-          humanColor: (opts && opts.humanColor) || humanColor,
-          side: opts && opts.side,
-          difficulty: "normal",
-          timeMs: 200,
-        });
-      } catch (_) {
-        return null;
-      }
-    }
-  }
-  /**
-   * 'init' | 'ready' | 'failed'. The packaged WKWebView cannot load classic
-   * worker scripts through the zero:// custom-scheme handler (workers bypass
-   * WKURLSchemeHandler), so the worker is built from a Blob of the engine
-   * sources fetched by the page — the page context CAN fetch them.
-   */
-  let workerState = "init";
-  let workerInitPromise = null;
-  let workerRestarts = 0;
-  let degradeToastShown = false;
-  /** Blob URL cached so a busy worker can be rebuilt instantly. */
-  let workerBlobUrl = null;
-  /** Jobs posted to the worker and not yet answered (stale ones included). */
-  let workerJobs = 0;
-  /** Times a move had to come from the capped main-thread fallback. */
-  let syncFallbacks = 0;
-
-  const WORKER_SRC = ["js/core.js", "js/ai.js", "js/ai2.js", "js/ai-worker.js"];
-
-  function rejectAllPending(reason) {
-    const pend = Array.from(aiPending.values());
-    aiPending.clear();
-    pend.forEach((p) => {
-      try { p.reject(new Error(reason)); } catch (_) {}
-    });
-  }
-
-  function dropWorker(permanent) {
-    if (aiWorker) {
-      try { aiWorker.terminate(); } catch (_) {}
-    }
-    aiWorker = null;
-    if (permanent) workerState = "failed";
-    rejectAllPending("worker unavailable");
-  }
-
-  let pongResolve = null;
-
-  function attachWorkerHandlers(w) {
-    w.onmessage = (ev) => {
-      const data = ev.data || {};
-      if (data.pong) {
-        if (pongResolve) {
-          const r = pongResolve;
-          pongResolve = null;
-          r(!!data.engines);
-        }
-        return;
-      }
-      if (data.type === "error" && !data.id) {
-        // bootstrap failure: reject waiters NOW instead of leaving them to
-        // the safety timeout (the old gap behind "stuck thinking")
-        dropWorker(true);
-        return;
-      }
-      if (workerJobs > 0) workerJobs--;
-      const pending = aiPending.get(data.id);
-      if (!pending) return;
-      aiPending.delete(data.id);
-      if (data.error) pending.reject(new Error(data.error));
-      else pending.resolve(data.move || null);
-    };
-    w.onerror = () => {
-      dropWorker(false);
-      workerState = "init";
-      workerJobs = 0;
-      // one rebuild for transient faults, then give up for the session
-      if (workerRestarts++ < 1) workerInitPromise = initAiWorker();
-      else workerState = "failed";
-    };
-  }
-
-  /**
-   * The worker runs jobs serially with no cancellation: a stale job (hint
-   * discarded by a placed stone, request abandoned on new game, safety
-   * timeout) would keep it busy for a full budget and every later move
-   * would drop to the capped fallback — the "gets dumber mid-game" spiral.
-   * Rebuilding from the cached Blob URL clears the backlog instantly.
-   */
-  function restartWorker() {
-    if (!workerBlobUrl || workerState !== "ready") return;
-    if (aiWorker) {
-      try { aiWorker.terminate(); } catch (_) {}
-    }
-    // stale pendings resolve null; caller-side gen/histLen guards discard them
-    const pend = Array.from(aiPending.values());
-    aiPending.clear();
-    workerJobs = 0;
-    pend.forEach((p) => {
-      try { p.resolve(null); } catch (_) {}
-    });
-    try {
-      aiWorker = new Worker(workerBlobUrl);
-      attachWorkerHandlers(aiWorker);
-    } catch (_) {
-      aiWorker = null;
-      workerState = "failed";
-    }
-  }
-
-  async function initAiWorker() {
-    if (aiWorker || workerState === "failed" || typeof Worker === "undefined") return;
-    // debug/diagnostic switch: force the degraded main-thread path
-    if (/[?&]noworker=1/.test(window.location.search)) {
-      workerState = "failed";
-      return;
-    }
-    try {
-      // Embedded source is primary: the zero:// scheme handler returns bare
-      // NSURLResponse objects that <script> accepts but spec-strict fetch()
-      // rejects — so the packaged app cannot fetch its own assets. worker-src.js
-      // (generated at build time) carries the sources in via a script tag.
-      let src = typeof window.GOBAN_WORKER_SRC === "string" && window.GOBAN_WORKER_SRC
-        ? window.GOBAN_WORKER_SRC
-        : null;
-      if (!src) {
-        const texts = await Promise.all(
-          WORKER_SRC.map((path) =>
-            fetch(path).then((r) => {
-              if (!r.ok) throw new Error("fetch " + path + ": " + r.status);
-              return r.text();
-            })
-          )
-        );
-        src = texts.join("\n;\n");
-      }
-      const blob = new Blob([src], { type: "text/javascript" });
-      workerBlobUrl = URL.createObjectURL(blob);
-      const w = new Worker(workerBlobUrl);
-      attachWorkerHandlers(w);
-      const healthy = await new Promise((resolve) => {
-        const t = setTimeout(() => resolve(false), 1500);
-        pongResolve = (ok) => {
-          clearTimeout(t);
-          resolve(ok);
-        };
-        try {
-          w.postMessage({ ping: true });
-        } catch (_) {
-          resolve(false);
-        }
-      });
-      if (!healthy || workerState === "failed") {
-        try { w.terminate(); } catch (_) {}
-        if (workerState !== "failed") workerState = "failed";
-        return;
-      }
-      aiWorker = w;
-      workerState = "ready";
-    } catch (_) {
-      workerState = "failed";
-    }
-  }
-
-  /** Diagnostic hook for bug reports: state:jobs:fallbacks:restarts. */
-  window.__gobanWorker = () =>
-    workerState + ":jobs=" + workerJobs + ":fallbacks=" + syncFallbacks + ":restarts=" + workerRestarts;
-
-  /**
-   * Run AI off-thread when the Blob worker is healthy; otherwise a DEGRADED
-   * main-thread run with a hard 600ms cap — the UI must never freeze for a
-   * full hard/extreme budget.
-   * @returns {Promise<{r:number,c:number}|null>}
-   */
-  async function aiMoveAsync(opts) {
-    const payload = {
-      board: (opts && opts.board) || board,
-      humanColor: (opts && opts.humanColor) || humanColor,
-      side: opts && opts.side,
-      difficulty: (opts && opts.difficulty) || difficulty,
-    };
-    const useWorker = payload.difficulty !== "easy";
-    const timeMs =
-      typeof (opts && opts.timeMs) === "number" ? opts.timeMs : budgetForDiff(payload.difficulty);
-    const think = (opts && opts.think) || thinkLevel;
-    if (useWorker && workerState === "init" && workerInitPromise) {
-      // bounded wait: a fetch that neither resolves nor rejects must not
-      // wedge the game — after 3s we proceed degraded
-      try {
-        await Promise.race([
-          workerInitPromise,
-          new Promise((r) => setTimeout(r, 3000)),
-        ]);
-      } catch (_) {}
-    }
-    // a busy worker at this point only holds STALE jobs (app flow is serial
-    // per intent) — rebuild so this request starts immediately
-    if (useWorker && workerState === "ready" && workerJobs > 0) restartWorker();
-    const w = useWorker && workerState === "ready" ? aiWorker : null;
-    const cappedMs = Math.min(600, timeMs);
-    if (w) {
-      return new Promise((resolve) => {
-        const id = ++aiReqId;
-        let settled = false;
-        const finish = (move) => {
-          if (settled) return;
-          settled = true;
-          aiPending.delete(id);
-          resolve(move);
-        };
-        aiPending.set(id, {
-          resolve: (move) => finish(move),
-          // worker died mid-request: capped main-thread fallback
-          reject: () =>
-            finish(
-              aiMoveSyncSafe(Object.assign({}, payload, { timeMs: cappedMs, think: think }))
-            ),
-        });
-        try {
-          w.postMessage({
-            id: id,
-            board: payload.board,
-            humanColor: payload.humanColor,
-            side: payload.side,
-            difficulty: payload.difficulty,
-            timeMs: timeMs,
-            think: think,
-          });
-          workerJobs++;
-        } catch (e) {
-          syncFallbacks++;
-          finish(aiMoveSyncSafe(Object.assign({}, payload, { timeMs: cappedMs, think: think })));
-          return;
-        }
-        // safety net: budget + margin. If it fires the worker is wedged on
-        // this job — rebuild so the NEXT move is full-strength again.
-        // Detach this id BEFORE restartWorker: restart resolves remaining
-        // pendings with null, which would settle us first and drop the
-        // Safe fallback (AI turn stranded with no stone).
-        setTimeout(() => {
-          if (settled) return;
-          syncFallbacks++;
-          aiPending.delete(id);
-          const fallback = aiMoveSyncSafe(
-            Object.assign({}, payload, { timeMs: cappedMs, think: think })
-          );
-          restartWorker();
-          finish(fallback);
-        }, timeMs + 2000);
-      });
-    }
-    // degraded path
-    if (
-      useWorker &&
-      workerState === "failed" &&
-      (payload.difficulty === "hard" || payload.difficulty === "extreme") &&
-      !degradeToastShown
-    ) {
-      degradeToastShown = true;
-      toast("后台计算不可用，已降级速算");
-    }
-    if (useWorker) syncFallbacks++;
-    return new Promise((resolve) => {
-      // small delay lets the 思考中 status paint before the sync compute
-      setTimeout(
-        () =>
-          resolve(aiMoveSyncSafe(Object.assign({}, payload, { timeMs: cappedMs, think: think }))),
-        30
-      );
-    });
-  }
-  function buildSgf() {
-    return SgfMod.buildSgf({
-      history: history,
-      result: result,
-      mode: mode,
-      humanColor: humanColor,
-      originalStartedAt: originalStartedAt,
-    });
-  }
-  function sgfFileName() { return SgfMod.fileNameFromDate(originalStartedAt); }
+  // SGF export lives in GobanSgfIo (v1.28 split); import stays here because it
+  // rewrites the whole session, not just the file.
+  function buildSgf() { return SgfIo.buildSgf(); }
+  function sgfFileName() { return SgfIo.fileName(); }
   function bytesToBase64(str) { return Host.bytesToBase64(str); }
-  function downloadSgfBlob(sgf, name) {
-    const blob = new Blob([sgf], { type: "application/x-go-sgf" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  }
-  async function exportSgfString(sgf, name) {
-    if (Host.hasZero()) {
-      try {
-        const path = await Host.saveFileDialog({ title: "导出 SGF", defaultName: name });
-        if (path == null) { toast("已取消导出"); return; }
-        await Host.writeTextFile(path, sgf);
-        await Host.revealPath(path);
-        toast("已导出 " + name);
-        return;
-      } catch (e) {}
-    }
-    try {
-      downloadSgfBlob(sgf, name);
-      toast("已导出 " + name);
-    } catch (_) {
-      try { await copySgfText(sgf); toast("导出受限，SGF 已复制到剪贴板"); }
-      catch (e2) { toast("导出失败"); }
-    }
-  }
-  async function downloadSgf() {
-    if (!history.length) { toast("还没有棋谱可导出"); return; }
-    await exportSgfString(buildSgf(), sgfFileName());
-  }
-  async function copySgfText(sgf) { await Host.writeClipboard(sgf); }
-  async function copySgf() {
-    if (!history.length) { toast("还没有棋谱可复制"); return; }
-    try {
-      await copySgfText(buildSgf());
-      toast("SGF 已复制到剪贴板");
-    } catch (_) { toast("复制失败，请用导出文件"); }
-  }
+  async function exportSgfString(sgf, name) { return SgfIo.exportString(sgf, name); }
+  async function downloadSgf() { return SgfIo.download(); }
+  async function copySgfText(sgf) { return SgfIo.copyText(sgf); }
+  async function copySgf() { return SgfIo.copy(); }
 
   async function readTextFile(path) { return Host.readTextFile(path); }
 
@@ -912,30 +581,10 @@
 
 
 
-  function toast(msg) {
-    const el = document.getElementById("toast");
-    el.textContent = msg;
-    el.classList.add("show");
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => el.classList.remove("show"), 2200);
-  }
-
-  function formatDuration(ms) {
-    const s = Math.max(0, Math.floor(ms / 1000));
-    const m = Math.floor(s / 60);
-    const ss = s % 60;
-    const h = Math.floor(m / 60);
-    if (h > 0) {
-      return h + ":" + String(m % 60).padStart(2, "0") + ":" + String(ss).padStart(2, "0");
-    }
-    return String(m).padStart(2, "0") + ":" + String(ss).padStart(2, "0");
-  }
-
-  function formatTime(ts) {
-    const d = new Date(ts);
-    const p = (n) => String(n).padStart(2, "0");
-    return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
-  }
+  // presentation helpers live in GobanUi (v1.28 split)
+  function toast(msg) { Ui.toast(msg); }
+  function formatDuration(ms) { return Ui.formatDuration(ms); }
+  function formatTime(ts) { return Ui.formatTime(ts); }
 
   function nowElapsed() {
     if (result !== "play") return elapsedBaseMs;
@@ -1357,16 +1006,9 @@
     setPanelOpen(!isPanelOpen());
   }
 
-  /** Scroll #move-list only — never element.scrollIntoView (pulls closed panel into view in WKWebView). */
   function scrollMoveListToCurrent() {
-    const el = document.getElementById("move-list");
-    if (!el || !isPanelOpen()) return;
-    const cur = el.querySelector("button.cur");
-    if (!cur) return;
-    const listH = el.clientHeight;
-    if (listH <= 0) return;
-    const top = cur.offsetTop - listH / 2 + cur.offsetHeight / 2;
-    el.scrollTop = Math.max(0, Math.min(top, el.scrollHeight - listH));
+    if (!isPanelOpen()) return;
+    Ui.scrollMoveListToCurrent();
   }
 
   Draw.attach(canvas, ctx, () => ({
@@ -1459,49 +1101,9 @@
     renderSwap2Bar();
   }
 
-  function hideSwap2Bar() {
-    const bar = document.getElementById("swap2-bar");
-    if (bar) bar.hidden = true;
-    appEl.classList.remove("swap2-on");
-  }
+  function hideSwap2Bar() { Ui.hideSwap2Bar(appEl); }
 
-  function renderSwap2Bar() {
-    const bar = document.getElementById("swap2-bar");
-    const msg = document.getElementById("swap2-msg");
-    const btns = document.getElementById("swap2-btns");
-    if (!bar || !msg || !btns) return;
-    if (!swap2) {
-      bar.hidden = true;
-      appEl.classList.remove("swap2-on");
-      return;
-    }
-    appEl.classList.add("swap2-on");
-    if (swap2.phase === "place" || swap2.phase === "place2") {
-      const target = swap2.phase === "place" ? 3 : 5;
-      btns.innerHTML = "";
-      msg.textContent = "平衡开局 · 请落第 " + (history.length + 1) + " 子（共 " + target + "）";
-      bar.hidden = false;
-      return;
-    }
-    let items;
-    if (swap2.phase === "p2choose") {
-      msg.textContent = "开局已布 3 子 · 由你选择：";
-      items = [["black", "执黑"], ["white", "执白"], ["add2", "加两手"]];
-    } else { // p1choose
-      msg.textContent = "对手已加两手 · 请选择执子：";
-      items = [["black", "执黑"], ["white", "执白"]];
-    }
-    btns.innerHTML = "";
-    for (const it of items) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "swap2-btn";
-      b.dataset.kind = it[0];
-      b.textContent = it[1];
-      btns.appendChild(b);
-    }
-    bar.hidden = false;
-  }
+  function renderSwap2Bar() { Ui.renderSwap2Bar(appEl, swap2, history.length); }
 
   /** Lay one opening stone (strictly alternating by parity). */
   function swap2PlaceStone(r, c, fromAi) {
@@ -1755,32 +1357,7 @@
   /** Sidebar move list: rebuilt when moves change, highlight follows view. */
   let mlSig = "";
   function renderMoveList() {
-    const el = document.getElementById("move-list");
-    if (!el) return;
-    const last = history.length ? history[history.length - 1] : null;
-    const sig = history.length + ":" + (last ? last.r + "," + last.c : "") + ":" + gameGen;
-    if (sig !== mlSig) {
-      mlSig = sig;
-      let html = "";
-      for (let i = 0; i < history.length; i++) {
-        const p = history[i];
-        const lab = String.fromCharCode(65 + p.c) + (SIZE - p.r);
-        // tabindex=-1: list is navigated by click / replay keys, not Tab-steal from board
-        html +=
-          '<button type="button" tabindex="-1" data-i="' +
-          (i + 1) +
-          '">' +
-          (i + 1) +
-          ". " +
-          lab +
-          "</button>";
-      }
-      el.innerHTML = html;
-    }
-    const btns = el.children;
-    for (let i = 0; i < btns.length; i++) {
-      btns[i].classList.toggle("cur", i + 1 === viewIndex);
-    }
+    Ui.renderMoveList(history, viewIndex, gameGen);
     // Only adjust scroll when the panel is actually open. scrollIntoView on an
     // off-screen (translateX(100%)) button makes WKWebView yank the sidebar
     // partially into view every move — the "auto pop incomplete panel" bug.
@@ -2042,6 +1619,23 @@
   const statsEl = document.getElementById("open-stats");
   if (statsEl) statsEl.onclick = () => { openStats(); };
 
+  Engine.init({
+    defaults: () => ({
+      board: board, humanColor: humanColor, difficulty: difficulty, think: thinkLevel,
+    }),
+    budgetFor: budgetForDiff,
+    engineFor: engineFor,
+    toast: toast,
+  });
+
+  SgfIo.init({
+    getGame: () => ({
+      history: history, result: result, mode: mode,
+      humanColor: humanColor, originalStartedAt: originalStartedAt,
+    }),
+    toast: toast,
+  });
+
   // Practice pulls puzzle material from the live game + saved slots; it plays
   // entirely inside its own modal/board and never touches game state.
   Practice.init({
@@ -2254,32 +1848,8 @@
   document.getElementById("confirm-cancel").onclick = () => finishConfirm(false);
   confirmModal.onclick = (ev) => { if (ev.target === confirmModal) finishConfirm(false); };
 
-  function openModalFocusables(modal) {
-    if (!modal) return [];
-    return Array.from(
-      modal.querySelectorAll(
-        'button:not([disabled]):not([hidden]), [href], input:not([disabled]):not([hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      )
-    ).filter((el) => {
-      if (el.closest("[hidden]")) return false;
-      const s = window.getComputedStyle(el);
-      return s.display !== "none" && s.visibility !== "hidden";
-    });
-  }
-
-  /** Keep Tab inside the topmost open dialog (confirm has its own 2-button cycle). */
-  function trapModalTab(ev, modal) {
-    if (ev.key !== "Tab" || !modal) return false;
-    const list = openModalFocusables(modal);
-    if (!list.length) return false;
-    ev.preventDefault();
-    const i = list.indexOf(document.activeElement);
-    let next;
-    if (ev.shiftKey) next = i <= 0 ? list[list.length - 1] : list[i - 1];
-    else next = i < 0 || i >= list.length - 1 ? list[0] : list[i + 1];
-    next.focus();
-    return true;
-  }
+  function openModalFocusables(modal) { return Ui.modalFocusables(modal); }
+  function trapModalTab(ev, modal) { return Ui.trapModalTab(ev, modal); }
 
   window.addEventListener("keydown", (ev) => {
     const k = ev.key.toLowerCase();
@@ -2438,7 +2008,7 @@
 
   // Build the Blob worker up-front so the first computer reply has no
   // cold-start hitch (and degraded mode is known before it matters)
-  workerInitPromise = initAiWorker();
+  initAiWorker();
 
   resizeCanvas();
   sync();

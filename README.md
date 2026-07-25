@@ -63,7 +63,10 @@ src/web/
   js/slots.js      # 命名存档槽（存取 + 列表渲染）
   js/review.js     # 复盘：评分曲线 / 失着检出
   js/stats.js      # 对局统计
-  js/practice.js   # 战术练习 + 每日挑战（独立小棋盘）
+  js/practice.js   # 战术练习 + 每日挑战 + 错题本（独立小棋盘）
+  js/ui.js         # 展示层：toast / 格式化 / 弹层焦点 / 手数列表 / swap2 提示条
+  js/sgfio.js      # SGF 导出：复制 / 保存对话框 / 下载兜底
+  js/engine.js     # 引擎桥接：Worker 生命周期 + 降级兜底
   js/app.js        # UI 编排
 src/main.zig
 scripts/package.sh

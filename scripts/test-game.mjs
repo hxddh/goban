@@ -826,6 +826,23 @@ const Practice = ctx.GobanPractice;
   assert(bands.join("") === bands.slice().sort().join(""), "orderPool bands: 未做 → 错题 → 已掌握");
 }
 
+// --- ui.js: helpers that were unreachable while they lived inside app.js ---
+{
+  // ui.js reads GobanCore.SIZE at load and otherwise only touches the DOM in
+  // functions we do not call here, so it loads fine in the node context.
+  load("src/web/js/ui.js");
+  const Ui = ctx.GobanUi;
+  assert(typeof Ui.formatDuration === "function", "GobanUi loaded");
+  assert(Ui.formatDuration(0) === "00:00", "formatDuration zero");
+  assert(Ui.formatDuration(59_000) === "00:59", "formatDuration under a minute");
+  assert(Ui.formatDuration(60_000) === "01:00", "formatDuration a minute");
+  assert(Ui.formatDuration(3_600_000) === "1:00:00", "formatDuration an hour");
+  assert(Ui.formatDuration(3_661_000) === "1:01:01", "formatDuration hour+");
+  assert(Ui.formatDuration(-5000) === "00:00", "formatDuration clamps negatives");
+  const t = new Date(2026, 6, 25, 9, 5).getTime();
+  assert(Ui.formatTime(t) === "07-25 09:05", "formatTime local, zero-padded — got " + Ui.formatTime(t));
+}
+
 if (failed) {
   console.error("\n" + failed + " failed");
   process.exit(1);
