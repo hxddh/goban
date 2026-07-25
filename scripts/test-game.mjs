@@ -868,13 +868,22 @@ const Practice = ctx.GobanPractice;
   // a dictionary entry breaks the build instead of silently shipping half a
   // translation. Comments are exempt; i18n.js is the dictionary itself.
   const CJK = /[\u4e00-\u9fa5]/;
+  // The trailing \r matters: a Windows checkout is CRLF, so split("\n") leaves
+  // "\u2026// comment\r" and `//.*$` cannot match it \u2014 `.` excludes \r, so the
+  // comment survived stripping and three Chinese *comments* were reported as
+  // literals. The v1.29.0 windows build failed on exactly that while ubuntu CI
+  // stayed green; drop the \r before doing anything line-based.
+  const codeOf = (line) =>
+    line.replace(/\r$/, "").replace(/\/\/.*$/, "").replace(/^\s*\*.*$/, "");
+  assert(!CJK.test(codeOf('  // do not cache as "\u6700\u4f73\u4e00\u624b".\r')),
+    "comment stripping survives a CRLF checkout");
   const offenders = [];
   const jsDir = path.join(root, "src/web/js");
   for (const file of fs.readdirSync(jsDir)) {
     if (!file.endsWith(".js") || file === "i18n.js" || file === "worker-src.js") continue;
     const text = fs.readFileSync(path.join(jsDir, file), "utf8");
     text.split("\n").forEach((line, i) => {
-      const code = line.replace(/\/\/.*$/, "").replace(/^\s*\*.*$/, "");
+      const code = codeOf(line);
       if (!CJK.test(code)) return;
       // string literals only — a Chinese identifier is impossible here
       const lits = code.match(/"[^"\n]*[\u4e00-\u9fa5][^"\n]*"/g) || [];
