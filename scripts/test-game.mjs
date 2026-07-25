@@ -633,6 +633,86 @@ const Practice = ctx.GobanPractice;
   assert(Stats.unrecordByEndedAt(endedAt) === false, "already removed");
 }
 
+// --- 题库: every built-in must be solvable, and deep enough for 每日挑战 ---
+{
+  const Pz = Practice.puzzles;
+  const N = Pz.BUILTINS.length;
+  // At 8 built-ins the daily set re-served 3 of every 5 puzzles the next day.
+  assert(N >= 40, "builtin puzzle bank has 40+ positions (" + N + ")");
+
+  const broken = [];
+  const byType = {};
+  for (let i = 0; i < N; i++) {
+    const def = Pz.BUILTINS[i];
+    byType[def.type] = (byType[def.type] || 0) + 1;
+    const board = Pz.boardOf(def);
+    // no stone may sit twice, and the position must not be already won
+    const stones = def.b.length + def.w.length;
+    let placed = 0;
+    for (let r = 0; r < 15; r++) for (let c = 0; c < 15; c++) if (board[r][c]) placed++;
+    if (placed !== stones) { broken.push(i + ":重叠落点"); continue; }
+    if (!Pz.makePuzzle(board, def.side, def.type, "内置")) broken.push(i + ":无解");
+  }
+  assert(broken.length === 0, "every builtin puzzle validates (" + broken.join(",") + ")");
+  assert(byType.win1 > 0 && byType.defend > 0 && byType.vcf > 0,
+    "bank covers all three types " + JSON.stringify(byType));
+
+  // 每日挑战 must not keep re-serving the same handful: measure the real
+  // day-over-day overlap the built-in bank produces over a month.
+  const ids = Array.from({ length: N }, (_, i) => i);
+  const days = [];
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(2026, 0, 1 + i);
+    const p = (n) => (n < 10 ? "0" + n : "" + n);
+    days.push(d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()));
+  }
+  const picks = days.map((day) => Practice.daily.pickForDate(ids, day, 5));
+  let overlap = 0;
+  for (let i = 1; i < picks.length; i++) {
+    overlap += picks[i].filter((x) => picks[i - 1].includes(x)).length;
+  }
+  const avg = overlap / (picks.length - 1);
+  assert(avg <= 1, "daily set repeats ≤1 of 5 from the previous day (" + avg.toFixed(2) + ")");
+}
+
+// --- vcf puzzles: the solution must really force a win by continuous fours ---
+{
+  const Pz = Practice.puzzles;
+  const vcfDefs = Pz.BUILTINS.filter((d) => d.type === "vcf");
+  assert(vcfDefs.length >= 5, "bank has vcf puzzles (" + vcfDefs.length + ")");
+
+  let checked = 0;
+  const bad = [];
+  for (const def of vcfDefs.slice(0, 6)) {
+    const board = Pz.boardOf(def);
+    const side = def.side, oppo = Core.opp(side);
+    // A vcf position must not offer an immediate five to either side —
+    // otherwise the objectively winning click is not in the solution set.
+    if (Ai.listWinCells(board, side).length) { bad.push("有一步成五"); continue; }
+    if (Ai.listWinCells(board, oppo).length) { bad.push("对方有一步成五"); continue; }
+    const sol = Pz.solutionsFor(board, side, "vcf");
+    if (!sol.length) { bad.push("无解"); continue; }
+    for (const s of sol) {
+      board[s.r][s.c] = side;
+      const mine = Ai.listWinCells(board, side);
+      const theirs = Ai.listWinCells(board, oppo);
+      // the move must create a four (or two) and hand the opponent nothing
+      if (!mine.length || theirs.length) bad.push("非强制手 " + s.r + "," + s.c);
+      board[s.r][s.c] = "";
+      checked++;
+    }
+  }
+  assert(bad.length === 0, "vcf solutions are forcing fours (" + bad.slice(0, 4).join("; ") + ")");
+  assert(checked > 0, "vcf solutions actually checked (" + checked + ")");
+
+  // A cell that merely completes five is a win1 answer, never a vcf answer.
+  const b2 = Core.emptyBoard();
+  for (let c = 3; c <= 6; c++) b2[7][c] = "b";
+  const vcfSol = Pz.solutionsFor(b2, "b", "vcf");
+  assert(vcfSol.every((s) => !Core.wouldWin(b2, s.r, s.c, "b")),
+    "vcf never marks an immediate five as its answer");
+}
+
 if (failed) {
   console.error("\n" + failed + " failed");
   process.exit(1);

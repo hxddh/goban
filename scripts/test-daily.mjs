@@ -20,11 +20,19 @@ const PW_MODULE =
   process.env.PLAYWRIGHT_MODULE || "/opt/node22/lib/node_modules/playwright/index.mjs";
 const PW_CHROMIUM = process.env.PLAYWRIGHT_CHROMIUM || "/opt/pw-browsers/chromium";
 
+// Skipping keeps plain `node` environments usable, but a silent skip in CI
+// would turn this whole suite into a green no-op — REQUIRE_PLAYWRIGHT=1 (set
+// by .github/workflows/ci.yml) makes a missing browser a hard failure.
 let chromium;
 try {
   ({ chromium } = await import(PW_MODULE));
 } catch (_) {
-  console.log("SKIP: playwright not found at " + PW_MODULE + " (set PLAYWRIGHT_MODULE)");
+  const msg = "playwright not found at " + PW_MODULE + " (set PLAYWRIGHT_MODULE)";
+  if (process.env.REQUIRE_PLAYWRIGHT === "1") {
+    console.error("FAIL: " + msg + " — REQUIRE_PLAYWRIGHT=1 forbids skipping");
+    process.exit(1);
+  }
+  console.log("SKIP: " + msg);
   process.exit(0);
 }
 
@@ -79,6 +87,13 @@ const solutionFor = (i) =>
     for (const [r, c] of def.b) bd[r][c] = "b";
     for (const [r, c] of def.w) bd[r][c] = "w";
     const side = def.side, oppo = Core.opp(side);
+    // vcf: ask the engine's own VCF search for a forcing first move — an
+    // oracle independent of practice.js, which derives its answer set from
+    // the same public helper rather than from this code.
+    if (def.type === "vcf") {
+      const m = Ai.findVCF(bd, side, 6);
+      return m ? { r: m.r, c: m.c } : null;
+    }
     for (let r = 0; r < Core.SIZE; r++) for (let c = 0; c < Core.SIZE; c++) {
       if (bd[r][c]) continue;
       if (Core.wouldWin(bd, r, c, side)) return { r, c };
