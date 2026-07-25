@@ -1,0 +1,65 @@
+name: ci
+
+# The gate this repo did not have: until v1.26 every workflow was
+# dispatch-only, so nothing ran on a pull request and code was first tested
+# at release time — after it had already landed on main. That is how the
+# buried top bar survived four releases.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: unit tests (core / sgf / state / stats / 每日 / 题库)
+        run: node scripts/test-game.mjs
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: install playwright + chromium
+        run: |
+          npm install --no-save --no-fund --no-audit playwright
+          npx playwright install --with-deps chromium
+      - name: resolve chromium path
+        id: pw
+        run: |
+          bin="$(node -e "const {chromium}=require('playwright');console.log(chromium.executablePath())")"
+          echo "chromium=$bin" >> "$GITHUB_OUTPUT"
+      # REQUIRE_PLAYWRIGHT=1 turns "browser missing" from a silent skip into a
+      # failure — without it these suites would pass vacuously in CI.
+      - name: cross-feature regression
+        env:
+          REQUIRE_PLAYWRIGHT: "1"
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/node_modules/playwright/index.mjs
+          PLAYWRIGHT_CHROMIUM: ${{ steps.pw.outputs.chromium }}
+        run: node scripts/test-cross.mjs
+      - name: 每日挑战 regression
+        env:
+          REQUIRE_PLAYWRIGHT: "1"
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/node_modules/playwright/index.mjs
+          PLAYWRIGHT_CHROMIUM: ${{ steps.pw.outputs.chromium }}
+        run: node scripts/test-daily.mjs
+
+  strength:
+    # Self-play regression is slower and only meaningful for engine-touching
+    # changes; keep it off the PR critical path but never unrun on main.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: AI strength baseline (self-play)
+        run: node scripts/test-strength.mjs

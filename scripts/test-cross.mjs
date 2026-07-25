@@ -22,11 +22,19 @@ const PW_MODULE =
   process.env.PLAYWRIGHT_MODULE || "/opt/node22/lib/node_modules/playwright/index.mjs";
 const PW_CHROMIUM = process.env.PLAYWRIGHT_CHROMIUM || "/opt/pw-browsers/chromium";
 
+// Skipping keeps plain `node` environments usable, but a silent skip in CI
+// would turn this whole suite into a green no-op — REQUIRE_PLAYWRIGHT=1 (set
+// by .github/workflows/ci.yml) makes a missing browser a hard failure.
 let chromium;
 try {
   ({ chromium } = await import(PW_MODULE));
 } catch (_) {
-  console.log("SKIP: playwright not found at " + PW_MODULE + " (set PLAYWRIGHT_MODULE)");
+  const msg = "playwright not found at " + PW_MODULE + " (set PLAYWRIGHT_MODULE)";
+  if (process.env.REQUIRE_PLAYWRIGHT === "1") {
+    console.error("FAIL: " + msg + " — REQUIRE_PLAYWRIGHT=1 forbids skipping");
+    process.exit(1);
+  }
+  console.log("SKIP: " + msg);
   process.exit(0);
 }
 
@@ -142,6 +150,69 @@ async function enableSwap2Pvp(page) {
     leaks.length === 0 && !bar.hidden && bar.display !== "none" && bar.w > 100 &&
       page.__errors.length === 0,
     JSON.stringify({ leaks, bar, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- Test 0b: top-bar actions must stay clickable with the sidebar open ----
+// The sidebar used to paint over the chrome bar: 悔棋/提示/新局/?/☰ showed
+// through as ghosts but every click landed on #side, and the sidebar hosts no
+// duplicates of them — an open panel left no way to undo or start a new game
+// by mouse. Attribute/visibility checks all passed; only hit testing catches
+// it, so assert elementFromPoint at each button's centre, both panel states,
+// across the window widths the app actually runs at.
+{
+  const page = await newPage();
+  const IDS = ["undo", "btn-hint", "btn-new", "help-btn", "toggle-panel"];
+  const hitTest = () =>
+    page.evaluate((ids) => {
+      const bar = document.querySelector(".chrome").getBoundingClientRect();
+      const bad = [];
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        const b = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        if (!(hit === el || el.contains(hit))) {
+          bad.push(id + "←" + (hit ? hit.id || hit.className || hit.tagName : "null"));
+        } else if (b.right > bar.right + 0.5 || b.left < bar.left - 0.5) {
+          bad.push(id + ":出界"); // squeezed out of the bar rather than covered
+        }
+      }
+      return bad;
+    }, IDS);
+
+  const blocked = [];
+  // Toggle with the keyboard shortcuts ("]" open / "[" close) so a covered ☰
+  // cannot abort the run — the pointer assertions below are the actual test.
+  for (const width of [560, 700, 820, 960, 1280, 1728]) {
+    await page.setViewportSize({ width, height: 860 });
+    await page.waitForTimeout(120);
+    for (const id of await hitTest()) blocked.push(width + "px 收起:" + id);
+
+    await page.keyboard.press("]");
+    await page.waitForTimeout(420); // .28s panel transition + settle
+    const openPanel = await page.evaluate(() =>
+      document.getElementById("app").classList.contains("panel-open"));
+    if (!openPanel) blocked.push(width + "px 面板未打开");
+    for (const id of await hitTest()) blocked.push(width + "px 展开:" + id);
+
+    // …and a real click must still reach a handler while the panel is open
+    let helpOpens = false;
+    try {
+      await page.click("#help-btn", { timeout: 2500 });
+      await page.waitForTimeout(200);
+      helpOpens = await page.evaluate(() =>
+        document.getElementById("help-modal").classList.contains("show"));
+    } catch (_) { helpOpens = false; }
+    if (!helpOpens) blocked.push(width + "px 展开:帮助点不开");
+    await page.keyboard.press("Escape"); // close help (if it opened)
+    await page.waitForTimeout(150);
+    await page.keyboard.press("[");
+    await page.waitForTimeout(420);
+  }
+  await page.setViewportSize({ width: 1280, height: 860 });
+  report("0b 顶栏按钮在侧栏开合两态下均可点击",
+    blocked.length === 0 && page.__errors.length === 0,
+    JSON.stringify({ blocked, errs: page.__errors }));
   await page.close();
 }
 

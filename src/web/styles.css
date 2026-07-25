@@ -105,7 +105,10 @@
 
     .chrome {
       position: absolute; top: 0; left: 0; right: 0;
-      height: var(--chrome-h); z-index: 20;
+      /* Above .scrim (25) so the top-bar actions stay live while the sidebar
+         is open as a sheet; below .side (30) — but see the panel-open rule,
+         which keeps the two from overlapping in the first place. */
+      height: var(--chrome-h); z-index: 26;
       display: flex; align-items: center; gap: 6px;
       padding: 0 10px 0 14px;
       background: var(--chrome-bg);
@@ -215,13 +218,21 @@
     }
 
     .side {
-      position: absolute; top: 0; right: 0; bottom: 0;
+      /* Starts BELOW the chrome bar. Before v1.26 it started at top:0 with a
+         higher z-index, so it painted over the bar and buried 悔棋/提示/新局/?/☰
+         under itself — the five showed through as ghosts but swallowed every
+         click, and the sidebar deliberately hosts no duplicates of them
+         ("顶栏已有悔棋/新局"), so an open panel left no way to undo or start a
+         new game by mouse. Offsetting by --chrome-h keeps the two apart at
+         every window width (shrinking the bar instead breaks under ~820px,
+         where the actions no longer fit beside the panel). */
+      position: absolute; top: var(--chrome-h); right: 0; bottom: 0;
       width: var(--side-w); z-index: 30;
       background: color-mix(in srgb, var(--panel) 94%, transparent);
       border-left: 1px solid var(--panel-border);
       backdrop-filter: blur(22px) saturate(1.15);
       -webkit-backdrop-filter: blur(22px) saturate(1.15);
-      padding: calc(var(--chrome-h) + 18px) 22px 20px;
+      padding: 18px 22px 20px;
       display: flex; flex-direction: column; gap: 0;
       transform: translateX(100%);
       transition: transform .28s var(--ease);
