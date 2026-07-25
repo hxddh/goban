@@ -105,13 +105,25 @@
     );
   }
 
+  /** 战术练习 progress line (per-puzzle memory added in v1.27). */
+  function practiceLine() {
+    const P = global.GobanPractice;
+    const s = P && P.practiceSummary ? P.practiceSummary() : null;
+    if (!s || !s.seen) return "";
+    return (
+      "<div class='stats-line'>战术练习 做过 <strong>" + s.seen + "</strong> / " + s.total +
+      " 题 · 已掌握 <strong>" + s.mastered + "</strong>" +
+      (s.wrong ? " · 错题本 <strong>" + s.wrong + "</strong> 题" : "") + "</div>"
+    );
+  }
+
   /** Fill #stats-body with the aggregate tables. */
   function render() {
     const body = document.getElementById("stats-body");
     const empty = document.getElementById("stats-empty");
     if (!body) return;
     const a = aggregate();
-    const daily = dailyLine();
+    const daily = dailyLine() + practiceLine();
     const hasAny = a.games > 0 || !!daily;
     if (empty) empty.hidden = hasAny;
     body.hidden = !hasAny;

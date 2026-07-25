@@ -212,7 +212,14 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  assert(text.includes("AP[Goban:1.25.3]"), "SGF AP version");
+  // The stamp is a hand-kept literal in sgf.js, so it silently drifted: v1.26.0
+  // exported 棋谱 claiming 1.25.3. Tie it to app.zon instead of a fixed string.
+  const appZon = fs.readFileSync(path.join(root, "app.zon"), "utf8");
+  const appVersion = (appZon.match(/\.version\s*=\s*"([^"]+)"/) || [])[1];
+  assert(!!appVersion, "app.zon version readable");
+  assert(text.includes("AP[Goban:" + appVersion + "]"),
+    "SGF AP version matches app.zon (" + appVersion + "), got " +
+      (text.match(/AP\[[^\]]*\]/) || ["none"])[0]);
 }
 
 // sgf comment annotations (复盘 3.0): per-move C[] + root comment, ] escaped,
@@ -711,6 +718,112 @@ const Practice = ctx.GobanPractice;
   const vcfSol = Pz.solutionsFor(b2, "b", "vcf");
   assert(vcfSol.every((s) => !Core.wouldWin(b2, s.r, s.c, "b")),
     "vcf never marks an immediate five as its answer");
+}
+
+// --- 题库自带解集必须与现场推导完全一致（运行时信任、CI 证明） ---
+{
+  const Pz = Practice.puzzles;
+  const mismatched = [];
+  let checked = 0;
+  for (const def of Pz.BUILTINS) {
+    if (!def.sol) continue;
+    const board = Pz.boardOf(def);
+    const derived = Pz.solutionsFor(board, def.side, def.type)
+      .map((s) => s.r + "," + s.c).sort().join(" ");
+    const stored = def.sol.map((s) => s[0] + "," + s[1]).sort().join(" ");
+    if (derived !== stored) mismatched.push(def.type + ":" + stored + " ≠ " + derived);
+    checked++;
+  }
+  assert(checked > 0, "题库自带解集的条目存在 (" + checked + ")");
+  assert(mismatched.length === 0,
+    "自带解集与现场推导一致 (" + mismatched.slice(0, 2).join("; ") + ")");
+}
+
+// --- vcf 强制序列: the line shown to the player must really be forced ---
+{
+  const Pz = Practice.puzzles;
+  const vcfDefs = Pz.BUILTINS.filter((d) => d.type === "vcf");
+  const bad = [];
+  const depths = [];
+  for (const def of vcfDefs) {
+    const board = Pz.boardOf(def);
+    const side = def.side, oppo = Core.opp(side);
+    const sols = Pz.solutionsFor(board, side, "vcf");
+    for (let si = 0; si < sols.length; si++) {
+      const s = sols[si];
+      const line = Pz.forcedLine(board, side, s);
+      if (!line.length) { bad.push("空序列"); continue; }
+      if (line[0].r !== s.r || line[0].c !== s.c) bad.push("首手不符");
+      // replay it: every one of my moves must make a four, every reply of
+      // theirs must be the only legal answer, and the line must end in a win.
+      const bd = board.map((row) => row.slice());
+      let endsWon = false;
+      for (const mv of line) {
+        if (bd[mv.r][mv.c]) { bad.push("重叠落点"); break; }
+        bd[mv.r][mv.c] = mv.color;
+        if (mv.color === side) {
+          if (Core.findWin(bd, mv.r, mv.c, side)) { endsWon = true; break; }
+          const mine = Ai.listWinCells(bd, side);
+          if (!mine.length) { bad.push("非冲四"); break; }
+          if (Ai.listWinCells(bd, oppo).length) { bad.push("对方可抢先成五"); break; }
+          if (mine.length >= 2) { endsWon = true; break; } // double four: no reply
+        }
+      }
+      if (!endsWon) bad.push("未走成必胜");
+      if (si === 0) depths.push(Pz.lineDepth(line, side)); // one sample per puzzle
+    }
+  }
+  assert(bad.length === 0, "vcf 强制序列可复现且必胜 (" + bad.slice(0, 4).join("; ") + ")");
+
+  // v1.26 shipped 9 of 12 vcf puzzles winnable by one double-four — a much
+  // easier exercise than the "continuous fours" the task text promises.
+  const deep = depths.filter((d) => d >= 3).length;
+  assert(depths.length > 0 && deep >= Math.ceil(depths.length * 0.8),
+    "多数 vcf 题需要 ≥3 手连续冲四 (" + deep + "/" + depths.length + ")");
+}
+
+// --- 练习进度 / 错题本: pure state machine ---
+{
+  const Pr = Practice.progress;
+  const Pz = Practice.puzzles;
+  const cands = Pz.BUILTINS.slice(0, 6).map((d) =>
+    Pz.makePuzzle(Pz.boardOf(d), d.side, d.type, "内置")).filter(Boolean);
+  assert(cands.length >= 4, "progress fixture built");
+
+  const keys = cands.map((p) => Pr.puzzleKey(p));
+  assert(new Set(keys).size === keys.length, "puzzleKey unique per position");
+  assert(Pr.puzzleKey(cands[0]) === Pr.puzzleKey(cands[0]), "puzzleKey stable");
+
+  let st = {};
+  assert(Pr.unmastered(cands, st).length === 0, "nothing unmastered before answering");
+  st = Pr.recordAnswer(st, keys[0], false, "2026-07-25");
+  assert(Pr.unmastered(cands, st).length === 1, "a wrong answer enters 错题本");
+  st = Pr.recordAnswer(st, keys[0], false, "2026-07-25");
+  assert(st.items[keys[0]].wrong === 2 && st.items[keys[0]].n === 2, "counts accumulate");
+  st = Pr.recordAnswer(st, keys[0], true, "2026-07-26");
+  assert(Pr.unmastered(cands, st).length === 0, "getting it right clears it from 错题本");
+  assert(st.items[keys[0]].wrong === 2, "past mistakes stay on the record");
+  st = Pr.recordAnswer(st, keys[0], false, "2026-07-27");
+  assert(Pr.unmastered(cands, st).length === 1, "missing it again re-enters 错题本");
+
+  st = Pr.recordAnswer(st, keys[1], true, "2026-07-25");
+  const sum = Pr.progressSummary(cands, st);
+  assert(sum.total === cands.length && sum.seen === 2 && sum.mastered === 1 && sum.wrong === 1,
+    "progress summary counts " + JSON.stringify(sum));
+
+  // ordering: never-seen first, unmastered next, mastered last
+  const seq = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+  let i = 0;
+  const rand = () => seq[i++ % seq.length];
+  const ordered = Pr.orderPool(cands, st, rand);
+  assert(ordered.length === cands.length, "orderPool keeps every puzzle");
+  const bandOf = (p) => {
+    const it = st.items[Pr.puzzleKey(p)];
+    if (!it) return 0;
+    return it.wrong > 0 && !it.ok ? 1 : 2;
+  };
+  const bands = ordered.map(bandOf);
+  assert(bands.join("") === bands.slice().sort().join(""), "orderPool bands: 未做 → 错题 → 已掌握");
 }
 
 if (failed) {
