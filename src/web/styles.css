@@ -760,7 +760,13 @@
       color: var(--accent); width: 42%;
       font-family: var(--font-num); font-size: 12px;
     }
-    .modal .close-row { margin-top: 16px; text-align: right; }
+    /* version sits left, button stays right — flex rather than text-align so
+       the two never collide when the English label is longer */
+    .modal .close-row {
+      margin-top: 16px; display: flex; align-items: center;
+      justify-content: flex-end; gap: 12px;
+    }
+    .modal .close-row .app-version { margin-right: auto; font-size: 12px; }
 
     .scrim {
       display: none; position: absolute; inset: 0; z-index: 25;

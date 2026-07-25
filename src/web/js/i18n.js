@@ -159,6 +159,7 @@
       "help.question.d": "打开本说明",
       "help.esc": "Esc",
       "help.esc.d": "关闭弹层（说明 / 存档 / 复盘 / 统计 / 练习）· 收起侧栏",
+      "help.version": "版本",
 
       "slots.title": "对局存档",
       "slots.saveCurrent": "另存当前对局",
@@ -557,6 +558,7 @@
       "help.question.d": "Open this help",
       "help.esc": "Esc",
       "help.esc.d": "Close a dialog (help / saves / review / stats / practice) · hide the sidebar",
+      "help.version": "Version",
 
       "slots.title": "Saved games",
       "slots.saveCurrent": "Save current game",
