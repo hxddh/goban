@@ -30,7 +30,13 @@ const Ai = ctx.GobanAi;
 const P = ctx.GobanPractice.puzzles;
 const SIZE = Core.SIZE;
 
+// `node scripts/gen-puzzles.mjs vcf` regenerates one type only.
+const ONLY = process.argv.slice(2).filter((a) => /^(win1|defend|vcf)$/.test(a));
 const TARGET = { win1: 18, defend: 15, vcf: 12 };
+for (const t of Object.keys(TARGET)) if (ONLY.length && !ONLY.includes(t)) TARGET[t] = 0;
+/** vcf puzzles must need a real forcing chain: v1.26 shipped 9 of 12 that were
+ *  won by a single double-four, which is a different (much easier) exercise. */
+const VCF_MIN_DEPTH = 3;
 const found = { win1: [], defend: [], vcf: [] };
 const seen = new Set();
 
@@ -81,13 +87,25 @@ function consider(board, side, type) {
   if (type === "defend" && sol.length > 4) return;
   if (type === "vcf" && sol.length > 3) return;    // keep the key move sharp
 
+  let depth = 0;
+  if (type === "vcf") {
+    // Every solution must lead to a chain worth solving, not just the first.
+    depth = Math.min(...sol.map((s) => P.lineDepth(P.forcedLine(board, side, s), side)));
+    if (depth < VCF_MIN_DEPTH) return;
+  }
+
   const k = sig(board, side, type);
   if (seen.has(k)) return;
   const sk = shapeKey(board, type);
   if (shapes.has(sk)) return;
   seen.add(k); shapes.add(sk);
   const st = stonesOf(board);
-  found[type].push({ type, side, b: st.b, w: st.w, solutions: sol.length, stones });
+  found[type].push({
+    type, side, b: st.b, w: st.w, solutions: sol.length, stones, depth,
+    // vcf answers are expensive to re-derive (a full findVCF sweep per open),
+    // so they ship with the position; test-game.mjs re-derives and compares.
+    sol: type === "vcf" ? sol.map((s) => [s.r, s.c]) : null,
+  });
 }
 
 /** Deterministic openings: seed stones before the engines take over. */
@@ -140,12 +158,16 @@ for (const levels of LEVELS) {
 const all = [...found.win1, ...found.defend, ...found.vcf];
 const fmt = (pts) => "[" + pts.map(([r, c]) => `[${r},${c}]`).join(",") + "]";
 const lines = all.map(
-  (p) => `    { type: "${p.type}", side: "${p.side}",\n      b: ${fmt(p.b)},\n      w: ${fmt(p.w)} },`
+  (p) => `    { type: "${p.type}", side: "${p.side}",\n      b: ${fmt(p.b)},\n      w: ${fmt(p.w)}` +
+    (p.sol ? `,\n      sol: ${fmt(p.sol)} },` : " },")
 );
 
 console.error(
   `games=${games} win1=${found.win1.length} defend=${found.defend.length} vcf=${found.vcf.length} total=${all.length}`
 );
+const vcfDepths = found.vcf.map((p) => p.depth);
+if (vcfDepths.length) console.error("vcf 深度分布: " + JSON.stringify(
+  vcfDepths.reduce((m, d) => ((m[d] = (m[d] || 0) + 1), m), {})));
 console.error(
   "solutions/puzzle: " +
     JSON.stringify(all.reduce((m, p) => ((m[p.solutions] = (m[p.solutions] || 0) + 1), m), {})) +

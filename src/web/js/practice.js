@@ -151,42 +151,55 @@
     { type: "defend", side: "b",
       b: [[1,8],[2,6],[2,7],[2,9],[2,10],[2,11],[3,6],[3,8],[3,12],[4,8],[4,10],[4,12],[5,6],[5,10],[6,13],[7,9],[7,11],[8,9],[10,9]],
       w: [[2,8],[2,12],[3,7],[3,9],[3,10],[3,11],[3,13],[4,5],[4,7],[4,9],[4,11],[5,8],[5,11],[5,12],[6,9],[6,10],[7,10],[7,14],[9,9]] },
-    { type: "vcf", side: "w",
-      b: [[2,6],[4,1],[4,5],[5,2],[6,4],[7,7]],
-      w: [[4,2],[4,3],[4,4],[5,3],[6,2]] },
-    { type: "vcf", side: "w",
-      b: [[1,5],[3,6],[4,4],[5,3],[5,8],[6,4],[6,5],[6,9],[7,2],[7,4]],
-      w: [[2,3],[2,7],[3,5],[4,5],[5,4],[5,5],[5,6],[6,3],[7,5]] },
-    { type: "vcf", side: "w",
-      b: [[2,4],[3,6],[3,7],[3,8],[4,5],[5,8],[6,6],[6,8],[6,9],[7,7],[9,5]],
-      w: [[3,5],[4,6],[4,8],[5,5],[5,7],[6,7],[6,10],[7,9],[8,6],[8,8]] },
-    { type: "vcf", side: "w",
-      b: [[2,5],[2,7],[3,6],[4,6],[4,8],[5,6],[6,4],[6,5],[6,7],[7,2],[8,4],[8,5],[9,4]],
-      w: [[1,5],[1,6],[2,6],[3,5],[4,5],[4,7],[5,5],[5,7],[6,6],[7,4],[7,5],[7,6]] },
-    { type: "vcf", side: "w",
-      b: [[1,5],[2,6],[3,5],[3,9],[4,6],[5,6],[5,10],[6,8],[6,12],[7,7],[7,11]],
-      w: [[2,7],[3,6],[3,7],[4,8],[4,9],[5,7],[5,9],[6,10],[6,11],[6,13]] },
-    { type: "vcf", side: "w",
-      b: [[0,12],[1,10],[2,7],[2,8],[2,10],[3,9],[3,11],[4,8],[4,9],[4,10],[4,12],[5,6],[5,10],[5,13],[6,9],[7,7]],
-      w: [[1,7],[1,9],[1,11],[3,7],[3,8],[3,10],[4,7],[4,11],[5,7],[5,8],[5,9],[5,12],[6,7],[6,14],[7,10]] },
     { type: "vcf", side: "b",
-      b: [[1,8],[2,7],[2,9],[2,11],[3,8],[3,12],[4,10],[4,12],[5,10],[6,13],[7,9],[7,11],[8,9],[10,9]],
-      w: [[2,12],[3,7],[3,9],[3,10],[3,11],[3,13],[4,9],[4,11],[5,11],[5,12],[6,10],[7,10],[7,14],[9,9]] },
+      b: [[4,7],[4,8],[4,9],[4,10],[5,5],[5,10],[5,11],[5,13],[6,6],[6,8],[6,10],[7,7],[7,8],[7,9],[8,8],[9,4],[9,6],[9,11],[10,8],[10,12]],
+      w: [[3,10],[3,11],[4,4],[4,6],[4,11],[4,12],[5,6],[5,7],[5,8],[5,9],[6,7],[7,6],[7,10],[7,11],[8,5],[8,6],[8,10],[9,7],[9,8],[9,9]],
+      sol: [[5,12],[5,14],[6,9]] },
+    { type: "vcf", side: "b",
+      b: [[4,7],[4,8],[4,9],[4,10],[5,5],[5,10],[5,11],[5,12],[5,13],[6,6],[6,8],[6,10],[7,7],[7,8],[7,9],[8,8],[9,4],[9,6],[9,11],[10,8],[10,12]],
+      w: [[3,10],[3,11],[4,4],[4,6],[4,11],[4,12],[5,6],[5,7],[5,8],[5,9],[5,14],[6,7],[7,6],[7,10],[7,11],[8,5],[8,6],[8,10],[9,7],[9,8],[9,9]],
+      sol: [[6,9]] },
+    { type: "vcf", side: "b",
+      b: [[5,8],[6,6],[7,7],[7,11],[8,6],[8,8],[8,9],[8,10],[9,6],[9,8],[9,9],[10,6],[10,7],[11,9]],
+      w: [[5,5],[5,13],[7,6],[7,8],[7,10],[8,7],[8,11],[9,7],[9,11],[10,8],[10,10],[11,6],[11,7],[12,9]],
+      sol: [[7,9]] },
+    { type: "vcf", side: "b",
+      b: [[3,4],[3,9],[4,7],[5,3],[5,8],[6,5],[6,9],[7,6],[7,7],[8,4],[8,8],[8,11],[10,8],[10,9],[10,10],[11,8],[12,7],[14,5]],
+      w: [[3,6],[4,4],[4,8],[4,9],[6,4],[6,6],[7,4],[7,5],[7,8],[7,10],[8,6],[8,7],[9,7],[9,10],[10,11],[11,7],[12,8],[13,6]],
+      sol: [[9,9],[10,7]] },
+    { type: "vcf", side: "b",
+      b: [[3,4],[3,9],[4,7],[5,3],[5,8],[6,5],[6,9],[7,6],[7,7],[8,4],[8,8],[8,11],[9,9],[10,8],[10,9],[10,10],[11,8],[12,7],[14,5]],
+      w: [[3,6],[4,4],[4,8],[4,9],[6,4],[6,6],[7,4],[7,5],[7,8],[7,10],[8,6],[8,7],[9,7],[9,10],[10,11],[11,7],[11,11],[12,8],[13,6]],
+      sol: [[8,9],[10,7]] },
+    { type: "vcf", side: "b",
+      b: [[3,4],[3,9],[4,7],[5,3],[5,8],[6,5],[6,9],[7,6],[7,7],[8,4],[8,8],[8,9],[8,10],[8,11],[9,9],[10,8],[10,9],[10,10],[11,8],[12,7],[14,5]],
+      w: [[3,6],[4,4],[4,8],[4,9],[6,4],[6,6],[7,4],[7,5],[7,8],[7,9],[7,10],[8,6],[8,7],[8,12],[9,7],[9,10],[10,11],[11,7],[11,11],[12,8],[13,6]],
+      sol: [[7,11],[10,7],[12,9]] },
+    { type: "vcf", side: "b",
+      b: [[3,4],[3,9],[4,7],[5,3],[5,8],[6,5],[6,9],[7,6],[7,7],[7,11],[8,4],[8,8],[8,9],[8,10],[8,11],[9,9],[10,8],[10,9],[10,10],[11,8],[12,7],[14,5]],
+      w: [[3,6],[4,4],[4,8],[4,9],[6,4],[6,6],[6,12],[7,4],[7,5],[7,8],[7,9],[7,10],[8,6],[8,7],[8,12],[9,7],[9,10],[10,11],[11,7],[11,11],[12,8],[13,6]],
+      sol: [[10,7],[12,9]] },
+    { type: "vcf", side: "b",
+      b: [[5,5],[6,4],[6,6],[6,8],[7,4],[7,7],[7,11],[8,4],[8,6],[8,7],[8,10],[8,12],[8,13],[9,7],[9,8],[9,9],[10,5],[10,9],[11,7],[11,12],[12,6],[12,8],[12,9],[12,11],[14,14]],
+      w: [[3,3],[5,4],[5,7],[5,9],[5,13],[7,6],[7,13],[8,3],[8,8],[8,11],[9,6],[9,11],[10,4],[10,6],[10,7],[10,8],[10,10],[11,6],[11,8],[11,9],[11,10],[11,11],[12,7],[12,12],[13,13]],
+      sol: [[6,5],[7,5]] },
     { type: "vcf", side: "w",
-      b: [[1,8],[2,6],[2,7],[2,9],[2,10],[2,11],[3,6],[3,8],[3,12],[4,8],[4,10],[4,12],[5,6],[5,10],[6,13],[7,9],[7,11],[8,9],[10,9]],
-      w: [[2,8],[2,12],[3,7],[3,9],[3,10],[3,11],[3,13],[4,5],[4,7],[4,9],[4,11],[5,11],[5,12],[6,9],[6,10],[7,10],[7,14],[9,9]] },
-    { type: "vcf", side: "w",
-      b: [[1,8],[2,6],[2,7],[2,9],[2,10],[2,11],[3,6],[3,8],[3,12],[4,8],[4,10],[4,12],[5,6],[5,10],[6,13],[7,9],[7,11],[8,9],[8,11],[10,9]],
-      w: [[2,8],[2,12],[3,7],[3,9],[3,10],[3,11],[3,13],[4,5],[4,7],[4,9],[4,11],[5,8],[5,11],[5,12],[6,9],[6,10],[7,10],[7,14],[9,9]] },
-    { type: "vcf", side: "w",
-      b: [[3,7],[5,2],[6,6],[7,7],[8,2],[9,4]],
-      w: [[5,4],[5,5],[6,4],[7,4],[8,3]] },
-    { type: "vcf", side: "w",
-      b: [[4,7],[5,5],[6,6],[6,8],[7,6],[8,9],[9,7]],
-      w: [[4,5],[5,6],[5,8],[6,7],[7,7],[8,6]] },
-    { type: "vcf", side: "w",
-      b: [[5,7],[5,8],[5,9],[5,11],[6,8],[7,4],[7,8],[7,10],[8,7],[9,8],[9,9],[10,7]],
-      w: [[4,8],[5,6],[5,10],[7,3],[7,5],[7,6],[7,7],[7,9],[8,6],[8,8],[8,9]] },
+      b: [[1,2],[2,0],[2,4],[4,3],[4,4],[4,6],[4,7],[5,5],[5,8],[5,9],[6,6],[6,7],[7,3],[7,5],[8,5],[8,7],[8,8],[9,9],[10,4]],
+      w: [[3,1],[3,4],[3,8],[4,2],[4,5],[5,3],[5,4],[5,6],[5,7],[6,4],[6,5],[6,8],[6,9],[7,4],[7,6],[7,7],[8,6],[9,5]],
+      sol: [[9,2],[9,4]] },
+    { type: "vcf", side: "b",
+      b: [[3,7],[3,9],[3,11],[4,7],[4,8],[5,7],[5,10],[6,6],[7,7]],
+      w: [[2,10],[2,12],[4,10],[5,9],[6,7],[6,8],[7,5],[7,8],[8,8]],
+      sol: [[2,7],[3,8]] },
+    { type: "vcf", side: "b",
+      b: [[2,7],[2,9],[2,11],[3,7],[3,9],[3,10],[3,11],[3,13],[4,7],[4,8],[5,7],[5,8],[5,10],[6,6],[7,7],[10,8]],
+      w: [[1,7],[2,10],[2,12],[2,13],[2,14],[3,8],[3,12],[4,10],[4,11],[5,9],[6,7],[6,8],[7,5],[7,8],[8,8],[9,8]],
+      sol: [[4,9]] },
+    { type: "vcf", side: "b",
+      b: [[2,7],[2,9],[2,11],[3,7],[3,9],[3,10],[3,11],[3,13],[4,5],[4,7],[4,8],[4,9],[5,7],[5,8],[5,10],[6,6],[7,7],[10,8]],
+      w: [[1,7],[1,12],[2,10],[2,12],[2,13],[2,14],[3,8],[3,12],[4,6],[4,10],[4,11],[5,9],[6,7],[6,8],[7,5],[7,8],[8,8],[9,8]],
+      sol: [[0,9]] },
+
   ];
 
   let deps = { getHistories: () => [] };
@@ -232,6 +245,37 @@
       if (near) out.push({ r, c });
     }
     return out;
+  }
+
+  /**
+   * The forced sequence a vcf answer produces: my four, their only possible
+   * reply, my next four … up to the five (or to a double four, which has no
+   * reply). Returns [] when `first` does not actually force. Built from the
+   * same public engine helpers solutionsFor() judges with, so the line shown
+   * can never contradict the verdict given.
+   */
+  function forcedLine(board, side, first) {
+    const oppo = Core.opp(side);
+    const bd = cloneBoard(board);
+    const line = [];
+    let m = first;
+    for (let step = 0; step < 16 && m; step++) {
+      bd[m.r][m.c] = side;
+      line.push({ r: m.r, c: m.c, color: side, n: line.length + 1 });
+      if (Core.findWin(bd, m.r, m.c, side)) return line;      // five on the board
+      const must = Ai.listWinCells(bd, side);
+      if (must.length >= 2) return line;                      // double four — no reply
+      if (!must.length) return [];                            // not forcing after all
+      bd[must[0].r][must[0].c] = oppo;
+      line.push({ r: must[0].r, c: must[0].c, color: oppo, n: line.length + 1 });
+      m = Ai.findVCF(bd, side, VCF_DEPTH);
+    }
+    return line;
+  }
+
+  /** How many moves of `side`'s own the forced line takes (its difficulty). */
+  function lineDepth(line, side) {
+    return line.filter((x) => x.color === side).length;
   }
 
   /** All correct cells for a puzzle; empty array ⇒ not a valid puzzle. */
@@ -280,17 +324,48 @@
     return out;
   }
 
-  function makePuzzle(board, side, type, source) {
-    const solutions = solutionsFor(board, side, type);
+  /**
+   * `presolved` short-circuits the search for puzzles whose answers are known
+   * (curated vcf positions ship theirs, and daily snapshots keep them): a deep
+   * vcf position costs a real findVCF sweep, and re-deriving all of them on
+   * every open put 3.3s in front of the 练习 button. The stored cells are
+   * still checked for being empty here, and scripts/test-game.mjs re-derives
+   * them from scratch and demands an exact match — the proof lives in CI,
+   * not in the player's click.
+   */
+  function makePuzzle(board, side, type, source, presolved) {
+    let solutions;
+    if (presolved && presolved.length) {
+      solutions = presolved
+        .map((s) => (Array.isArray(s) ? { r: s[0], c: s[1] } : s))
+        .filter((s) => s && board[s.r] && !board[s.r][s.c]);
+    } else {
+      solutions = solutionsFor(board, side, type);
+    }
     if (!solutions.length) return null;
     return { board, side, type, solutions, source };
   }
 
+  /** Cheap fingerprint of the game shelf: changes whenever any game does. */
+  function historiesSig(histories) {
+    return histories.map((h) => {
+      if (!Array.isArray(h) || !h.length) return "0";
+      const last = h[h.length - 1];
+      return h.length + "." + last.r + "." + last.c;
+    }).join("|");
+  }
+
+  /** Scanning a full 30-slot shelf costs ~180ms and usually finds nothing new. */
+  let gamePuzzleCache = { sig: null, out: [] };
+
   /** Derive puzzles from played games: missed wins + recoverable missed defenses. */
   function fromGames() {
+    const histories = deps.getHistories();
+    const sig = historiesSig(histories);
+    if (gamePuzzleCache.sig === sig) return gamePuzzleCache.out;
     const out = [];
     const seen = new Set();
-    for (const history of deps.getHistories()) {
+    for (const history of histories) {
       if (!Array.isArray(history) || history.length < 2) continue;
       for (let i = 1; i <= history.length; i++) {
         const side = (i - 1) % 2 === 0 ? "b" : "w";
@@ -311,16 +386,17 @@
           const key = p.type + ":" + p.side + ":" + p.board.map((row) => row.map((s) => s || ".").join("")).join("");
           if (!seen.has(key)) { seen.add(key); out.push(p); }
         }
-        if (out.length >= 12) return out;
+        if (out.length >= 12) { gamePuzzleCache = { sig: sig, out: out }; return out; }
       }
     }
+    gamePuzzleCache = { sig: sig, out: out };
     return out;
   }
 
   function buildCandidates() {
     const list = [];
     for (const def of BUILTINS) {
-      const p = makePuzzle(boardOf(def), def.side, def.type, "内置");
+      const p = makePuzzle(boardOf(def), def.side, def.type, "内置", def.sol);
       if (p) list.push(p);
     }
     list.push(...fromGames());
@@ -328,13 +404,101 @@
   }
 
   function buildPool() {
-    const list = buildCandidates();
-    // shuffle
-    for (let i = list.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [list[i], list[j]] = [list[j], list[i]];
+    // never-seen → still unmastered → the rest (shuffled within each band)
+    return orderPool(buildCandidates(), loadProgress());
+  }
+
+  // --- 练习进度 / 错题本 (per-puzzle memory) --------------------------------
+  // Before v1.27 practice remembered nothing: every open reshuffled all
+  // puzzles, so you re-did the ones you already knew and could never find the
+  // ones you got wrong. Stored separately from 每日 and from 对局统计.
+  const PROGRESS_KEY = "goban.v12.practice";
+
+  /** Short stable id for a position (full signature is ~225 chars/puzzle). */
+  function puzzleKey(p) {
+    const s = p.type + ":" + p.side + ":" +
+      p.board.map((row) => row.map((x) => x || ".").join("")).join("");
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0).toString(36);
+  }
+
+  function loadProgress() {
+    const h = hostStorage();
+    if (!h) return {};
+    try {
+      const st = JSON.parse(h.storageGet(PROGRESS_KEY) || "null");
+      return st && typeof st === "object" && st.items ? st : {};
+    } catch (_) { return {}; }
+  }
+
+  function saveProgress(st) {
+    const h = hostStorage();
+    return h ? !!h.storageSet(PROGRESS_KEY, JSON.stringify(st)) : false;
+  }
+
+  /**
+   * Fold one answer into the progress state (pure). `wrong` counts mistakes
+   * ever made; `ok` records whether the LAST answer was right, which is what
+   * decides whether a puzzle still belongs in the 错题本.
+   */
+  function recordAnswer(prev, key, correct, dateStr) {
+    const st = prev && prev.items ? { items: Object.assign({}, prev.items) } : { items: {} };
+    const it = Object.assign({ n: 0, wrong: 0, ok: false }, st.items[key]);
+    it.n += 1;
+    if (!correct) it.wrong += 1;
+    it.ok = !!correct;
+    it.last = dateStr;
+    st.items[key] = it;
+    return st;
+  }
+
+  /** Puzzles still to be mastered: answered wrong at some point, not yet right. */
+  function unmastered(cands, st) {
+    const items = (st && st.items) || {};
+    return cands.filter((p) => {
+      const it = items[puzzleKey(p)];
+      return it && it.wrong > 0 && !it.ok;
+    });
+  }
+
+  /** Counts for the stats panel (pure). */
+  function progressSummary(cands, st) {
+    const items = (st && st.items) || {};
+    let seen = 0, mastered = 0, wrong = 0;
+    for (const p of cands) {
+      const it = items[puzzleKey(p)];
+      if (!it) continue;
+      seen += 1;
+      if (it.ok) mastered += 1;
+      if (it.wrong > 0 && !it.ok) wrong += 1;
     }
-    return list;
+    return { total: cands.length, seen: seen, mastered: mastered, wrong: wrong };
+  }
+
+  /**
+   * Free-practice order (pure given `rand`): never-seen first, then the ones
+   * still unmastered, then the rest — shuffled inside each band so repeat
+   * sessions are not identical.
+   */
+  function orderPool(cands, st, rand) {
+    const items = (st && st.items) || {};
+    const band = (p) => {
+      const it = items[puzzleKey(p)];
+      if (!it) return 0;
+      if (it.wrong > 0 && !it.ok) return 1;
+      return 2;
+    };
+    const bands = [[], [], []];
+    for (const p of cands) bands[band(p)].push(p);
+    const r = rand || Math.random;
+    for (const b of bands) {
+      for (let i = b.length - 1; i > 0; i--) {
+        const j = Math.floor(r() * (i + 1));
+        [b[i], b[j]] = [b[j], b[i]];
+      }
+    }
+    return bands[0].concat(bands[1], bands[2]);
   }
 
   // --- 每日挑战 (daily challenge) ------------------------------------------
@@ -437,14 +601,17 @@
       st.date = date;
       st.puzzles = picked.map((p) => {
         const stones = stonesOf(p.board);
-        return { side: p.side, type: p.type, source: p.source, b: stones.b, w: stones.w };
+        return {
+          side: p.side, type: p.type, source: p.source, b: stones.b, w: stones.w,
+          sol: p.solutions.map((s) => [s.r, s.c]),
+        };
       });
       saveDaily(st);
     }
     const pool = [];
     for (const def of st.puzzles) {
       // re-validate through the same predicates as every other puzzle
-      const p = makePuzzle(boardOf(def), def.side, def.type, def.source || "内置");
+      const p = makePuzzle(boardOf(def), def.side, def.type, def.source || "内置", def.sol);
       if (p) pool.push(p);
     }
     return { state: st, pool: pool };
@@ -467,7 +634,12 @@
   }
 
   // --- mini-board rendering (isolated canvas, theme-neutral) ---
-  function drawBoard(marks) {
+  /**
+   * marks: plain dots {r,c,color} — or, for a played-out sequence, numbered
+   * ghost stones {r,c,n,stone,key}. `dots` draws the verdict dots on top of a
+   * sequence so the answer given is still visible.
+   */
+  function drawBoard(marks, dots) {
     const cv = document.getElementById("practice-board");
     if (!cv || !cur) return;
     const dpr = window.devicePixelRatio || 1;
@@ -503,14 +675,31 @@
       g.lineWidth = 1;
       g.stroke();
     }
-    if (marks) {
-      for (const m of marks) {
-        const x = pad + m.c * step, y = pad + m.r * step;
+    const all = (marks || []).concat(dots || []);
+    for (const m of all) {
+      const x = pad + m.c * step, y = pad + m.r * step;
+      if (m.stone) {
+        // sequence move: a translucent stone carrying its move number
+        g.globalAlpha = 0.92;
         g.beginPath();
-        g.arc(x, y, step * 0.2, 0, Math.PI * 2);
-        g.fillStyle = m.color;
+        g.arc(x, y, rr, 0, Math.PI * 2);
+        g.fillStyle = m.stone === "b" ? "#1a1a1a" : "#f2f2f2";
         g.fill();
+        g.lineWidth = m.key ? 2 : 1;
+        g.strokeStyle = m.key ? "rgba(47,158,94,0.95)" : "rgba(120,120,120,0.7)";
+        g.stroke();
+        g.globalAlpha = 1;
+        g.fillStyle = m.stone === "b" ? "#fff" : "#1a1a1a";
+        g.font = "600 " + Math.round(step * 0.5) + "px -apple-system, system-ui, sans-serif";
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText(String(m.n), x, y + step * 0.02);
+        continue;
       }
+      g.beginPath();
+      g.arc(x, y, step * 0.2, 0, Math.PI * 2);
+      g.fillStyle = m.color;
+      g.fill();
     }
   }
 
@@ -587,11 +776,20 @@
         "答对 " + score + " / " + pool.length + " · 连续打卡 " + (st.streak || 1) + " 天 🔥",
         "good");
       if (next) { next.hidden = false; next.textContent = "再练一遍"; }
+    } else if (runMode === "wrong") {
+      if (task) task.textContent = "错题本完成";
+      const left = unmastered(buildCandidates(), loadProgress()).length;
+      setFeedback(
+        "答对 " + score + " / " + pool.length + " 题" +
+          (left ? " · 还剩 " + left + " 题未攻克" : " · 错题本已清空 🎉"),
+        left ? "" : "good");
+      if (next) { next.hidden = false; next.textContent = left ? "再来一轮" : "回到练习"; }
     } else {
       if (task) task.textContent = "本轮完成";
       setFeedback("答对 " + score + " / " + pool.length + " 题 🎉", "good");
       if (next) { next.hidden = false; next.textContent = "再来一轮"; }
     }
+    syncWrongButton();
     setProgress(); // reflects score with cur=null ("共 N 题 · 答对 X")
     clearMiniBoard();
   }
@@ -609,12 +807,23 @@
     answered = true;
     const good = cur.solutions.some((s) => s.r === r && s.c === c);
     if (good) score++;
+    saveProgress(recordAnswer(loadProgress(), puzzleKey(cur), good, todayStr()));
+    syncWrongButton();
     setProgress(); // reflect the score immediately, not only on the next puzzle
     const marks = [{ r, c, color: good ? "rgba(47,158,94,0.95)" : "rgba(192,57,43,0.95)" }];
     if (!good) {
       for (const s of cur.solutions) marks.push({ r: s.r, c: s.c, color: "rgba(47,158,94,0.8)" });
     }
-    drawBoard(marks);
+    // vcf: the answer is a whole forced sequence — a single dot teaches nothing,
+    // so play the line out (my four → their only reply → … → five).
+    let line = [];
+    if (cur.type === "vcf") {
+      const from = good ? { r, c } : cur.solutions[0];
+      line = forcedLine(cur.board, cur.side, from).map((m) => ({
+        r: m.r, c: m.c, n: m.n, stone: m.color, key: m.color === cur.side,
+      }));
+    }
+    drawBoard(line.length ? line : marks, line.length ? marks : null);
     if (good) {
       setFeedback("✓ 正解！", "good");
     } else {
@@ -622,7 +831,7 @@
         cur.type === "win1"
           ? "✗ 这一点不能一步成五。绿色点位可直接连五。"
           : cur.type === "vcf"
-            ? "✗ 这一手无法把对方逼死。绿色点位起手冲四，对方每一步应手都是唯一的，最终成五。"
+            ? "✗ 这一手无法把对方逼死。棋盘上按顺序摆出了正解：绿圈是你的冲四，对方每一手应手都是唯一的，最终成五。"
             : "✗ 对方下一手就会成五。必须挡在成五点上（或自己抢先成五）——绿色点位。",
         "bad");
     }
@@ -631,8 +840,10 @@
   }
 
   function onNext() {
-    if (!cur) { // "再来一轮" / "再练一遍"
-      if (runMode === "daily") { replayDaily(); } else { start(); }
+    if (!cur) { // "再来一轮" / "再练一遍" / 错题本重来
+      if (runMode === "daily") replayDaily();
+      else if (runMode === "wrong") startWrong();
+      else start();
       return;
     }
     idx++;
@@ -651,6 +862,45 @@
       return;
     }
     showPuzzle();
+  }
+
+  /** 错题本: only the puzzles answered wrong and not since gotten right. */
+  function startWrong() {
+    runMode = "wrong";
+    pool = unmastered(buildCandidates(), loadProgress());
+    idx = 0;
+    score = 0;
+    setTitle("错题本");
+    setModalLabel("错题本");
+    if (!pool.length) {
+      cur = null;
+      const task = document.getElementById("practice-task");
+      if (task) task.textContent = "错题本是空的";
+      setFeedback("做错的题会收进这里，答对一次就移出。", "");
+      clearMiniBoard();
+      setProgress();
+      const next = document.getElementById("practice-next");
+      if (next) next.hidden = true;
+      syncWrongButton();
+      return;
+    }
+    showPuzzle();
+  }
+
+  /** Label the 错题本 entry with its live count (and hide it when empty). */
+  function syncWrongButton() {
+    const btn = document.getElementById("practice-wrong");
+    if (!btn) return;
+    const n = unmastered(buildCandidates(), loadProgress()).length;
+    btn.textContent = n ? "错题本 " + n : "错题本";
+    btn.disabled = runMode === "wrong" && !n;
+  }
+
+  /** Practice progress for the stats panel; null before anything was answered. */
+  function practiceSummary() {
+    const st = loadProgress();
+    if (!st || !st.items || !Object.keys(st.items).length) return null;
+    return progressSummary(buildCandidates(), st);
   }
 
   /** Re-run today's set (after finishing); completion stays counted once. */
@@ -696,7 +946,10 @@
     if (m) m.classList.add("show");
     setTitle("战术练习");
     setModalLabel("战术练习");
+    const wrongBtn = document.getElementById("practice-wrong");
+    if (wrongBtn) wrongBtn.hidden = false;
     start();
+    syncWrongButton();
     focusPracticeClose();
   }
 
@@ -705,6 +958,8 @@
     if (m) m.classList.add("show");
     setTitle("每日挑战");
     setModalLabel("每日挑战");
+    const wrongBtn = document.getElementById("practice-wrong");
+    if (wrongBtn) wrongBtn.hidden = true; // 每日 is its own fixed set
     startDaily();
     focusPracticeClose();
   }
@@ -727,16 +982,24 @@
     if (next) next.addEventListener("click", onNext);
     const closeBtn = document.getElementById("practice-close");
     if (closeBtn) closeBtn.addEventListener("click", close);
+    const wrongBtn = document.getElementById("practice-wrong");
+    if (wrongBtn) wrongBtn.addEventListener("click", () => {
+      if (runMode === "wrong") { setTitle("战术练习"); setModalLabel("战术练习"); start(); }
+      else startWrong();
+      syncWrongButton();
+    });
     const m = document.getElementById("practice-modal");
     if (m) m.addEventListener("click", (ev) => { if (ev.target === m) close(); });
   }
 
   global.GobanPractice = {
-    init, wire, open, openDaily, close, isOpen, dailySummary,
+    init, wire, open, openDaily, close, isOpen, dailySummary, practiceSummary,
     // pure daily helpers, exposed for unit tests
     daily: { pickForDate, advanceDaily, prevDayStr, seededRng },
     // pure puzzle predicates + the curated bank, exposed for unit tests
     // and for scripts/gen-puzzles.mjs (which validates through this very code)
-    puzzles: { BUILTINS, boardOf, solutionsFor, makePuzzle, buildCandidates },
+    puzzles: { BUILTINS, boardOf, solutionsFor, makePuzzle, buildCandidates, forcedLine, lineDepth },
+    // pure progress helpers, exposed for unit tests
+    progress: { puzzleKey, recordAnswer, unmastered, progressSummary, orderPool },
   };
 })(typeof window !== "undefined" ? window : globalThis);

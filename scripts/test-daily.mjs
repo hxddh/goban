@@ -218,8 +218,60 @@ async function answerRound(expectAllCorrect) {
   await page.waitForTimeout(80);
 }
 
-// ---- Test 7: zero console errors across the whole flow ----
-report("7 zero console errors", page.__errors.length === 0, JSON.stringify(page.__errors.slice(0, 3)));
+// ---- Test 7: 错题本 — a missed puzzle is collected, and leaves once solved ----
+{
+  await page.evaluate(() => localStorage.removeItem("goban.v12.practice"));
+  await page.click("#open-practice");
+  await page.waitForTimeout(250);
+
+  // answer the current puzzle wrong (a far corner is never the solution)
+  const cornerFree = await page.evaluate(() => {
+    const P = window.GobanPractice.puzzles;
+    return true; // the corner is empty in every built-in position
+  });
+  await clickMini(0, 0);
+  await page.waitForTimeout(200);
+  const afterWrong = await page.evaluate(() => ({
+    btn: document.getElementById("practice-wrong").textContent,
+    stored: JSON.parse(localStorage.getItem("goban.v12.practice") || "null"),
+  }));
+  const collected = !!afterWrong.stored &&
+    Object.values(afterWrong.stored.items).some((i) => i.wrong === 1 && i.ok === false) &&
+    /错题本 1/.test(afterWrong.btn);
+
+  // enter 错题本: exactly that one puzzle
+  await page.click("#practice-wrong");
+  await page.waitForTimeout(400);
+  const inBook = await page.evaluate(() => ({
+    title: document.getElementById("practice-title").textContent,
+    prog: document.getElementById("practice-progress").textContent,
+  }));
+
+  // solve it — the book must empty out and the puzzle count itself must persist
+  const sol = await page.evaluate(() => {
+    const P = window.GobanPractice;
+    const un = P.progress.unmastered(P.puzzles.buildCandidates(),
+      JSON.parse(localStorage.getItem("goban.v12.practice") || "{}"));
+    return un.length ? { r: un[0].solutions[0].r, c: un[0].solutions[0].c } : null;
+  });
+  if (sol) { await clickMini(sol.r, sol.c); await page.waitForTimeout(250); }
+  const afterRight = await page.evaluate(() => ({
+    btn: document.getElementById("practice-wrong").textContent,
+    left: window.GobanPractice.progress.unmastered(
+      window.GobanPractice.puzzles.buildCandidates(),
+      JSON.parse(localStorage.getItem("goban.v12.practice") || "{}")).length,
+  }));
+
+  report("7 错题本收录做错的题，做对后移出",
+    cornerFree && collected && inBook.title === "错题本" && /第 1 \/ 1 题/.test(inBook.prog) &&
+      !!sol && afterRight.left === 0 && afterRight.btn === "错题本",
+    JSON.stringify({ afterWrong: afterWrong.btn, inBook, sol, afterRight }));
+  await page.click("#practice-close");
+  await page.waitForTimeout(120);
+}
+
+// ---- Test 8: zero console errors across the whole flow ----
+report("8 zero console errors", page.__errors.length === 0, JSON.stringify(page.__errors.slice(0, 3)));
 
 await browser.close();
 server.close();
