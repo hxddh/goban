@@ -11,7 +11,7 @@
   <div id="app">
     <header class="chrome">
       <span class="brand" data-i18n="app.name">五子棋</span>
-      <span class="status-pill" id="status" data-i18n="status.blackTurn">黑棋落子</span>
+      <span class="status-pill" id="status" role="status" aria-live="polite" data-i18n="status.blackTurn">黑棋落子</span>
       <span class="meta-chip num" id="moves">0/0</span>
       <span class="meta-chip num" id="clock">00:00</span>
       <span class="spacer"></span>
@@ -20,7 +20,7 @@
         <button type="button" class="tool-btn" id="btn-hint" title="提示一手 (H)" data-i18n="btn.hint" data-i18n-title="btn.hint.title">提示</button>
         <button type="button" class="tool-btn primary" id="btn-new" title="新局 (N)" data-i18n="btn.new" data-i18n-title="btn.new.title">新局</button>
         <button type="button" class="icon-btn" id="help-btn" title="快捷键 (?)" data-i18n-title="btn.help.title">?</button>
-        <button type="button" class="icon-btn" id="toggle-panel" title="侧栏 (Tab)" aria-label="侧栏" data-i18n-title="btn.panel.title" data-i18n-aria="aria.panel">☰</button>
+        <button type="button" class="icon-btn" id="toggle-panel" title="侧栏 ([ ])" aria-label="侧栏" data-i18n-title="btn.panel.title" data-i18n-aria="aria.panel">☰</button>
       </div>
     </header>
 
@@ -30,7 +30,7 @@
         <canvas id="board" width="900" height="900" aria-label="棋盘" data-i18n-aria="aria.board"></canvas>
         <div class="think-dot" id="think-dot" hidden aria-hidden="true"></div>
         <div class="swap2-bar" id="swap2-bar" hidden role="group" aria-label="平衡开局选择" data-i18n-aria="aria.swap2">
-          <span class="swap2-msg" id="swap2-msg"></span>
+          <span class="swap2-msg" id="swap2-msg" role="status" aria-live="polite"></span>
           <div class="swap2-btns" id="swap2-btns"></div>
         </div>
       </div>
@@ -120,7 +120,7 @@
       <section class="side-section">
         <h2 class="side-h" data-i18n="sec.look">外观</h2>
         <div class="setting-list">
-          <div class="setting-row stack">
+          <div class="setting-row">
             <span class="setting-k" data-i18n="set.theme">主题</span>
             <div class="theme-row" id="theme-seg" role="group" aria-label="主题" data-i18n-aria="aria.theme">
               <button type="button" data-theme="wood" class="active" title="木盘" data-i18n="theme.wood" data-i18n-title="theme.wood.title">木</button>
@@ -180,19 +180,16 @@
           <button type="button" class="text-link" id="sgf-review" title="全局复盘：评分曲线与失着" data-i18n="sgf.review" data-i18n-title="sgf.review.title">复盘</button>
         </div>
         <button type="button" class="continue-btn" id="sgf-continue" hidden title="从导入局面继续对局" data-i18n="sgf.continue" data-i18n-title="sgf.continue.title">续下</button>
-        <p class="hint" data-i18n="sgf.dropHint">拖入 .sgf 或粘贴棋谱 · 导入后不自动续下</p>
       </section>
 
       <div class="side-foot">
         <button type="button" class="text-link" id="open-practice" title="战术练习：找制胜一手 / 找防守点" data-i18n="foot.practice" data-i18n-title="foot.practice.title">练习</button>
         <button type="button" class="text-link" id="open-daily" title="每日挑战：每天固定 5 题，连续打卡" data-i18n="foot.daily" data-i18n-title="foot.daily.title">每日</button>
         <button type="button" class="text-link" id="open-stats" title="对局统计" data-i18n="foot.stats" data-i18n-title="foot.stats.title">统计</button>
-        <button type="button" class="text-link danger" id="clear-save" data-i18n="foot.clear">清除存档</button>
-        <button type="button" class="text-link" id="collapse" data-i18n="foot.collapse">收起</button>
       </div>
     </aside>
 
-    <div class="toast" id="toast"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <div class="modal-bg" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
       <div class="modal">
@@ -220,6 +217,7 @@
           <tr><td data-i18n="help.sgf">侧栏·棋谱</td><td data-i18n="help.sgf.d">复制 / 导出 / 导入 / 粘贴 SGF；导入后可「续下」</td></tr>
           <tr><td data-i18n="help.fullscreen">⌘⌃F · 绿键 · F</td><td data-i18n="help.fullscreen.d">系统全屏 / 窗口 Zoom / 提示入口</td></tr>
           <tr><td data-i18n="help.question">?</td><td data-i18n="help.question.d">打开本说明</td></tr>
+          <tr><td data-i18n="help.tab">Tab</td><td data-i18n="help.tab.d">在按钮之间移动焦点</td></tr>
           <tr><td data-i18n="help.esc">Esc</td><td data-i18n="help.esc.d">关闭弹层（说明 / 存档 / 复盘 / 统计 / 练习）· 收起侧栏</td></tr>
         </table>
         <div class="close-row">
@@ -241,6 +239,7 @@
           <span class="muted" data-i18n="backup.label">全部数据</span>
           <button type="button" class="text-link" id="backup-export" title="把存档、统计、每日打卡与练习进度导出为一个文件" data-i18n="backup.export" data-i18n-title="backup.export.title">备份</button>
           <button type="button" class="text-link" id="backup-import" title="用备份文件覆盖当前全部数据" data-i18n="backup.import" data-i18n-title="backup.import.title">恢复</button>
+          <button type="button" class="text-link danger" id="clear-save" data-i18n="foot.clear">清除存档</button>
         </div>
         <div class="close-row">
           <button type="button" class="tool-btn" id="slots-close" data-i18n="dlg.close">关闭</button>

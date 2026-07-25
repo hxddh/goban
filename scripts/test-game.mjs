@@ -1251,6 +1251,33 @@ const Practice = ctx.GobanPractice;
     .filter((f) => f.endsWith(".js") && !tagged.has(f) && !workerOnly.has(f));
   assert(orphans.length === 0, "every js module is loaded by index.html or the worker (" + orphans.join(",") + ")");
 
+  // The mirror image of the orphan gate, and a costlier failure. Deleting a
+  // button from index.html leaves `getElementById("collapse").onclick = …`
+  // dereferencing null, which throws *during init* — so every handler bound
+  // after that line never binds. The app still paints, so it looks fine; it
+  // just does nothing. v1.32 shipped this for the length of one sidebar edit.
+  // Only unguarded uses count: `const x = getElementById(…); if (x) …` is the
+  // established way to mark an element as optional.
+  const domIds = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+  const dangling = [];
+  for (const f of fs.readdirSync(path.join(root, "src/web/js"))) {
+    if (!f.endsWith(".js")) continue;
+    const js = fs.readFileSync(path.join(root, "src/web/js", f), "utf8");
+    for (const m of js.matchAll(/getElementById\(\s*"([^"]+)"\s*\)\s*\./g)) {
+      if (!domIds.has(m[1])) dangling.push(f + " → #" + m[1]);
+    }
+  }
+  assert(dangling.length === 0,
+    "every unguarded getElementById target exists in index.html (" + dangling.join(", ") + ")");
+  // Negative controls, run against fabricated source so they cannot go stale:
+  // the matcher must flag the unguarded form and must not flag the guarded one.
+  const scan = (js, ids) =>
+    [...js.matchAll(/getElementById\(\s*"([^"]+)"\s*\)\s*\./g)].filter((m) => !ids.has(m[1])).length;
+  assert(scan('document.getElementById("gone").onclick = f;', new Set()) === 1,
+    "dangling-id gate flags an unguarded reference to a deleted element");
+  assert(scan('const e = document.getElementById("gone");\nif (e) e.onclick = f;', new Set()) === 0,
+    "dangling-id gate allows the guarded optional-element idiom");
+
   fs.rmSync(outDir, { recursive: true, force: true });
 }
 
