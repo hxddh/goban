@@ -7,8 +7,14 @@
  */
 (function (global) {
   const t = (k, p) => (global.GobanI18n ? global.GobanI18n.t(k, p) : k);
-  const SQUASH = 1200;      // static-eval scale → tanh spread
-  const BLUNDER_DROP = 0.3; // squashed-advantage loss that flags a mistake
+  const KNEE = 120;         // eval magnitude where the curve still has slope
+  const DECISIVE = 20000;   // beyond this the position is won — clamp to ±1
+  /** Advantage handed to the opponent by one move. */
+  const BLUNDER_DROP = 0.45;
+  /** …and at most this many, worst first: the flag rate scales with game
+   *  length, so a loose 70-move game hit fourteen. A wall of red dots says
+   *  no more than a blank curve did. */
+  const MAX_BLUNDERS = 8;
 
   let deps = null;
   let data = null;
@@ -29,11 +35,28 @@
 
   function getData() { return data; }
 
-  /** Signed advantage from Black's perspective at ply i, squashed to [-1,1]. */
+  /**
+   * Signed advantage from Black's perspective at ply i, compressed to [-1,1].
+   *
+   * Not tanh(raw/1200) any more. That saturated: evalStatic reaches 10^5 once
+   * either side has a real threat and 10^10 near a five, so from about ply 7
+   * every game read exactly 1.000000 to the end. Measured over 91 plies, 90
+   * of them had a per-move change of exactly 0.000 — the curve was a flat
+   * line at the ceiling and the blunder detector below it could never fire.
+   *
+   * A signed log spreads the range that actually varies (hundreds to a few
+   * thousand) and treats anything past DECISIVE as won, which it is.
+   */
+  function squash(raw) {
+    const s = raw < 0 ? -1 : 1;
+    const a = Math.abs(raw);
+    if (a >= DECISIVE) return s;
+    return s * (Math.log1p(a / KNEE) / Math.log1p(DECISIVE / KNEE));
+  }
+
   function advAt(i) {
     if (i > 0 && deps.winLineAt(i)) return (i - 1) % 2 === 0 ? 1 : -1; // someone just won
-    const raw = deps.evaluateBoard(deps.boardAfter(i), "b");
-    return Math.tanh(raw / SQUASH);
+    return squash(deps.evaluateBoard(deps.boardAfter(i), "b"));
   }
 
   /** Analyze the whole game: per-ply Black-advantage + flagged blunders. */
@@ -47,24 +70,37 @@
     if (data && data.gen === gen && data.len === N) return data;
     const adv = [];
     for (let i = 0; i <= N; i++) adv.push(advAt(i));
-    const blunders = [];
+    let blunders = [];
     let bCount = 0, wCount = 0;
     for (let i = 1; i <= N; i++) {
       const color = (i - 1) % 2 === 0 ? "b" : "w";
       const hard = deps.coachFacts(deps.boardAfter(i - 1), color, history[i - 1]);
       let reason = null;
+      let drop = 0;
       if (hard && hard.grade === "blunder") reason = hard.text;
       else {
-        // advantage from the mover's own perspective before vs after
-        const before = color === "b" ? adv[i - 1] : -adv[i - 1];
-        const after = color === "b" ? adv[i] : -adv[i];
-        if (before - after >= BLUNDER_DROP) reason = t("review.blunderReason");
+        // Measured AFTER the opponent has answered, not immediately after the
+        // move. Placing your own stone almost never lowers your own eval — the
+        // cost of a bad move shows up in what the opponent gets to do next, so
+        // comparing i-1 with i (as this did through v1.30) reported a change of
+        // exactly 0.000 for 90 of 91 plies and never flagged anything.
+        const sgn = color === "b" ? 1 : -1;
+        const before = sgn * adv[i - 1];
+        const after = sgn * adv[Math.min(i + 1, N)];
+        drop = before - after;
+        if (drop >= BLUNDER_DROP) reason = t("review.blunderReason");
       }
-      if (reason) {
-        blunders.push({ i, color, reason });
-        if (color === "b") bCount++; else wCount++;
-      }
+      if (reason) blunders.push({ i, color, reason, drop, hard: !!(hard && hard.grade === "blunder") });
     }
+    // Keep the worst, but list them in playing order — a review is read
+    // forwards. Hard verdicts (missed win / missed block) always survive:
+    // they are facts about the position, not a score difference.
+    if (blunders.length > MAX_BLUNDERS) {
+      const keep = blunders.slice().sort((a, b) => (b.hard - a.hard) || (b.drop - a.drop)).slice(0, MAX_BLUNDERS);
+      const keepSet = new Set(keep.map((x) => x.i));
+      blunders = blunders.filter((x) => keepSet.has(x.i));
+    }
+    for (const b of blunders) { if (b.color === "b") bCount++; else wCount++; }
     data = { adv, blunders, summary: { b: bCount, w: wCount }, gen, len: N };
     return data;
   }

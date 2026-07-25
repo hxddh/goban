@@ -15,6 +15,7 @@
   const Slots = window.GobanSlots;
   const Review = window.GobanReview;
   const Stats = window.GobanStats;
+  const Backup = window.GobanBackup;
   const Practice = window.GobanPractice;
   const SIZE = Core.SIZE;
   const WIN = Core.WIN;
@@ -2050,6 +2051,51 @@
 
   const sgfImport = document.getElementById("sgf-import");
   if (sgfImport) sgfImport.onclick = () => { pickAndImportSgf(); };
+
+  // --- whole-app backup / restore ---
+  const backupExport = document.getElementById("backup-export");
+  if (backupExport) backupExport.onclick = async () => {
+    try {
+      const text = Backup.serialize(Host);
+      const n = Object.keys(JSON.parse(text).data).length;
+      await SgfIo.exportString(text, Backup.fileName());
+      toast(t("backup.done", { n: n }));
+    } catch (_) {
+      toast(t("backup.fail"));
+    }
+  };
+
+  const backupImport = document.getElementById("backup-import");
+  if (backupImport) backupImport.onclick = async () => {
+    if (!Host.hasZero()) { toast(t("file.unsupported")); return; }
+    let text;
+    try {
+      const files = await Host.openFileDialog({ title: t("backup.import"), allowMultiple: false });
+      const paths = Host.normalizePaths(files);
+      if (!paths.length) { toast(t("file.cancelled")); return; }
+      text = await readTextFile(paths[0]);
+    } catch (_) {
+      toast(t("file.openFail"));
+      return;
+    }
+    // Validate BEFORE asking: no point warning about an irreversible
+    // overwrite that the file cannot perform anyway.
+    const chk = Backup.inspect(text);
+    if (!chk.ok) {
+      toast(t(chk.error === "version" ? "backup.badVersion" : chk.error === "empty" ? "backup.empty" : "backup.badFile"));
+      return;
+    }
+    const go = await confirmNative(t("backup.confirm"), t("backup.confirmTitle"),
+      { ok: t("backup.confirmOk"), cancel: t("dlg.cancel") });
+    if (!go) return;
+    const res = Backup.restore(Host, text);
+    if (!res.ok) { toast(t("backup.badFile")); return; }
+    toast(t("backup.restored", { n: res.restored }));
+    // Reload rather than re-wire: every module read its key at boot, and
+    // rebuilding all of that state in place is far more code — and far more
+    // ways to leave half the app looking at the old profile.
+    setTimeout(() => window.location.reload(), 600);
+  };
   Host.onDropFiles((detail) => {
     const paths = Host.normalizePaths((detail && detail.paths) || detail);
     const sgfPath = paths.find((p) => /\.sgf$/i.test(p));

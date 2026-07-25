@@ -639,6 +639,15 @@
       gap: 2px 4px; margin-top: 14px;
     }
     .link-row .text-link { text-align: center; }
+    /* backup/restore sits under the slot list, away from the per-slot rows —
+       it acts on everything, not on the slot you happen to be looking at */
+    .backup-row {
+      display: flex; align-items: center; gap: 4px;
+      margin-top: 12px; padding-top: 10px;
+      border-top: 1px solid var(--card-border);
+      font-size: 12px;
+    }
+    .backup-row .muted { margin-right: auto; }
     .text-link {
       appearance: none; border: 0; background: transparent;
       color: var(--accent);

@@ -94,6 +94,7 @@ function positions(n) {
           board: b, side: t,
           difficulty: i % 3 === 0 ? "easy" : "normal",
           nodeBudget: 3000,
+          vary: false, // positions must be identical for both engines
         });
         if (!m || b[m.r][m.c]) { ok = false; break; }
         b[m.r][m.c] = t;
@@ -110,12 +111,26 @@ function positions(n) {
   return out;
 }
 
-function play(pos, blackEng, whiteEng) {
+/** mulberry32 — variety is exercised, but from a fixed seed, so "same ref,
+ *  same arguments, same score" still holds. Math.random here would make every
+ *  run disagree with the last by a game or two and drown small effects. */
+function seededRng(seed) {
+  let h = seed >>> 0;
+  return function () {
+    h = (h + 0x6d2b79f5) | 0;
+    let x = Math.imul(h ^ (h >>> 15), 1 | h);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function play(pos, blackEng, whiteEng, seed) {
   const b = pos.board.map((r) => r.slice());
+  const rng = seededRng(seed || 1);
   let t = pos.turn;
   for (let ply = 0; ply < 120; ply++) {
     const eng = t === "b" ? blackEng : whiteEng;
-    const m = eng.GobanAi2.aiMove({ board: b, side: t, difficulty: "hard", nodeBudget: NB });
+    const m = eng.GobanAi2.aiMove({ board: b, side: t, difficulty: "hard", nodeBudget: NB, rng: rng });
     if (!m || b[m.r][m.c]) return "err";
     b[m.r][m.c] = t;
     if (Core.findWin(b, m.r, m.c, t)) return t;
@@ -130,7 +145,9 @@ let pts = 0, w = 0, l = 0, d = 0;
 const t0 = Date.now();
 for (let i = 0; i < POS.length; i++) {
   for (const candBlack of [true, false]) {
-    const r = play(POS[i], candBlack ? CAND : BASE, candBlack ? BASE : CAND);
+    // Same seed for both colour assignments of a position: the pairing only
+    // cancels out colour bias if the two games see the same variety choices.
+    const r = play(POS[i], candBlack ? CAND : BASE, candBlack ? BASE : CAND, i + 1);
     let tag;
     if (r === "draw" || r === "err") { pts += 0.5; d++; tag = "和"; }
     else if ((r === "b") === candBlack) { pts += 1; w++; tag = "候选胜"; }

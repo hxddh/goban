@@ -877,6 +877,247 @@ const Practice = ctx.GobanPractice;
   }
 }
 
+// --- whole-app backup / restore (v1.31) ---
+{
+  load("src/web/js/backup.js");
+  const Backup = ctx.GobanBackup;
+
+  const makeStore = (init) => {
+    const map = new Map(Object.entries(init || {}));
+    return {
+      map,
+      storageGet: (k) => (map.has(k) ? map.get(k) : null),
+      storageSet: (k, v) => { map.set(k, v); return true; },
+      storageRemove: (k) => { map.delete(k); },
+    };
+  };
+
+  const full = {
+    "goban.v12.slots": '[{"id":"a","name":"s"}]',
+    "goban.v12.stats": '[{"result":"b"}]',
+    "goban.v12.daily": '{"streak":3}',
+    "goban.v12.practice": '{"items":{"x":{"n":1}}}',
+    "goban.v12.lang": "en",
+  };
+  const src = makeStore(full);
+  const text = Backup.serialize(src);
+  const round = Backup.inspect(text);
+  assert(round.ok, "a fresh backup validates");
+  assert(round.keys.length === 5, "every present key is carried (" + round.keys.length + ")");
+  assert(!text.includes('"goban.v12.save"'), "keys absent from storage are skipped");
+  assert(JSON.parse(text).app === ctx.GOBAN_VERSION, "the backup records the app version");
+
+  // restore onto a machine with different data
+  const dst = makeStore({ "goban.v12.stats": '[{"result":"w"}]', "goban.v12.save": "{}" });
+  const res = Backup.restore(dst, text);
+  assert(res.ok && res.restored === 5, "restore reports what it wrote");
+  for (const k of Object.keys(full)) {
+    assert(dst.storageGet(k) === full[k], "restored " + k + " byte-for-byte");
+  }
+  // …and the key the backup did NOT carry is cleared, not left behind: a
+  // half-restored profile is worse than either state on its own
+  assert(dst.storageGet("goban.v12.save") === null, "keys missing from the backup are cleared");
+
+  // a second round trip is a fixed point
+  // \s* matters: JSON.stringify(…, 2) writes `"savedAt": 123`, and a regex
+  // without it silently compares the timestamps too — which made this pass
+  // only when both calls landed in the same millisecond.
+  const noStamp = (j) => j.replace(/"savedAt":\s*\d+/, "");
+  assert(noStamp(Backup.serialize(dst)) === noStamp(text), "backup → restore → backup is stable");
+
+  // rejections, and nothing is touched when they happen
+  const guard = makeStore(full);
+  const before = JSON.stringify([...guard.map]);
+  for (const [bad, why] of [
+    ["not json at all", "parse"],
+    ['{"format":"something-else","data":{}}', "format"],
+    ['{"format":"goban-backup","formatVersion":99,"data":{"goban.v12.lang":"en"}}', "version"],
+    ['{"format":"goban-backup","formatVersion":1,"data":{}}', "empty"],
+    ['{"format":"goban-backup","formatVersion":1,"data":{"evil.key":"x"}}', "empty"],
+  ]) {
+    const r = Backup.restore(guard, bad);
+    assert(!r.ok && r.error === why, "rejects " + why + " (" + (r.error || "accepted!") + ")");
+  }
+  assert(JSON.stringify([...guard.map]) === before, "a rejected file leaves storage untouched");
+
+  // an older backup is still readable — that is the whole point of a backup
+  const oldFile = JSON.stringify({
+    format: "goban-backup", formatVersion: 1, app: "1.30.0",
+    data: { "goban.v12.lang": "zh" },
+  });
+  const oldChk = Backup.inspect(oldFile);
+  assert(oldChk.ok && oldChk.app === "1.30.0", "a backup from an older app version restores");
+
+  assert(/^goban-backup-\d{14}\.json$/.test(Backup.fileName(Date.UTC(2026, 0, 2, 3, 4, 5))),
+    "backup file name is timestamped — got " + Backup.fileName(Date.UTC(2026, 0, 2, 3, 4, 5)));
+
+  // the key list must not drift from what the app actually stores
+  const stored = new Set();
+  for (const f of fs.readdirSync(path.join(root, "src/web/js"))) {
+    if (!f.endsWith(".js")) continue;
+    const srcText = fs.readFileSync(path.join(root, "src/web/js", f), "utf8");
+    for (const m of srcText.matchAll(/"(goban\.v12\.[a-z]+)"/g)) stored.add(m[1]);
+  }
+  const missing = [...stored].filter((k) => Backup.KEYS.indexOf(k) < 0);
+  assert(missing.length === 0, "backup covers every goban.v12.* key in the app (" + missing.join(",") + ")");
+}
+
+// --- review: the advantage curve has to carry information (v1.31) ---
+// compute() is pure over injected deps, so it runs here without a DOM.
+{
+  load("src/web/js/review.js");
+  const Review = ctx.GobanReview;
+
+  const coachFacts = (pre, color, played) => {
+    if (Core.wouldWin(pre, played.r, played.c, color)) return { grade: "best", text: "胜着" };
+    if (Ai.listWinCells(pre, color).length) return { grade: "blunder", text: "错失胜着" };
+    const a = pre.map((r) => r.slice());
+    a[played.r][played.c] = color;
+    if (Ai.listWinCells(a, Core.opp(color)).length) return { grade: "blunder", text: "漏防对手成五" };
+    return null;
+  };
+  let gen = 0;
+  const analyze = (hist) => {
+    gen++;
+    Review.init({
+      getHistory: () => hist,
+      getGameGen: () => gen,
+      getViewIndex: () => 0,
+      boardAfter: (n) => Core.boardAfter(hist, n),
+      winLineAt: (n) => {
+        const p = hist[n - 1];
+        return p ? Core.findWin(Core.boardAfter(hist, n), p.r, p.c, (n - 1) % 2 === 0 ? "b" : "w") : null;
+      },
+      coachFacts,
+      evaluateBoard: (b, me) => Ai.evaluateBoard(b, me),
+    });
+    Review.invalidate();
+    return Review.compute();
+  };
+
+  // A game where black walks into a lost position: white builds an open row
+  // while black answers on the far side of the board.
+  const hist = [];
+  for (let k = 0; k < 8; k++) {
+    hist.push({ r: 0, c: k });        // black, doing nothing useful
+    if (k < 7) hist.push({ r: 7, c: 4 + k }); // white, building
+  }
+  const d = analyze(hist);
+
+  // The curve, measured on a QUIET game — scattered stones, no side with a
+  // real shape, so nobody is winning and the curve has to say so. Through
+  // v1.30 tanh(raw/1200) pinned anything past a modest advantage to exactly
+  // ±1, so consecutive plies differed by 0.000 and the line sat at the rail.
+  // (A mirrored build-up is not "level": once both sides own an open four the
+  // position really is decided for whoever moves next.)
+  const level = [[3, 3], [11, 3], [3, 6], [11, 6], [6, 9], [9, 9], [5, 4], [10, 4]]
+    .map(([r, c]) => ({ r, c }));
+  const dLevel = analyze(level);
+  const distinct = new Set(dLevel.adv.map((v) => v.toFixed(3))).size;
+  assert(distinct >= 4, "advantage curve takes several distinct values (" + distinct + "/" + dLevel.adv.length + ")");
+  assert(dLevel.adv.every((v) => v >= -1 && v <= 1), "curve stays inside [-1,1]");
+  const pinned = dLevel.adv.filter((v) => Math.abs(Math.abs(v) - 1) < 1e-9).length;
+  assert(pinned === 0, "a level game never touches the rails (" + pinned + "/" + dLevel.adv.length + ")");
+  // The sharpest statement of the v1.30 bug: consecutive plies were identical.
+  // Measured across 91 plies of real games, 90 had a delta of exactly 0.000.
+  const zeroDeltas = dLevel.adv.slice(1).filter((v, k) => Math.abs(v - dLevel.adv[k]) < 1e-9).length;
+  assert(zeroDeltas === 0, "every ply moves the curve (" + zeroDeltas + " frozen of " + (dLevel.adv.length - 1) + ")");
+
+  // …and the case that actually saturated. A live three is a good position,
+  // not a won one — tanh(raw/1200) read it as 0.975, one step from the rail,
+  // which left no room for the rest of the game to show anything. This is the
+  // assertion that fails if the old curve ever comes back.
+  const three = [[7, 5], [0, 0], [7, 6], [0, 1]].map(([r, c]) => ({ r, c }));
+  const dThree = analyze(three);
+  const atThree = dThree.adv[dThree.adv.length - 1];
+  assert(atThree > 0.3 && atThree < 0.9,
+    "a live three reads as an edge, not a win (" + atThree.toFixed(3) + ")");
+
+  // blunders: at minimum the move that let white finish, and — the point of
+  // the change — something earlier than that
+  assert(d.blunders.length >= 2, "a lost game flags more than just the losing move (" + d.blunders.length + ")");
+  const plies = d.blunders.map((b) => b.i);
+  assert(plies.join(",") === plies.slice().sort((a, b) => a - b).join(","),
+    "blunders are listed in playing order");
+  assert(plies[0] < hist.length - 1, "the first flag is earlier than the final move (" + plies[0] + " of " + hist.length + ")");
+  assert(d.summary.b + d.summary.w === d.blunders.length, "summary counts match the list");
+
+  // a decided position still reads as decided
+  assert(Math.abs(d.adv[d.adv.length - 1]) > 0.9, "a won game ends at the rail");
+
+  // the cap: a long sloppy game must not paint the curve red
+  const longHist = [];
+  for (let k = 0; k < 14; k++) {
+    longHist.push({ r: 14, c: k });
+    longHist.push({ r: 6 + (k % 3), c: k });
+  }
+  const dl = analyze(longHist);
+  assert(dl.blunders.length <= 8, "no more than 8 flags however loose the game (" + dl.blunders.length + ")");
+}
+
+// --- engine variety by board symmetry (v1.31) ---
+// Through v1.30 the engine was deterministic above 简单: repeating an opening
+// replayed the identical game (1 distinct game in 8 at 困难). Variety comes
+// from symmetries the position ALREADY has, so the alternative is the same
+// move in a mirrored frame and cannot be weaker.
+{
+  const empty = Core.emptyBoard();
+  assert(Ai.stabilizer(empty).length === 8, "empty board has all 8 symmetries");
+
+  const tengen = Core.emptyBoard();
+  tengen[7][7] = "b";
+  assert(Ai.stabilizer(tengen).length === 8, "a stone on 天元 keeps all 8");
+  const orbit = Ai.symmetryOrbit(tengen, { r: 7, c: 6 }).map((m) => m.r + "," + m.c).sort();
+  assert(orbit.join(" ") === "6,7 7,6 7,8 8,7",
+    "orbit of a 天元 neighbour is the four orthogonals — got " + orbit.join(" "));
+  assert(Ai.symmetryOrbit(tengen, { r: 7, c: 6 })[0].r === 7 &&
+    Ai.symmetryOrbit(tengen, { r: 7, c: 6 })[0].c === 6,
+    "the engine's own choice stays first in the orbit");
+
+  // asymmetric position ⇒ nothing to vary, so play is untouched
+  const skew = Core.emptyBoard();
+  skew[7][7] = "b"; skew[5][9] = "w"; skew[3][4] = "b";
+  assert(Ai.stabilizer(skew).length === 1, "an asymmetric position has only the identity");
+  assert(Ai.symmetryOrbit(skew, { r: 8, c: 8 }).length === 1, "…so its orbit is a single move");
+
+  // colours matter: a position that is only symmetric if you ignore colour
+  // must NOT be treated as symmetric — the mirrored reply would be a
+  // different move for a different player.
+  const twoTone = Core.emptyBoard();
+  twoTone[7][6] = "b"; twoTone[7][8] = "w";
+  assert(!Ai.stabilizer(twoTone).some((f) => {
+    const p = f(7, 6);
+    return p.r === 7 && p.c === 8;
+  }), "a symmetry that swaps colours is not a symmetry");
+
+  // occupied points can never be offered as an alternative
+  const filled = Core.emptyBoard();
+  filled[7][7] = "b"; filled[6][7] = "w"; filled[8][7] = "w";
+  for (const m of Ai.symmetryOrbit(filled, { r: 7, c: 6 })) {
+    assert(!filled[m.r][m.c], "orbit never lands on an occupied point");
+  }
+
+  // vary:false is the old behaviour, exactly
+  const fixed = Ai.varyBySymmetry(tengen, { r: 7, c: 6 }, { vary: false });
+  assert(fixed.r === 7 && fixed.c === 6, "vary:false returns the engine's own move");
+  // and an rng pinned to 0 also lands on it, which is what keeps the
+  // deterministic suites reproducible
+  const first = Ai.varyBySymmetry(tengen, { r: 7, c: 6 }, { rng: () => 0 });
+  assert(first.r === 7 && first.c === 6, "rng()=0 selects the engine's own move");
+
+  // the whole point: a repeated opening must not replay one game
+  {
+    const seen = new Set();
+    for (let i = 0; i < 12; i++) {
+      const b = Core.emptyBoard();
+      b[7][7] = "b";
+      const m = Ai.aiMove({ board: b, side: "w", difficulty: "normal", nodeBudget: 4000 });
+      seen.add(m.r + "," + m.c);
+    }
+    assert(seen.size > 1, "a repeated opening no longer gives one fixed reply (" + seen.size + " seen)");
+  }
+}
+
 // --- ui.js: helpers that were unreachable while they lived inside app.js ---
 {
   // ui.js reads GobanCore.SIZE at load and otherwise only touches the DOM in
