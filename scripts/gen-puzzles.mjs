@@ -148,7 +148,9 @@ function playAndHarvest(opening, levels) {
     if (Object.keys(TARGET).every((t) => found[t].length >= TARGET[t])) return true;
 
     const diff = turn === "b" ? levels.b : levels.w;
-    const m = Ai.aiMove({ board, side: turn, difficulty: diff, nodeBudget: 12000 });
+    // vary:false — the bank must be byte-reproducible from the same arguments;
+    // symmetry variety would reshuffle every harvested position.
+    const m = Ai.aiMove({ board, side: turn, difficulty: diff, nodeBudget: 12000, vary: false });
     if (!m || board[m.r][m.c]) return false;
     board[m.r][m.c] = turn;
     if (Core.findWin(board, m.r, m.c, turn)) return false; // game over — next game

@@ -1013,7 +1013,83 @@
     };
   }
 
+  /**
+   * The eight symmetries of a square board, as (r,c) → (r,c) on 15×15.
+   * Index 0 is the identity and is always first, which is what keeps
+   * `vary: false` byte-identical to the pre-v1.31 engine.
+   */
+  const SYMS = [
+    (r, c) => ({ r: r, c: c }),                       // identity
+    (r, c) => ({ r: c, c: SZ - 1 - r }),              // rotate 90
+    (r, c) => ({ r: SZ - 1 - r, c: SZ - 1 - c }),     // rotate 180
+    (r, c) => ({ r: SZ - 1 - c, c: r }),              // rotate 270
+    (r, c) => ({ r: r, c: SZ - 1 - c }),              // mirror |
+    (r, c) => ({ r: SZ - 1 - r, c: c }),              // mirror —
+    (r, c) => ({ r: c, c: r }),                       // mirror ╲
+    (r, c) => ({ r: SZ - 1 - c, c: SZ - 1 - r }),     // mirror ╱
+  ];
+
+  /** Symmetries that map the position onto itself, colours included. */
+  function stabilizer(board) {
+    const out = [];
+    for (let s = 0; s < SYMS.length; s++) {
+      const f = SYMS[s];
+      let same = true;
+      for (let r = 0; r < SZ && same; r++) {
+        for (let c = 0; c < SZ; c++) {
+          const p = f(r, c);
+          if (board[r][c] !== board[p.r][p.c]) { same = false; break; }
+        }
+      }
+      if (same) out.push(f);
+    }
+    return out;
+  }
+
+  /**
+   * Equally-good alternatives to `mv`, obtained by mapping it through every
+   * symmetry the position already has. Not a heuristic: if the board is
+   * unchanged by a reflection, the reflected reply is the SAME move in a
+   * mirrored frame, so strength cannot differ — unlike picking a
+   * near-equal-scoring move, which trades real strength for variety.
+   *
+   * Why this exists: through v1.30 the engine was fully deterministic above
+   * 简单, so repeating an opening replayed the identical game — measured 1
+   * distinct game in 8 at 困难, 2 in 8 at 普通. The four orthogonal
+   * neighbours of 天元 are one orbit, and each leads somewhere different
+   * once the human keeps playing absolute coordinates.
+   *
+   * `mv` itself is always first, so a caller that wants the old behaviour
+   * (deterministic suites, the puzzle generator, the arena baseline) can
+   * take [0] — or pass vary:false and never get here at all.
+   */
+  function symmetryOrbit(board, mv) {
+    if (!mv) return [];
+    const seen = new Set([mv.r * SZ + mv.c]);
+    const out = [{ r: mv.r, c: mv.c }];
+    for (const f of stabilizer(board)) {
+      const p = f(mv.r, mv.c);
+      const k = p.r * SZ + p.c;
+      if (!seen.has(k) && !board[p.r][p.c]) { seen.add(k); out.push(p); }
+    }
+    return out;
+  }
+
+  /** Pick uniformly from the orbit; `vary:false` or a 1-element orbit is a no-op. */
+  function varyBySymmetry(board, mv, opts) {
+    if (!mv || (opts && opts.vary === false)) return mv;
+    const orbit = symmetryOrbit(board, mv);
+    if (orbit.length < 2) return mv;
+    const rnd = opts && typeof opts.rng === "function" ? opts.rng : Math.random;
+    return orbit[Math.min(orbit.length - 1, (rnd() * orbit.length) | 0)];
+  }
+
   function aiMove(opts) {
+    const mv = aiMoveCore(opts);
+    return varyBySymmetry(opts.board, mv, opts);
+  }
+
+  function aiMoveCore(opts) {
     const board = cloneBoard(opts.board);
     const difficulty = opts.difficulty || "normal";
     const me =
@@ -1187,6 +1263,10 @@
 
   global.GobanAi = {
     aiMove: aiMove,
+    aiMoveCore: aiMoveCore,
+    symmetryOrbit: symmetryOrbit,
+    stabilizer: stabilizer,
+    varyBySymmetry: varyBySymmetry,
     hintMove: hintMove,
     candidateMoves: candidateMoves,
     evaluateBoard: evalStatic,

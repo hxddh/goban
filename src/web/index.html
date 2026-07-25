@@ -237,6 +237,11 @@
           <span class="muted" id="slots-empty" hidden data-i18n="slots.empty">还没有存档</span>
         </div>
         <div class="slots-list" id="slots-list"></div>
+        <div class="backup-row">
+          <span class="muted" data-i18n="backup.label">全部数据</span>
+          <button type="button" class="text-link" id="backup-export" title="把存档、统计、每日打卡与练习进度导出为一个文件" data-i18n="backup.export" data-i18n-title="backup.export.title">备份</button>
+          <button type="button" class="text-link" id="backup-import" title="用备份文件覆盖当前全部数据" data-i18n="backup.import" data-i18n-title="backup.import.title">恢复</button>
+        </div>
         <div class="close-row">
           <button type="button" class="tool-btn" id="slots-close" data-i18n="dlg.close">关闭</button>
         </div>
@@ -311,6 +316,7 @@
   <script src="js/engine.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/slots.js"></script>
+  <script src="js/backup.js"></script>
   <script src="js/review.js"></script>
   <script src="js/stats.js"></script>
   <script src="js/practice.js"></script>

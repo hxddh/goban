@@ -453,7 +453,14 @@
 
   let lastStage = "";
 
+  /** Same symmetry-orbit variety as C1 — see GobanAi.symmetryOrbit. Applied
+   *  once, at the outer edge, so every return path inside is covered and the
+   *  delegation to C1 below cannot double-randomise (it runs with vary:false). */
   function aiMove(opts) {
+    return C1.varyBySymmetry(opts.board, aiMoveCore(opts), opts);
+  }
+
+  function aiMoveCore(opts) {
     const board2d = C1.cloneBoard(opts.board);
     const difficulty = opts.difficulty || "hard";
     const me2 = opts.side === "b" || opts.side === "w" ? opts.side : Core.opp(opts.humanColor || "b");
@@ -509,6 +516,7 @@
         difficulty: "hard",
         timeMs: prof.budgetMs > 0 ? Math.min(300, prof.budgetMs) : undefined,
         nodeBudget: detEvals > 0 ? Math.max(2000, detEvals >> 3) : undefined,
+        vary: false, // the outer aiMove varies once; twice would be no worse but is confusing
       });
     }
 

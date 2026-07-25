@@ -42,6 +42,10 @@ function play(cfgB, cfgW, maxMoves) {
       difficulty: cfg.difficulty,
       timeMs: cfg.timeMs,
       nodeBudget: cfg.nodeBudget,
+      // v1.31 varies among symmetry-equivalent replies; equally strong by
+      // construction, but a strength assertion has to compare the same game
+      // twice, so this suite plays the engine with variety switched off.
+      vary: false,
     });
     if (!m || b[m.r][m.c]) return { winner: "ERR", moves };
     b[m.r][m.c] = turn;
@@ -101,7 +105,7 @@ const C2HARD = { eng: Ai2, difficulty: "hard", nodeBudget: 80000 };
     let moves = opening.length;
     while (moves < 160) {
       const cfg = turn === "b" ? cfgB : cfgW;
-      const m = cfg.eng.aiMove({ board: b, side: turn, difficulty: cfg.difficulty, nodeBudget: cfg.nodeBudget });
+      const m = cfg.eng.aiMove({ board: b, side: turn, difficulty: cfg.difficulty, nodeBudget: cfg.nodeBudget, vary: false });
       if (!m || b[m.r][m.c]) return "ERR";
       b[m.r][m.c] = turn;
       moves++;
