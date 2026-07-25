@@ -1595,7 +1595,6 @@
     toast(t("save.cleared"));
   };
   document.getElementById("toggle-panel").onclick = togglePanel;
-  document.getElementById("collapse").onclick = () => setPanelOpen(false);
   document.getElementById("scrim").onclick = () => setPanelOpen(false);
 
   const mlEl = document.getElementById("move-list");
@@ -1926,17 +1925,11 @@
       return;
     }
     if (ev.key === "?" || (ev.shiftKey && k === "/")) { openHelp(); return; }
-    if (ev.key === "Tab") {
-      // Tab = panel toggle only when not chorded (Shift+Tab etc. still toggle — intentional).
-      // Ignore when focus is already in a text field (future-proof).
-      const tag = (document.activeElement && document.activeElement.tagName) || "";
-      if (tag === "INPUT" || tag === "TEXTAREA" || (document.activeElement && document.activeElement.isContentEditable)) {
-        return;
-      }
-      ev.preventDefault();
-      togglePanel();
-      return;
-    }
+    // Tab is deliberately NOT bound here any more. Through v1.31 it toggled the
+    // sidebar, which meant focus never moved: 40 visible buttons, every one of
+    // them focusable, and no key that could reach any of them — while the
+    // dialogs had a full focus trap since v1.25.2. The sidebar already has
+    // three other affordances (☰, [ and ], Esc), so Tab goes back to being Tab.
     if (ev.key === "ArrowLeft") { ev.preventDefault(); setViewIndex(viewIndex - 1); return; }
     if (ev.key === "ArrowRight") { ev.preventDefault(); setViewIndex(viewIndex + 1); return; }
     if (ev.key === "Home") { ev.preventDefault(); setViewIndex(0); return; }

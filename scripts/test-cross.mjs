@@ -480,6 +480,101 @@ async function enableSwap2Pvp(page) {
   await page.close();
 }
 
+// I 对比度：--accent 是按「面」调的（描边、色块、落子标记），但同一个变量
+// 在五处又当文字用。day 的 #b8894a 当文字只有 2.75:1，v1.32 才分出
+// --accent-text。四个主题一起量，避免下次只改一个主题的调色板时又漏掉。
+{
+  const page = await newPage();
+  await page.waitForTimeout(300);
+  const rows = [];
+  for (const theme of ["wood", "night", "day", "notebook"]) {
+    await page.evaluate((t) => document.querySelector(`#theme-seg button[data-theme="${t}"]`)?.click(), theme);
+    await page.waitForTimeout(150);
+    rows.push(await page.evaluate((t) => {
+      // getComputedStyle returns rendered colours; composite any alpha onto the
+      // opaque ancestor, or a 14% tint reads as fully opaque and passes wrongly.
+      const parse = (s) => {
+        const n = (s.match(/[\d.]+/g) || []).map(Number);
+        if (/^color\(srgb/.test(s)) return [n[0] * 255, n[1] * 255, n[2] * 255, n.length > 3 ? n[3] : 1];
+        return [n[0], n[1], n[2], n.length > 3 ? n[3] : 1];
+      };
+      const lum = ([r, g, b]) => {
+        const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+      };
+      // 导入 is always enabled — 复制/导出 are disabled at 0 手 (opacity .35),
+      // and disabled controls are exempt from the contrast rule anyway.
+      const el = document.getElementById("sgf-import");
+      let bg = [255, 255, 255, 1], n = el;
+      while (n) {
+        const c = parse(getComputedStyle(n).backgroundColor);
+        if (c[3] > 0) { bg = c[3] >= 1 ? c : c.map((v, i) => i < 3 ? v * c[3] + 255 * (1 - c[3]) : 1); break; }
+        n = n.parentElement;
+      }
+      const fg = parse(getComputedStyle(el).color);
+      const a = lum(fg), b = lum(bg);
+      return { theme: t, ratio: +(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toFixed(2)) };
+    }, theme));
+  }
+  const bad = rows.filter((r) => r.ratio < 4.5);
+  report("I 四个主题下 --accent-text 当正文都过 AA 4.5:1",
+    bad.length === 0 && page.__errors.length === 0,
+    JSON.stringify({ rows, errs: page.__errors }));
+  await page.close();
+}
+
+// J 键盘可达：v1.31 之前 Tab 被绑去开合侧栏,于是 40 个按钮一个都走不到,
+// 而弹层从 v1.25.2 起就有焦点陷阱。两头都要守：主界面 Tab 走得进侧栏,
+// 弹层里 Tab 走不出去。
+{
+  const page = await newPage();
+  await page.keyboard.press("]");
+  await page.waitForTimeout(350);
+  const seen = new Set();
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press("Tab");
+    const id = await page.evaluate(() => {
+      const e = document.activeElement;
+      return e && e !== document.body && e.closest("#side") ? (e.id || e.textContent.trim().slice(0, 8)) : null;
+    });
+    if (id) seen.add(id);
+  }
+  await page.evaluate(() => document.getElementById("help-btn").click());
+  await page.waitForTimeout(300);
+  let escaped = 0;
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Tab");
+    if (!(await page.evaluate(() => !!(document.activeElement && document.activeElement.closest(".modal-bg"))))) escaped++;
+  }
+  report("J Tab 走得进侧栏（≥20 项）且走不出弹层",
+    seen.size >= 20 && escaped === 0 && page.__errors.length === 0,
+    JSON.stringify({ reachable: seen.size, escaped, errs: page.__errors }));
+  await page.close();
+}
+
+// K 折叠线：练习/每日/复盘/统计/存档都在侧栏里,滚动一下才看见等于没有。
+// 900px 高是 1440×900 和 960×900 两种常见桌面窗口的下限。
+{
+  const page = await newPage();
+  await page.setViewportSize({ width: 960, height: 900 });
+  await page.keyboard.press("]");
+  await page.waitForTimeout(350);
+  const r = await page.evaluate(() => {
+    const side = document.getElementById("side");
+    const sr = side.getBoundingClientRect();
+    const below = ["open-practice", "open-daily", "sgf-review", "open-stats", "sgf-slots"]
+      .filter((id) => {
+        const e = document.getElementById(id);
+        return !e || e.getBoundingClientRect().bottom > sr.bottom + 0.5;
+      });
+    return { below, overflow: side.scrollHeight - side.clientHeight };
+  });
+  report("K 960×900 下五个功能入口无需滚动即可见",
+    r.below.length === 0 && r.overflow <= 0 && page.__errors.length === 0,
+    JSON.stringify({ ...r, errs: page.__errors }));
+  await page.close();
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");
