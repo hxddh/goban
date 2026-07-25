@@ -20,6 +20,9 @@ test -f frontend/dist/js/core.js
 test -f frontend/dist/js/host.js
 test -f frontend/dist/js/state.js
 test -f frontend/dist/js/draw.js
+test -f frontend/dist/js/ui.js
+test -f frontend/dist/js/sgfio.js
+test -f frontend/dist/js/engine.js
 test -f frontend/dist/js/audio.js
 test -f frontend/dist/js/slots.js
 test -f frontend/dist/js/review.js
