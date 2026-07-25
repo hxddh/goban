@@ -20,6 +20,20 @@ jobs:
       - name: unit tests (core / sgf / state / stats / 每日 / 题库)
         run: node scripts/test-game.mjs
 
+  # Same suite on Windows. Not redundant: the runner checks out CRLF, and a
+  # line-ending assumption in the i18n source scan passed here while failing
+  # only in the release build — v1.29.0's windows installer was blocked by it,
+  # after ubuntu CI had gone green. 13s to never repeat that.
+  unit-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: unit tests (CRLF checkout)
+        run: node scripts/test-game.mjs
+
   browser:
     runs-on: ubuntu-latest
     steps:

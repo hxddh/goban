@@ -24,6 +24,7 @@ test -f frontend/dist/js/ui.js
 test -f frontend/dist/js/sgfio.js
 test -f frontend/dist/js/engine.js
 test -f frontend/dist/js/i18n.js
+test -f frontend/dist/js/version.js
 test -f frontend/dist/js/audio.js
 test -f frontend/dist/js/slots.js
 test -f frontend/dist/js/review.js

@@ -3,8 +3,10 @@
  * Run: node scripts/test-game.mjs
  */
 import fs from "fs";
+import os from "os";
 import path from "path";
 import vm from "vm";
+import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -21,6 +23,7 @@ function load(rel) {
   vm.runInContext(code, ctx, { filename: rel });
 }
 
+load("src/web/js/version.js");
 load("src/web/js/i18n.js");
 load("src/web/js/core.js");
 load("src/web/js/sgf.js");
@@ -213,14 +216,20 @@ load("src/web/js/draw.js");
     humanColor: "b",
     originalStartedAt: Date.UTC(2026, 0, 1),
   });
-  // The stamp is a hand-kept literal in sgf.js, so it silently drifted: v1.26.0
-  // exported 棋谱 claiming 1.25.3. Tie it to app.zon instead of a fixed string.
+  // The stamp used to be a hand-kept literal inside sgf.js and silently
+  // drifted: v1.26.0 exported 棋谱 claiming 1.25.3. It now reads version.js,
+  // which v1.30 also shows in the help dialog — so one bump feeds the
+  // installer, the 棋谱 stamp and the UI, and this ties all three to app.zon.
   const appZon = fs.readFileSync(path.join(root, "app.zon"), "utf8");
   const appVersion = (appZon.match(/\.version\s*=\s*"([^"]+)"/) || [])[1];
   assert(!!appVersion, "app.zon version readable");
+  assert(ctx.GOBAN_VERSION === appVersion,
+    "version.js matches app.zon (" + appVersion + "), got " + ctx.GOBAN_VERSION);
   assert(text.includes("AP[Goban:" + appVersion + "]"),
     "SGF AP version matches app.zon (" + appVersion + "), got " +
       (text.match(/AP\[[^\]]*\]/) || ["none"])[0]);
+  assert(!/AP\[Goban:\d/.test(fs.readFileSync(path.join(root, "src/web/js/sgf.js"), "utf8")),
+    "sgf.js no longer hard-codes a version");
 }
 
 // sgf comment annotations (复盘 3.0): per-move C[] + root comment, ] escaped,
@@ -825,6 +834,47 @@ const Practice = ctx.GobanPractice;
   };
   const bands = ordered.map(bandOf);
   assert(bands.join("") === bands.slice().sort().join(""), "orderPool bands: 未做 → 错题 → 已掌握");
+
+  // progress store had no ceiling while 统计 caps at 200 and 存档 at 30
+  {
+    const cap = Pr.capProgress;
+    const mk = (n, kind) => {
+      const items = {};
+      for (let i = 0; i < n; i++) {
+        items[kind + i] =
+          kind === "wrong" ? { n: 1, wrong: 1, ok: false, last: "2026-01-01" }
+          : kind === "fixed" ? { n: 2, wrong: 1, ok: true, last: "2026-01-02" }
+          : { n: 1, wrong: 0, ok: true, last: "2026-01-03" };
+      }
+      return items;
+    };
+    const under = { items: mk(5, "clean") };
+    assert(cap(under, 10) === under, "under the cap the state is untouched");
+
+    const mixed = { items: Object.assign(mk(30, "clean"), mk(6, "wrong"), mk(4, "fixed")) };
+    const trimmed = cap(mixed, 10);
+    const keys = Object.keys(trimmed.items);
+    assert(keys.length === 10, "capped to the limit (" + keys.length + ")");
+    assert(keys.filter((k) => k.startsWith("wrong")).length === 6,
+      "错题本 survives the trim (" + keys.filter((k) => k.startsWith("wrong")).length + "/6)");
+    assert(keys.filter((k) => k.startsWith("fixed")).length === 4,
+      "once-missed-now-fixed outrank clean passes");
+    assert(keys.filter((k) => k.startsWith("clean")).length === 0,
+      "clean passes are what gets dropped");
+  }
+
+  // the builtin half of the candidate list is built once and reused now, so a
+  // caller writing to a board must not be able to poison every later open
+  {
+    const first = Pz.buildCandidates();
+    const before = first[0].board.map((r) => r.join("")).join("");
+    first[0].board[0][0] = "b";
+    first[0].board[0][1] = "w";
+    const second = Pz.buildCandidates();
+    assert(second.length === first.length, "cached bank returns a stable count");
+    assert(second[0].board.map((r) => r.join("")).join("") === before,
+      "writing to a returned board cannot corrupt the cached bank");
+  }
 }
 
 // --- ui.js: helpers that were unreachable while they lived inside app.js ---
@@ -906,6 +956,61 @@ const Practice = ctx.GobanPractice;
   }
   assert(untagged.length === 0,
     "every Chinese string in index.html is tagged (" + untagged.slice(0, 4).join(" | ") + ")");
+}
+
+// --- the worker bundle the PACKAGED app actually runs ---------------------
+// index.html loads js/worker-src.js, generated at build time. That file does
+// not exist in src/web, so the browser suites 404 it and silently take
+// engine.js's fetch fallback — i.e. every test to date has exercised a path
+// the shipped app never uses (fetch() is rejected by the zero:// handler).
+// This builds the real bundle and boots it the way a Worker would.
+{
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "goban-wsrc-"));
+  execFileSync(process.execPath, [path.join(root, "scripts/gen-worker-src.mjs"), outDir]);
+  const bundle = fs.readFileSync(path.join(outDir, "worker-src.js"), "utf8");
+
+  const holder = { window: {} };
+  holder.globalThis = holder;
+  vm.createContext(holder);
+  vm.runInContext(bundle, holder, { filename: "worker-src.js" });
+  const src = holder.window.GOBAN_WORKER_SRC;
+  assert(typeof src === "string" && src.length > 1000, "worker bundle generated (" + (src || "").length + " bytes)");
+
+  // In a Worker `self` IS the global, which is how the engine IIFEs find their
+  // home — a context where the two differ would pass while the real one fails.
+  const w = { console, Date, performance, postMessage() {} };
+  w.self = w;
+  w.globalThis = w;
+  vm.createContext(w);
+  vm.runInContext(src, w, { filename: "GOBAN_WORKER_SRC" });
+
+  // Exactly what ai-worker.js's ping reports as `engines`: engine.js treats a
+  // false there as a dead worker and degrades to the capped main-thread path.
+  assert(!!(w.GobanAi && w.GobanAi2), "bundle boots both engines (what the ping checks)");
+  assert(typeof w.GobanAi.aiMove === "function" && typeof w.GobanAi2.aiMove === "function",
+    "both engines expose aiMove");
+  assert(typeof w.onmessage === "function", "bundle installs the worker message handler");
+
+  // The generator reads its file list out of engine.js rather than keeping a
+  // copy; if that read ever silently returns the wrong thing, the assertions
+  // above still catch it — this one just names the cause.
+  const engineJs = fs.readFileSync(path.join(root, "src/web/js/engine.js"), "utf8");
+  const declared = (engineJs.match(/const WORKER_SRC = \[([^\]]*)\]/) || [])[1] || "";
+  const wanted = (declared.match(/"([^"]+)"/g) || []).map((s) => s.slice(1, -1).replace(/^js\//, ""));
+  assert(wanted.length >= 3 && wanted.every((f) => bundle.includes(f.replace(".js", "")) || src.length > 0),
+    "engine.js WORKER_SRC readable (" + wanted.join(",") + ")");
+
+  // A module nobody loads fails silently — version.js would simply leave
+  // GOBAN_VERSION undefined, and the 棋谱 stamp would read 0.0.0.
+  const html = fs.readFileSync(path.join(root, "src/web/index.html"), "utf8");
+  const tagged = new Set([...html.matchAll(/<script src="js\/([^"]+)"/g)].map((m) => m[1]));
+  const workerOnly = new Set(wanted);
+  const orphans = fs
+    .readdirSync(path.join(root, "src/web/js"))
+    .filter((f) => f.endsWith(".js") && !tagged.has(f) && !workerOnly.has(f));
+  assert(orphans.length === 0, "every js module is loaded by index.html or the worker (" + orphans.join(",") + ")");
+
+  fs.rmSync(outDir, { recursive: true, force: true });
 }
 
 if (failed) {

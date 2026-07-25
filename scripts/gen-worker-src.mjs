@@ -19,7 +19,21 @@ const root = path.join(__dirname, "..");
 const srcDir = path.join(root, "src/web/js");
 const outDir = path.resolve(root, process.argv[2] || "frontend/dist/js");
 
-const FILES = ["core.js", "ai.js", "ai2.js", "ai-worker.js"];
+// The file list lives in engine.js and is READ from there, never copied.
+// Keeping a second copy here was a live drift hazard: the packaged app can
+// only use this bundle (fetch() fails under zero://), while every browser
+// test takes engine.js's fetch fallback — so a list that went stale here
+// would ship a worker missing an engine, and nothing would go red. The app
+// does notice at runtime (ai-worker.js's ping reports `engines`), but the
+// only symptom is a silent drop to the 600ms main-thread path.
+const WORKER_SRC_RE = /const WORKER_SRC = \[([^\]]*)\]/;
+const engineJs = fs.readFileSync(path.join(srcDir, "engine.js"), "utf8");
+const m = engineJs.match(WORKER_SRC_RE);
+if (!m) {
+  console.error("gen-worker-src: could not read WORKER_SRC from engine.js — refusing to guess");
+  process.exit(1);
+}
+const FILES = m[1].match(/"([^"]+)"/g).map((s) => s.slice(1, -1).replace(/^js\//, ""));
 const joined = FILES.map((f) =>
   fs.readFileSync(path.join(srcDir, f), "utf8")
 ).join("\n;\n");

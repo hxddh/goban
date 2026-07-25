@@ -11,8 +11,10 @@
  * (CI unit-test jobs) are not broken by it.
  */
 import fs from "fs";
+import os from "os";
 import path from "path";
 import http from "http";
+import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,10 +40,24 @@ try {
   process.exit(0);
 }
 
+// js/worker-src.js is generated at build time and is therefore absent from
+// src/web. Serving a 404 for it (as this suite used to) makes engine.js fall
+// back to fetch() — a path the packaged app can never take, since the zero://
+// scheme handler returns responses spec-strict fetch() rejects. Generate it
+// here so the whole suite runs against what actually ships.
+const WORKER_SRC_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "goban-wsrc-"));
+execFileSync(process.execPath, [path.join(__dirname, "gen-worker-src.mjs"), WORKER_SRC_DIR]);
+const WORKER_SRC_FILE = path.join(WORKER_SRC_DIR, "worker-src.js");
+
 const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" };
 const server = http.createServer((req, res) => {
   const urlPath = decodeURIComponent((req.url || "/").split("?")[0]);
   const rel = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
+  if (rel === "js/worker-src.js") {
+    res.writeHead(200, { "content-type": "text/javascript" });
+    res.end(fs.readFileSync(WORKER_SRC_FILE));
+    return;
+  }
   const file = path.join(webRoot, rel);
   if (!file.startsWith(webRoot) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.writeHead(404); res.end("not found"); return;
@@ -428,6 +444,39 @@ async function enableSwap2Pvp(page) {
       page.__errors.length === 0,
     JSON.stringify({ zh: zh.undo, en: en.undo, runtimeEn, leftovers: leftovers.slice(0, 3),
       afterReload: afterReload.undo, backZh, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- Test H: the engine worker boots from the SHIPPED bundle -------------
+// Not "a worker starts" — which the fetch fallback also satisfies — but that
+// the embedded bundle is the thing that started it, with the fetch path cut
+// off the way zero:// cuts it off in the packaged app.
+{
+  const page = await newPage();
+  await page.route("**/js/{core,ai,ai2,ai-worker}.js", (route) =>
+    route.request().resourceType() === "fetch" ? route.abort() : route.continue());
+  await page.goto(ORIGIN + "/index.html");
+  await page.waitForTimeout(1500);
+
+  const embedded = await page.evaluate(() => typeof window.GOBAN_WORKER_SRC === "string" && window.GOBAN_WORKER_SRC.length > 1000);
+  const state = await page.evaluate(() =>
+    window.GobanEngine && window.GobanEngine.state ? window.GobanEngine.state() : "?");
+
+  // and it can actually answer a move — a worker that boots but cannot think
+  // would still read "ready"
+  const g = await page.evaluate(() => {
+    const r = document.getElementById("board").getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, pad: r.width * 0.06 };
+  });
+  const step = (g.w - 2 * g.pad) / 14;
+  await page.mouse.click(g.x + g.pad + 7 * step, g.y + g.pad + 7 * step);
+  const answered = await page
+    .waitForFunction(() => document.getElementById("move-list").children.length >= 2, { timeout: 10000 })
+    .then(() => true).catch(() => false);
+
+  report("H 打包版 worker：内嵌 bundle 启动并应答（fetch 兜底已切断）",
+    embedded && state === "ready" && answered,
+    JSON.stringify({ embedded, state, answered }));
   await page.close();
 }
 

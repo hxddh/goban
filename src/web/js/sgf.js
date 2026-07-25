@@ -51,7 +51,7 @@
     let s =
       "(;FF[4]GM[4]SZ[" +
       SIZE +
-      "]AP[Goban:1.29.0]DT[" +
+      "]AP[Goban:" + (global.GOBAN_VERSION || "0.0.0") + "]DT[" +
       dtStr +
       "]RE[" +
       re +

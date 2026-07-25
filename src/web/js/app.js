@@ -1716,7 +1716,10 @@
       const inp = ev.target.closest(".slot-name");
       if (!inp) return;
       const row = inp.closest(".slot-row");
-      if (row) Slots.rename(row.dataset.id, inp.value);
+      // Every other write path reports a failed persist; this one used to
+      // swallow it, so a rename that hit the storage quota looked applied
+      // until the next launch put the old name back.
+      if (row && !Slots.rename(row.dataset.id, inp.value)) toast(t("slot.saveFail"));
     };
     slotsListEl.addEventListener("change", commitRename);
     slotsListEl.addEventListener("keydown", (ev) => {
@@ -2012,6 +2015,10 @@
   loadSettings();
   I18n.load();
   I18n.apply();
+  // Version was invisible in-app through v1.29 — the only place it appeared
+  // was the AP[] stamp inside an exported 棋谱. Same single source (version.js).
+  const verEl = document.getElementById("app-version");
+  if (verEl) verEl.textContent = window.GOBAN_VERSION || "—";
   document.documentElement.setAttribute("lang", I18n.lang() === "en" ? "en" : "zh-CN");
   document.documentElement.setAttribute("data-theme", themeId);
   const savedPanel = Host.storageGet(PANEL_KEY);

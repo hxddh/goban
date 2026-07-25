@@ -32,7 +32,11 @@ const SIZE = Core.SIZE;
 
 // `node scripts/gen-puzzles.mjs vcf` regenerates one type only.
 const ONLY = process.argv.slice(2).filter((a) => /^(win1|defend|vcf)$/.test(a));
-const TARGET = { win1: 18, defend: 15, vcf: 12 };
+// v1.30 sizing: at 53 puzzles the daily challenge (5/day) showed the whole
+// bank in 46 days and then only repeated. ~130 pushes that past 100 days.
+// win1/defend saturate long before the sweep ends; vcf is the scarce type,
+// so it gets the headroom and the sweep runs to exhaustion for its sake.
+const TARGET = { win1: 50, defend: 45, vcf: 35 };
 for (const t of Object.keys(TARGET)) if (ONLY.length && !ONLY.includes(t)) TARGET[t] = 0;
 /** vcf puzzles must need a real forcing chain: v1.26 shipped 9 of 12 that were
  *  won by a single double-four, which is a different (much easier) exercise. */
@@ -108,12 +112,20 @@ function consider(board, side, type) {
   });
 }
 
-/** Deterministic openings: seed stones before the engines take over. */
+/**
+ * Deterministic openings: seed stones before the engines take over.
+ *
+ * Widened in v1.30 (5×5 grid, three seed shapes) because the old 4×4 grid ×
+ * two shapes ran out of vcf positions: a sweep with the target raised to 40
+ * still only yielded 13, having exhausted all 128 games. vcf needs a long
+ * forcing chain to exist at all, so the only lever is more distinct games.
+ */
 const OPENINGS = [];
-for (let r = 4; r <= 10; r += 2) {
-  for (let c = 4; c <= 10; c += 2) {
+for (let r = 3; r <= 11; r += 2) {
+  for (let c = 3; c <= 11; c += 2) {
     OPENINGS.push([[7, 7], [r, c]]);
     OPENINGS.push([[r, c], [r + 1, c + 1]]);
+    OPENINGS.push([[r, c], [r + 2, c + 1]]); // knight step — different shapes than the two diagonals
   }
 }
 
