@@ -3,6 +3,7 @@
  * @module sgf
  */
 (function (global) {
+  const t = (k, p) => (global.GobanI18n ? global.GobanI18n.t(k, p) : k);
   const Core = global.GobanCore;
   const SIZE = Core.SIZE;
 
@@ -50,7 +51,7 @@
     let s =
       "(;FF[4]GM[4]SZ[" +
       SIZE +
-      "]AP[Goban:1.28.0]DT[" +
+      "]AP[Goban:1.29.0]DT[" +
       dtStr +
       "]RE[" +
       re +
@@ -132,21 +133,21 @@
    * @returns {{ history: {r:number,c:number}[], error?: string }}
    */
   function parseSgf(text) {
-    if (text == null) return { history: [], error: "没有棋谱内容" };
-    if (typeof text !== "string") return { history: [], error: "棋谱格式无效" };
+    if (text == null) return { history: [], error: t("sgf.err.noContent") };
+    if (typeof text !== "string") return { history: [], error: t("sgf.err.invalid") };
     let src = text.replace(/\uFEFF/g, "").replace(/\s+/g, " ").trim();
-    if (!src) return { history: [], error: "棋谱为空" };
-    if (src.length > 200000) return { history: [], error: "棋谱过大（上限约 200KB）" };
+    if (!src) return { history: [], error: t("sgf.err.empty") };
+    if (src.length > 200000) return { history: [], error: t("sgf.err.tooBig") };
     // Drop comment-style text properties first — their free text can contain
     // move lookalikes such as "B[ii]" (escaped \] respected).
     src = src.replace(/(^|[^A-Za-z])(?:GC|C)\[(?:\\[\s\S]|[^\]\\])*\]/g, "$1 ");
     src = extractMainline(src);
     if (!/[;\s]*[BW]\s*\[/i.test(src) && !/\(/.test(src)) {
-      return { history: [], error: "不像 SGF 文件（未找到 B[]/W[] 落子）" };
+      return { history: [], error: t("sgf.err.notSgf") };
     }
     const sz = src.match(/SZ\[(\d+)\]/i);
     if (sz && Number(sz[1]) !== SIZE) {
-      return { history: [], error: "仅支持 " + SIZE + " 路（文件为 " + sz[1] + " 路）" };
+      return { history: [], error: t("sgf.err.size", { want: SIZE, got: sz[1] }) };
     }
     const history = [];
     const occupied = Core.emptyBoard();
@@ -161,19 +162,19 @@
       if (!coord) { skipped++; continue; }
       const p = parseSgfCoord(coord.toLowerCase());
       if (!p) {
-        return { history: [], error: "无法识别坐标「" + coord + "」" };
+        return { history: [], error: t("sgf.err.coord", { raw: coord }) };
       }
       if (occupied[p.r][p.c]) {
         return {
           history: [],
-          error: "第 " + (history.length + 1) + " 手与已有落点重叠（" + coord + "）",
+          error: t("sgf.err.overlap", { n: history.length + 1, coord: coord }),
         };
       }
       const want = history.length % 2 === 0 ? "b" : "w";
       if (color !== want) {
         return {
           history: [],
-          error: "第 " + (history.length + 1) + " 手颜色应为" + (want === "b" ? "黑" : "白"),
+          error: t("sgf.err.color", { n: history.length + 1, color: t(want === "b" ? "side.black" : "side.white") }),
         };
       }
       occupied[p.r][p.c] = color;
@@ -182,7 +183,7 @@
     if (!history.length) {
       return {
         history: [],
-        error: skipped ? "只有停着/空落子，没有有效手数" : "未找到有效落子",
+        error: t(skipped ? "sgf.err.onlyPass" : "sgf.err.noMoves"),
       };
     }
     return { history: history, skippedPasses: skipped };

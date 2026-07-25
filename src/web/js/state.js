@@ -3,6 +3,7 @@
  * UI still mutates fields; this documents the shape and shared transitions.
  */
 (function (global) {
+  const t = (k, p) => (global.GobanI18n ? global.GobanI18n.t(k, p) : k);
   const Core = global.GobanCore;
   const SIZE = Core.SIZE;
 
@@ -46,7 +47,7 @@
    */
   function sessionFromHistory(history, base) {
     if (!history || !history.length) {
-      return { ok: false, error: "没有可导入的落子" };
+      return { ok: false, error: t("state.err.noMoves") };
     }
     const session = base ? Object.assign({}, base) : createSession();
     session.history = history.slice();

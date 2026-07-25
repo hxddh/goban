@@ -7,6 +7,8 @@
   const GameState = window.GobanState;
   const Draw = window.GobanDraw;
   const Audio2 = window.GobanAudio; // "Audio" would shadow the DOM constructor
+  const I18n = window.GobanI18n;
+  const t = (k, p) => I18n.t(k, p);
   const Ui = window.GobanUi;
   const SgfIo = window.GobanSgfIo;
   const Engine = window.GobanEngine;
@@ -81,14 +83,14 @@
   async function importSgfFromText(text, label) {
     const parsed = SgfMod.parseSgf(text);
     if (parsed.error || !parsed.history || !parsed.history.length) {
-      toast(parsed.error || "导入失败：无法解析棋谱");
+      toast(parsed.error || t("import.parseFail"));
       return false;
     }
     if (history.length) {
       const ok = await confirmNative(
-        "导入棋谱将替换当前对局（仅复盘，不会自动让电脑续下）。是否继续？",
-        "导入 SGF",
-        { ok: "导入", cancel: "取消" }
+        t("import.confirm"),
+        t("import.title"),
+        { ok: t("import.ok"), cancel: t("dlg.cancel") }
       );
       if (!ok) return false;
     }
@@ -101,7 +103,7 @@
       gameGen: gameGen,
     });
     if (!applied.ok) {
-      toast(applied.error || "导入失败");
+      toast(applied.error || t("import.fail"));
       return false;
     }
     const s = applied.session;
@@ -133,21 +135,21 @@
     saveGame();
     const tag = label ? " · " + label : "";
     const end =
-      result === "b" ? "（黑胜）" : result === "w" ? "（白胜）" : result === "draw" ? "（满盘）" : "（可复盘）";
-    const hint = importPaused ? " · 点「续下」可继续" : " · 仅复盘";
-    toast("已导入 " + history.length + " 手" + end + tag + hint);
+      t(result === "b" ? "import.end.b" : result === "w" ? "import.end.w" : result === "draw" ? "import.end.draw" : "import.end.open");
+    const hint = t(importPaused ? "import.hint.continue" : "import.hint.reviewOnly");
+    toast(t("import.done", { n: history.length, end: end, tag: tag, hint: hint }));
     return true;
   }
 
   /** After import: resume live play (and AI if needed). */
   function continueFromImport() {
     if (!importPaused || result !== "play" || !history.length) {
-      toast(result !== "play" ? "这局已结束，仅可复盘" : "当前无需续下");
+      toast(t(result !== "play" ? "continue.finished" : "continue.none"));
       return;
     }
     importPaused = false;
     goLive();
-    toast(mode === "ai" && !isHumanTurn() ? "续下：电脑行棋" : "续下：可落子");
+    toast(t(mode === "ai" && !isHumanTurn() ? "continue.aiTurn" : "continue.yourTurn"));
     maybeAiTurn();
   }
 
@@ -156,53 +158,53 @@
     try {
       text = await Host.readClipboard();
     } catch (_) {
-      toast("无法读取剪贴板");
+      toast(t("clip.fail"));
       return;
     }
     if (!text || !String(text).trim()) {
-      toast("剪贴板为空");
+      toast(t("clip.empty"));
       return;
     }
-    await importSgfFromText(String(text), "剪贴板");
+    await importSgfFromText(String(text), t("clip.label"));
   }
 
   async function importSgfFromPath(path) {
     if (!path) {
-      toast("无效的文件路径");
+      toast(t("file.badPath"));
       return;
     }
     try {
       const text = await readTextFile(path);
       if (!text || !String(text).trim()) {
-        toast("文件为空");
+        toast(t("file.empty"));
         return;
       }
       const base = String(path).split(/[/\\]/).pop() || "sgf";
       await importSgfFromText(text, base);
     } catch (e) {
       const msg = (e && e.message) || "";
-      toast(msg && msg.length < 48 ? "读取失败：" + msg : "读取文件失败（权限或路径无效）");
+      toast(msg && msg.length < 48 ? t("file.readFail", { msg: msg }) : t("file.readFailGeneric"));
     }
   }
 
   async function pickAndImportSgf() {
     if (!Host.hasZero()) {
-      toast("当前环境不支持打开文件");
+      toast(t("file.unsupported"));
       return;
     }
     try {
       const files = await Host.openFileDialog({
-        title: "导入 SGF",
+        title: t("import.title"),
         allowMultiple: false,
       });
       const paths = Host.normalizePaths(files);
       if (!paths.length) {
-        toast("已取消导入");
+        toast(t("file.cancelled"));
         return;
       }
       await importSgfFromPath(paths[0]);
     } catch (e) {
-      toast("打开文件失败");
+      toast(t("file.openFail"));
     }
   }
 
@@ -305,14 +307,14 @@
   function coachFacts(preBoard, sColor, played) {
     const oppC = opp(sColor);
     const playedWins = Core.wouldWin(preBoard, played.r, played.c, sColor);
-    if (playedWins) return { grade: "best", text: "制胜一手" };
+    if (playedWins) return { grade: "best", text: t("coach.winning") };
     // missed win: a five was available but not taken
     const myWins = Ai.listWinCells(preBoard, sColor);
-    if (myWins.length) return { grade: "blunder", text: "错失胜着", best: myWins[0] };
+    if (myWins.length) return { grade: "blunder", text: t("coach.missedWin"), best: myWins[0] };
     // allowed opponent win-in-1 the move failed to prevent
     const after = preBoard.map((row) => row.slice());
     after[played.r][played.c] = sColor;
-    if (Ai.listWinCells(after, oppC).length) return { grade: "blunder", text: "漏防·被反杀" };
+    if (Ai.listWinCells(after, oppC).length) return { grade: "blunder", text: t("coach.missedBlock") };
     return null;
   }
 
@@ -336,7 +338,7 @@
     const preBoard = boardAfter(i - 1);
     const hard = coachFacts(preBoard, sColor, played);
     // show the instant verdict right away; the better-move marker fills in async
-    analysisVerdict = hard || { grade: "pending", text: "分析中…" };
+    analysisVerdict = hard || { grade: "pending", text: t("coach.pending") };
     analysisCell = hard && hard.best ? hard.best : null;
     const gen = ++analysisGen;
     const diff = difficulty === "easy" ? "normal" : difficulty === "extreme" ? "hard" : difficulty;
@@ -350,17 +352,17 @@
           if (!hard) {
             if (!best) {
               // Worker cancel/timeout → null; do not cache as "最佳一手".
-              analysisVerdict = { grade: "ok", text: "分析未完成" };
+              analysisVerdict = { grade: "ok", text: t("coach.incomplete") };
               analysisCell = null;
               sync();
               return;
             }
             if (best.r !== played.r || best.c !== played.c) {
               cell = best;
-              verdict = { grade: "ok", text: "有更优 · 虚线处" };
+              verdict = { grade: "ok", text: t("coach.better") };
             } else {
               cell = null;
-              verdict = { grade: "best", text: "最佳一手" };
+              verdict = { grade: "best", text: t("coach.best") };
             }
           } else if (!hard.best && best && (best.r !== played.r || best.c !== played.c)) {
             cell = best; // pair a blunder verdict with the recommended move
@@ -374,7 +376,7 @@
           if (gen !== analysisGen || viewIndex !== i) return;
           // Don't leave the UI wedged on「分析中…」when the engine path fails
           if (!hard) {
-            analysisVerdict = { grade: "ok", text: "分析未完成" };
+            analysisVerdict = { grade: "ok", text: t("coach.incomplete") };
             analysisCell = null;
             sync();
           }
@@ -393,8 +395,8 @@
    * @returns {Promise<boolean>}
    */
   function confirmNative(message, title, buttons) {
-    const okLabel = (buttons && buttons.ok) || "确定";
-    const cancelLabel = (buttons && buttons.cancel) || "取消";
+    const okLabel = (buttons && buttons.ok) || t("dlg.ok");
+    const cancelLabel = (buttons && buttons.cancel) || t("dlg.cancel");
     const modal = document.getElementById("confirm-modal");
     const titleEl = document.getElementById("confirm-title");
     const msgEl = document.getElementById("confirm-message");
@@ -411,7 +413,7 @@
       confirmResolver(false);
       confirmResolver = null;
     }
-    titleEl.textContent = title || "确认";
+    titleEl.textContent = title || t("dlg.confirm");
     msgEl.textContent = message;
     okBtn.textContent = okLabel;
     cancelBtn.textContent = cancelLabel;
@@ -439,15 +441,15 @@
   async function requestNewGame() {
     if (history.length) {
       const ok = await confirmNative(
-        "开始新局？当前进度会写入存档为新局。",
-        "新局",
-        { ok: "新局", cancel: "取消" }
+        t("newgame.confirm"),
+        t("newgame.ok"),
+        { ok: t("newgame.ok"), cancel: t("dlg.cancel") }
       );
       if (!ok) return;
     }
     // reset() bumps gameGen so any in-flight AI timeout cannot place.
     reset();
-    toast("新局已开始");
+    toast(t("newgame.started"));
   }
 
   function applyTheme(id) {
@@ -505,29 +507,29 @@
   }
 
   async function requestHint() {
-    if (swap2) { toast("开局选择阶段"); return; }
+    if (swap2) { toast(t("hint.swap2")); return; }
     if (aiThinking || hintBusy) {
-      toast("请稍候…");
+      toast(t("hint.wait"));
       return;
     }
     const live = isLive();
     if (live) {
       if (result !== "play") {
-        toast("对局已结束");
+        toast(t("hint.over"));
         return;
       }
       if (importPaused && mode === "ai" && !isHumanTurn()) {
-        toast("请先点「续下」");
+        toast(t("hint.needContinue"));
         return;
       }
       // Hint for the side to move (human's turn in AI mode, or either in pvp)
       if (mode === "ai" && !isHumanTurn()) {
-        toast("轮到电脑时无需提示");
+        toast(t("hint.aiTurn"));
         return;
       }
     } else if (winLineAt(viewIndex)) {
       // analysis mode works on any browsed position, except a finished one
-      toast("此局面已成五");
+      toast(t("hint.alreadyFive"));
       return;
     }
     hintBusy = true;
@@ -556,15 +558,15 @@
       if (!stillHere) {
         // discarded late result (new game / stone placed / view moved)
       } else if (!m) {
-        toast("没有可用提示");
+        toast(t("hint.none"));
         hintCell = null;
       } else {
         hintCell = { r: m.r, c: m.c };
-        toast("提示：" + (side === "b" ? "黑" : "白") + " · 虚线十字");
+        toast(t("hint.shown", { color: t(side === "b" ? "side.black" : "side.white") }));
       }
     } catch (_) {
       if (gen === gameGen) {
-        toast("提示失败");
+        toast(t("hint.fail"));
         hintCell = null;
       }
     } finally {
@@ -675,7 +677,7 @@
 
   /** Point users at real macOS window chrome — not web Fullscreen API. */
   function toggleFullscreen() {
-    toast("全屏：菜单 View → Enter Full Screen（⌘⌃F）· 放大：窗口绿键 Zoom");
+    toast(t("fs.tip"));
   }
 
   function serialize() {
@@ -710,7 +712,7 @@
     try {
       const ok = Host.storageSet(SAVE_KEY, JSON.stringify(serialize()));
       const hint = document.getElementById("save-hint");
-      if (hint) hint.textContent = ok ? "已存 " + formatTime(Date.now()) : "存档失败";
+      if (hint) hint.textContent = ok ? t("save.at", { time: formatTime(Date.now()) }) : t("save.failed");
     } catch (_) {}
   }
 
@@ -718,7 +720,7 @@
     Host.storageRemove(SAVE_KEY);
     Host.storageRemove("goban.v11.save");
     const hint = document.getElementById("save-hint");
-    if (hint) hint.textContent = "无存档";
+    if (hint) hint.textContent = t("save.none");
   }
 
   /**
@@ -813,20 +815,20 @@
 
   // --- named save slots: store/render in GobanSlots, game-flow glue here ---
   function saveCurrentAsSlot() {
-    if (!history.length) { toast("当前没有可保存的对局"); return; }
+    if (!history.length) { toast(t("slot.nothing")); return; }
     const ok = Slots.add(serialize());
     Slots.render();
-    toast(ok ? "已保存到存档" : "保存失败：本地存储空间不足，请删除旧存档");
+    toast(t(ok ? "slot.saved" : "slot.saveFail"));
   }
 
   async function loadSlotById(id) {
     const slot = Slots.get(id);
     if (!slot) return;
     if (history.length &&
-        !(await confirmNative("读取存档将替换当前对局，是否继续？", "读取存档", { ok: "读取", cancel: "取消" }))) {
+        !(await confirmNative(t("slot.loadConfirm"), t("slot.loadTitle"), { ok: t("slot.loadOk"), cancel: t("dlg.cancel") }))) {
       return;
     }
-    if (!applySnapshot(slot.snap)) { toast("存档已损坏，无法读取"); return; }
+    if (!applySnapshot(slot.snap)) { toast(t("slot.corrupt")); return; }
     gameGen += 1;
     if (result !== "play" && lastStatsEndedAt) statsRecordedGen = gameGen;
     clearAnalysis();
@@ -834,18 +836,18 @@
     sync();
     saveGame();
     maybeAiTurn();
-    toast("已读取存档");
+    toast(t("slot.loaded"));
   }
 
   async function deleteSlotById(id) {
     const slot = Slots.get(id);
     if (!slot) return;
-    if (!(await confirmNative("删除存档「" + slot.name + "」？", "删除存档", { ok: "删除", cancel: "取消" }))) {
+    if (!(await confirmNative(t("slot.delConfirm", { name: slot.name }), t("slot.delTitle"), { ok: t("slot.delOk"), cancel: t("dlg.cancel") }))) {
       return;
     }
     const ok = Slots.remove(id);
     Slots.render();
-    toast(ok ? "存档已删除" : "删除失败：本地存储异常");
+    toast(t(ok ? "slot.deleted" : "slot.delFail"));
   }
 
   function openSlots() {
@@ -898,12 +900,13 @@
   function buildAnnotatedSgf() {
     const rd = Review.compute();
     const comments = {};
-    for (const b of rd.blunders) comments[b.i - 1] = "失着 · " + b.reason;
+    for (const b of rd.blunders) comments[b.i - 1] = t("review.cmt.blunder", { reason: b.reason });
     const s = rd.summary;
     const rootComment =
-      "复盘评注 · 失着 黑" + s.b + " 白" + s.w +
-      (s.b + s.w === 0 ? "（双方无明显失误）" : "") +
-      " · 共" + history.length + "手";
+      t("review.cmt.root", {
+        b: s.b, w: s.w, n: history.length,
+        clean: s.b + s.w === 0 ? t("review.cmt.clean") : "",
+      });
     return SgfMod.buildSgf({
       history, result, mode, humanColor, originalStartedAt,
       comments, rootComment,
@@ -911,7 +914,7 @@
   }
 
   async function exportReviewSgf() {
-    if (history.length < 2) { toast("对局太短，无可评注内容"); return; }
+    if (history.length < 2) { toast(t("review.tooShort")); return; }
     await exportSgfString(buildAnnotatedSgf(), "review-" + sgfFileName());
   }
 
@@ -947,7 +950,7 @@
     variationCells = pv.length ? pv : null;
     closeReview();
     sync();
-    toast(pv.length ? "推演 " + pv.length + " 手（虚影）" : "此局面无可推演着法");
+    toast(pv.length ? t("pv.done", { n: pv.length }) : t("pv.none"));
   }
 
   let panelAnimUntil = 0;
@@ -1144,7 +1147,7 @@
     const evalB = Ai.evaluateBoard(bd, "b");
     const evalW = Ai.evaluateBoard(bd, "w");
     const aiTakesWhite = evalW >= evalB; // white also moves next → tempo
-    toast(aiTakesWhite ? "电脑选择执白" : "电脑选择执黑");
+    toast(t(aiTakesWhite ? "swap2.aiWhite" : "swap2.aiBlack"));
     settleSwap2(aiTakesWhite ? "b" : "w"); // human gets the other side
   }
 
@@ -1226,7 +1229,7 @@
     if (result !== "play") return;
     if (!isLive()) {
       if (!fromAi) {
-        toast("请先「回到最新一手」再落子");
+        toast(t("place.needLive"));
         return;
       }
       // AI reply landed while the user browses the replay: snap to live and
@@ -1385,6 +1388,9 @@
     document.querySelectorAll("#color-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.human === humanColor);
     });
+    document.querySelectorAll("#lang-seg button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.lang === I18n.lang());
+    });
     document.querySelectorAll("#theme-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.theme === themeId);
     });
@@ -1401,8 +1407,8 @@
       // Titles track the active difficulty budget (hard ≠ extreme wall times)
       const titles =
         difficulty === "extreme"
-          ? { fast: "约 2.5 秒", normal: "约 5 秒", deep: "约 8 秒" }
-          : { fast: "约 0.8 秒", normal: "约 2 秒", deep: "约 3.5 秒" };
+          ? { fast: t("think.fast.max.title"), normal: t("think.normal.max.title"), deep: t("think.deep.max.title") }
+          : { fast: t("think.fast.hard.title"), normal: t("think.normal.hard.title"), deep: t("think.deep.hard.title") };
       document.querySelectorAll("#think-seg button[data-think]").forEach((b) => {
         const t = titles[b.dataset.think];
         if (t) b.title = t;
@@ -1411,7 +1417,7 @@
       if (thinkGroup) {
         thinkGroup.setAttribute(
           "aria-label",
-          difficulty === "extreme" ? "极难思考时间" : "困难思考时间"
+          t(difficulty === "extreme" ? "aria.thinkMax" : "aria.think")
         );
       }
     }
@@ -1445,12 +1451,12 @@
 
     moves.textContent = viewIndex + "/" + history.length;
     document.getElementById("info-moves").textContent =
-      history.length + (live ? "" : "·看" + viewIndex);
+      history.length + (live ? "" : t("info.viewing", { n: viewIndex }));
     const modeEl = document.getElementById("info-mode");
     if (modeEl) {
       modeEl.textContent = mode === "pvp"
-        ? "双人"
-        : ({ easy: "简单", normal: "普通", hard: "困难", extreme: "极难" }[difficulty] || difficulty);
+        ? t("mode.pvp")
+        : t("diff." + difficulty + ".full");
     }
     document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
     const verdictEl = document.getElementById("coach-verdict");
@@ -1458,8 +1464,8 @@
       const show = analysisOn && !live && analysisVerdict;
       verdictEl.hidden = !show;
       if (show) {
-        const who = (viewIndex - 1) % 2 === 0 ? "黑" : "白";
-        verdictEl.textContent = "第" + viewIndex + "手 " + who + "：" + analysisVerdict.text;
+        const who = t((viewIndex - 1) % 2 === 0 ? "side.black" : "side.white");
+        verdictEl.textContent = t("coach.line", { n: viewIndex, who: who, text: analysisVerdict.text });
         verdictEl.className = "coach-verdict grade-" + (analysisVerdict.grade || "ok");
       }
     }
@@ -1497,14 +1503,14 @@
 
     if (swap2) {
       // Colors are undecided until settleSwap2 — don't show stale 你/电脑
-      document.getElementById("black-role").textContent = "待定";
-      document.getElementById("white-role").textContent = "待定";
+      document.getElementById("black-role").textContent = t("role.pending");
+      document.getElementById("white-role").textContent = t("role.pending");
     } else if (mode === "ai") {
-      document.getElementById("black-role").textContent = humanColor === "b" ? "你" : "电脑";
-      document.getElementById("white-role").textContent = humanColor === "w" ? "你" : "电脑";
+      document.getElementById("black-role").textContent = t(humanColor === "b" ? "role.you" : "role.computer");
+      document.getElementById("white-role").textContent = t(humanColor === "w" ? "role.you" : "role.computer");
     } else {
-      document.getElementById("black-role").textContent = "玩家 1";
-      document.getElementById("white-role").textContent = "玩家 2";
+      document.getElementById("black-role").textContent = t("role.p1");
+      document.getElementById("white-role").textContent = t("role.p2");
     }
 
     const showTurn = live && result === "play" && !swap2;
@@ -1524,24 +1530,24 @@
     if (swap2) {
       status.textContent =
         swap2.phase === "place" || swap2.phase === "place2"
-          ? "平衡开局 · 布子中"
-          : "平衡开局 · 待选边";
+          ? t("swap2.placing")
+          : t("swap2.choosing");
     } else if (!live) {
-      status.textContent = "复盘 " + viewIndex + "/" + history.length;
-      if (winLine) status.textContent += " · 已成五";
-    } else if (result === "b") status.textContent = "黑棋胜";
-    else if (result === "w") status.textContent = "白棋胜";
-    else if (result === "draw") status.textContent = "平局";
+      status.textContent = t("status.replay", { n: viewIndex, total: history.length });
+      if (winLine) status.textContent += t("status.five");
+    } else if (result === "b") status.textContent = t("status.blackWin");
+    else if (result === "w") status.textContent = t("status.whiteWin");
+    else if (result === "draw") status.textContent = t("result.draw");
     else if (importPaused) {
       status.textContent =
         mode === "ai" && !isHumanTurn()
-          ? "导入复盘 · 点「续下」让电脑走"
-          : "导入复盘 · 可落子或点「续下」";
+          ? t("status.importAi")
+          : t("status.importYou");
     }
-    else if (aiThinking) status.textContent = "电脑思考中…";
-    else if (hintBusy) status.textContent = "计算提示…";
-    else if (hintCell) status.textContent = (turn === "b" ? "黑棋落子" : "白棋落子") + " · 有提示";
-    else status.textContent = turn === "b" ? "黑棋落子" : "白棋落子";
+    else if (aiThinking) status.textContent = t("status.thinking");
+    else if (hintBusy) status.textContent = t("status.hintCalc");
+    else if (hintCell) status.textContent = t("status.withHint", { turn: t(turn === "b" ? "status.blackTurn" : "status.whiteTurn") });
+    else status.textContent = t(turn === "b" ? "status.blackTurn" : "status.whiteTurn");
 
     syncSettingsUI();
   }
@@ -1582,10 +1588,10 @@
   const reset2 = document.getElementById("reset2");
   if (reset2) reset2.onclick = () => { requestNewGame(); };
   document.getElementById("clear-save").onclick = async () => {
-    if (!(await confirmNative("清除自动存档并开始新局？", "清除存档", { ok: "清除", cancel: "取消" }))) return;
+    if (!(await confirmNative(t("save.clearConfirm"), t("save.clearTitle"), { ok: t("save.clearOk"), cancel: t("dlg.cancel") }))) return;
     clearSave();
     reset();
-    toast("存档已清除");
+    toast(t("save.cleared"));
   };
   document.getElementById("toggle-panel").onclick = togglePanel;
   document.getElementById("collapse").onclick = () => setPanelOpen(false);
@@ -1604,7 +1610,7 @@
   document.getElementById("rep-end").onclick = () => setViewIndex(history.length);
   document.getElementById("rep-live").onclick = () => {
     goLive();
-    toast("已回到最新一手");
+    toast(t("replay.backToLive"));
   };
   document.getElementById("sgf-copy").onclick = () => { copySgf(); };
   document.getElementById("sgf-download").onclick = () => { downloadSgf(); };
@@ -1655,10 +1661,10 @@
   const statsClearEl = document.getElementById("stats-clear");
   if (statsClearEl) {
     statsClearEl.onclick = async () => {
-      if (!(await confirmNative("清空全部对局统计？", "清空统计", { ok: "清空", cancel: "取消" }))) return;
+      if (!(await confirmNative(t("stats.clearConfirm"), t("stats.clearTitle"), { ok: t("stats.clear"), cancel: t("dlg.cancel") }))) return;
       Stats.clear();
       Stats.render();
-      toast("统计已清空");
+      toast(t("stats.cleared"));
     };
   }
 
@@ -1725,11 +1731,11 @@
     const b = ev.target.closest("button[data-mode]");
     if (!b) return;
     if (b.dataset.mode === mode) return;
-    if (history.length && !(await confirmNative("切换模式将开始新局，是否继续？", "切换模式", { ok: "切换", cancel: "取消" }))) return;
+    if (history.length && !(await confirmNative(t("confirm.switchMode"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
     mode = b.dataset.mode;
     saveSettings();
     reset({ keepSettings: true });
-    toast(mode === "ai" ? "人机对战" : "双人对战");
+    toast(t(mode === "ai" ? "toast.modeAi" : "toast.modePvp"));
   };
   document.getElementById("diff-seg").onclick = (ev) => {
     const b = ev.target.closest("button[data-diff]");
@@ -1737,7 +1743,7 @@
     difficulty = b.dataset.diff;
     saveSettings();
     syncSettingsUI();
-    toast("难度：" + ({ easy: "简单", normal: "普通", hard: "困难", extreme: "极难" })[difficulty]);
+    toast(t("toast.difficulty", { name: t("diff." + difficulty + ".full") }));
   };
   const thinkSeg = document.getElementById("think-seg");
   if (thinkSeg) {
@@ -1751,26 +1757,41 @@
       saveSettings();
       syncSettingsUI();
       toast(
-        "思考：" +
-          (difficulty === "extreme"
-            ? { fast: "快 ~2.5s", normal: "标准 ~5s", deep: "深 ~8s" }
-            : { fast: "快 ~0.8s", normal: "标准 ~2s", deep: "深 ~3.5s" })[id]
+        t("toast.think", {
+          name: (difficulty === "extreme"
+            ? { fast: t("think.fast.maxName"), normal: t("think.normal.maxName"), deep: t("think.deep.maxName") }
+            : { fast: t("think.fast.name"), normal: t("think.normal.name"), deep: t("think.deep.name") })[id],
+        })
       );
     };
   }
+  const langSeg = document.getElementById("lang-seg");
+  if (langSeg) langSeg.onclick = (ev) => {
+    const b = ev.target.closest("button[data-lang]");
+    if (!b || b.dataset.lang === I18n.lang()) return;
+    I18n.setLang(b.dataset.lang); // rewrites the static markup
+    // …and everything drawn from state has to be rebuilt in the new language
+    mlSig = "";
+    syncSettingsUI();
+    sync();
+    toast(t("toast.language"));
+  };
   document.getElementById("theme-seg").onclick = (ev) => {
     const b = ev.target.closest("button[data-theme]");
     if (!b) return;
     applyTheme(b.dataset.theme);
-    const names = { wood: "木盘", night: "夜盘", day: "日间", notebook: "练习本" };
-    toast("主题：" + (names[themeId] || themeId));
+    const names = {
+      wood: t("theme.wood.title"), night: t("theme.night.title"),
+      day: t("theme.day.title"), notebook: t("theme.notebook.title"),
+    };
+    toast(t("toast.theme", { name: names[themeId] || themeId }));
   };
   document.getElementById("opt-sound").onclick = () => {
     soundOn = !soundOn;
     saveSettings();
     syncSettingsUI();
     if (soundOn) playMoveSound("b");
-    toast(soundOn ? "音效已开" : "音效已关");
+    toast(t(soundOn ? "toast.soundOn" : "toast.soundOff"));
   };
   const coordsBtn = document.getElementById("opt-coords");
   if (coordsBtn) {
@@ -1779,7 +1800,7 @@
       saveSettings();
       syncSettingsUI();
       draw();
-      toast(showCoords ? "坐标已开" : "坐标已关");
+      toast(t(showCoords ? "toast.coordsOn" : "toast.coordsOff"));
     };
   }
   const analysisBtn = document.getElementById("opt-analysis");
@@ -1791,19 +1812,19 @@
       if (!analysisOn) clearAnalysis();
       else scheduleAnalysis();
       sync();
-      toast(analysisOn ? "复盘分析已开" : "复盘分析已关");
+      toast(t(analysisOn ? "toast.analysisOn" : "toast.analysisOff"));
     };
   }
   document.getElementById("color-seg").onclick = async (ev) => {
     const b = ev.target.closest("button[data-human]");
     if (!b) return;
     if (b.dataset.human === humanColor) return;
-    if (mode === "ai" && history.length && !(await confirmNative("更换执子将开始新局，是否继续？", "更换执子", { ok: "更换", cancel: "取消" }))) return;
+    if (mode === "ai" && history.length && !(await confirmNative(t("confirm.changeColor"), t("confirm.changeColorTitle"), { ok: t("confirm.changeColorOk"), cancel: t("dlg.cancel") }))) return;
     humanColor = b.dataset.human;
     saveSettings();
     if (mode === "ai") {
       reset({ keepSettings: true });
-      toast(humanColor === "b" ? "你执黑" : "你执白（电脑先手）");
+      toast(t(humanColor === "b" ? "toast.playBlack" : "toast.playWhite"));
     } else {
       syncSettingsUI();
     }
@@ -1817,11 +1838,11 @@
       const val = b.dataset.opening;
       if (val !== "standard" && val !== "swap2") return;
       if (val === openingRule) return;
-      if (history.length && !(await confirmNative("切换开局规则将开始新局，是否继续？", "切换开局", { ok: "切换", cancel: "取消" }))) return;
+      if (history.length && !(await confirmNative(t("confirm.switchOpening"), t("confirm.switchOpeningTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
       openingRule = val;
       saveSettings();
       reset({ keepSettings: true });
-      toast(val === "swap2" ? "平衡开局 swap2" : "标准开局");
+      toast(t(val === "swap2" ? "toast.openingSwap2" : "toast.openingStandard"));
     };
   }
 
@@ -1922,21 +1943,21 @@
       ev.preventDefault();
       if (mode === "pvp") return;
       (async () => {
-        if (history.length && !(await confirmNative("切换到双人对战将开始新局，是否继续？", "切换模式", { ok: "切换", cancel: "取消" }))) return;
+        if (history.length && !(await confirmNative(t("confirm.switchToPvp"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
         mode = "pvp";
         saveSettings();
         reset({ keepSettings: true });
-        toast("双人对战");
+        toast(t("toast.modePvp"));
       })();
     } else if ((ev.metaKey || ev.ctrlKey) && k === "2") {
       ev.preventDefault();
       if (mode === "ai") return;
       (async () => {
-        if (history.length && !(await confirmNative("切换到人机对战将开始新局，是否继续？", "切换模式", { ok: "切换", cancel: "取消" }))) return;
+        if (history.length && !(await confirmNative(t("confirm.switchToAi"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
         mode = "ai";
         saveSettings();
         reset({ keepSettings: true });
-        toast("人机对战");
+        toast(t("toast.modeAi"));
       })();
     } else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
     else if (k === "n" && !ev.metaKey && !ev.ctrlKey) requestNewGame();
@@ -1989,6 +2010,9 @@
 
   // boot
   loadSettings();
+  I18n.load();
+  I18n.apply();
+  document.documentElement.setAttribute("lang", I18n.lang() === "en" ? "en" : "zh-CN");
   document.documentElement.setAttribute("data-theme", themeId);
   const savedPanel = Host.storageGet(PANEL_KEY);
   // Restore only if user left panel open; always run setPanelOpen so inert/aria apply.
@@ -1998,7 +2022,7 @@
   if (resumed) {
     gameGen += 1;
     if (result !== "play" && lastStatsEndedAt) statsRecordedGen = gameGen;
-    toast("已恢复上次对局");
+    toast(t("game.restored"));
   } else {
     startedAt = Date.now();
     originalStartedAt = startedAt;
@@ -2023,7 +2047,7 @@
     const paths = Host.normalizePaths((detail && detail.paths) || detail);
     const sgfPath = paths.find((p) => /\.sgf$/i.test(p));
     if (sgfPath) importSgfFromPath(sgfPath);
-    else if (paths.length) toast("请拖入 .sgf 棋谱文件");
+    else if (paths.length) toast(t("file.dropSgfOnly"));
   });
 clockTimer = setInterval(updateClock, 500);
 

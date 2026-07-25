@@ -5,6 +5,7 @@
  * @module slots
  */
 (function (global) {
+  const t = (k, p) => (global.GobanI18n ? global.GobanI18n.t(k, p) : k);
   const Host = global.GobanHost;
   const SLOTS_KEY = "goban.v12.slots";
   const SLOTS_MAX = 30;
@@ -29,7 +30,7 @@
   }
 
   function resultLabel(r) {
-    return r === "b" ? "黑胜" : r === "w" ? "白胜" : r === "draw" ? "平局" : "进行中";
+    return t(r === "b" ? "result.blackWin" : r === "w" ? "result.whiteWin" : r === "draw" ? "result.draw" : "result.playing");
   }
 
   function slotDate(ts) {
@@ -40,7 +41,7 @@
 
   function metaText(snap) {
     const moves = (snap.history && snap.history.length) || 0;
-    return moves + "手 · " + resultLabel(snap.result) + " · " + slotDate(snap.savedAt);
+    return t("slots.meta", { result: resultLabel(snap.result), moves: moves, when: slotDate(snap.savedAt) });
   }
 
   function genId() {
@@ -50,7 +51,12 @@
   /** Prepend a new named slot for `snap`. @returns {boolean} persisted ok. */
   function add(snap) {
     const arr = load();
-    arr.unshift({ id: genId(), name: "对局 " + slotDate(Date.now()), savedAt: Date.now(), snap });
+    arr.unshift({
+      id: genId(),
+      name: t("slots.defaultName", { n: slotDate(Date.now()) }),
+      savedAt: Date.now(),
+      snap,
+    });
     return persist(arr);
   }
 
@@ -68,7 +74,7 @@
     const slot = arr.find((s) => s.id === id);
     if (!slot) return false;
     const clean = (name || "").trim().slice(0, 40);
-    slot.name = clean || ("对局 " + slotDate(slot.savedAt));
+    slot.name = clean || t("slots.defaultName", { n: slotDate(slot.savedAt) });
     return persist(arr);
   }
 
@@ -88,7 +94,7 @@
       nameEl.className = "slot-name";
       nameEl.value = slot.name;
       nameEl.maxLength = 40;
-      nameEl.setAttribute("aria-label", "存档名");
+      nameEl.setAttribute("aria-label", t("slots.nameLabel"));
       const meta = document.createElement("div");
       meta.className = "slot-meta";
       meta.textContent = metaText(slot.snap);

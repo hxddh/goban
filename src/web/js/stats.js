@@ -5,6 +5,7 @@
  * @module stats
  */
 (function (global) {
+  const t = (k, p) => (global.GobanI18n ? global.GobanI18n.t(k, p) : k);
   const Host = global.GobanHost;
   const KEY = "goban.v12.stats";
   const MAX = 200; // newest first; enough history for aggregates + future use
@@ -89,8 +90,8 @@
 
   function fmtDuration(ms) {
     const m = Math.floor(ms / 60000);
-    if (m < 60) return m + " 分钟";
-    return (m / 60).toFixed(1) + " 小时";
+    if (m < 60) return t("stats.minutes", { n: m });
+    return t("stats.hours", { n: (m / 60).toFixed(1) });
   }
 
   /** 每日挑战 line from practice.js (loaded before us; render runs on click). */
@@ -98,11 +99,10 @@
     const P = global.GobanPractice;
     const d = P && P.dailySummary ? P.dailySummary() : null;
     if (!d) return "";
-    return (
-      "<div class='stats-line'>每日挑战 打卡 " + d.daysDone + " 天 · 连续 <strong>" +
-      d.streak + "</strong> · 最长 <strong>" + d.bestStreak + "</strong>" +
-      (d.todayDone ? " · 今日已完成" : "") + "</div>"
-    );
+    return "<div class='stats-line'>" + t("stats.dailyLine", {
+      days: d.daysDone, streak: d.streak, best: d.bestStreak,
+      today: d.todayDone ? t("stats.dailyToday") : "",
+    }) + "</div>";
   }
 
   /** 战术练习 progress line (per-puzzle memory added in v1.27). */
@@ -110,11 +110,10 @@
     const P = global.GobanPractice;
     const s = P && P.practiceSummary ? P.practiceSummary() : null;
     if (!s || !s.seen) return "";
-    return (
-      "<div class='stats-line'>战术练习 做过 <strong>" + s.seen + "</strong> / " + s.total +
-      " 题 · 已掌握 <strong>" + s.mastered + "</strong>" +
-      (s.wrong ? " · 错题本 <strong>" + s.wrong + "</strong> 题" : "") + "</div>"
-    );
+    return "<div class='stats-line'>" + t("stats.practiceLine", {
+      seen: s.seen, total: s.total, mastered: s.mastered,
+      wrong: s.wrong ? t("stats.practiceWrong", { n: s.wrong }) : "",
+    }) + "</div>";
   }
 
   /** Fill #stats-body with the aggregate tables. */
@@ -129,7 +128,10 @@
     body.hidden = !hasAny;
     if (!hasAny) { body.innerHTML = ""; return; }
     if (a.games === 0) { body.innerHTML = daily; return; }
-    const names = { easy: "简单", normal: "普通", hard: "困难", extreme: "极难" };
+    const names = {
+      easy: t("diff.easy.full"), normal: t("diff.normal.full"),
+      hard: t("diff.hard.full"), extreme: t("diff.extreme.full"),
+    };
     let rows = "";
     for (const d of ["easy", "normal", "hard", "extreme"]) {
       const b = a.ai[d];
@@ -141,16 +143,20 @@
         b.l + "</td><td class='num'>" + b.d + "</td><td class='num'>" + rate + "%</td></tr>";
     }
     const aiTable = rows
-      ? "<table class='stats-table'><tr><th>人机</th><th>胜</th><th>负</th><th>平</th><th>胜率</th></tr>" + rows + "</table>"
+      ? "<table class='stats-table'>" + t("stats.aiTable") + rows + "</table>"
       : "";
     const pvpLine = a.pvp.games
-      ? "<div class='stats-line'>双人 " + a.pvp.games + " 局 · 黑胜 " + a.pvp.b + " · 白胜 " + a.pvp.w + " · 平 " + a.pvp.d + "</div>"
+      ? "<div class='stats-line'>" +
+        t("stats.pvpLine", { games: a.pvp.games, b: a.pvp.b, w: a.pvp.w, d: a.pvp.d }) + "</div>"
       : "";
     body.innerHTML =
       aiTable + pvpLine +
-      "<div class='stats-line'>连胜（人机）当前 <strong>" + a.curStreak + "</strong> · 最佳 <strong>" + a.bestStreak + "</strong></div>" +
+      "<div class='stats-line'>" +
+        t("stats.streakLine", { cur: a.curStreak, best: a.bestStreak }) + "</div>" +
       daily +
-      "<div class='stats-line muted2'>共 " + a.games + " 局 · " + a.totalMoves + " 手 · " + fmtDuration(a.totalMs) + "</div>";
+      "<div class='stats-line muted2'>" + t("stats.totalLine", {
+        games: a.games, moves: a.totalMoves, time: fmtDuration(a.totalMs),
+      }) + "</div>";
   }
 
   global.GobanStats = { record, unrecordByEndedAt, clear, aggregate, render };

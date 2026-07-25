@@ -13,6 +13,8 @@
  * @module engine
  */
 (function (global) {
+  // named `tr`: initWorker() has a local `const t = setTimeout(...)` that would shadow it
+  const tr = (k, p) => (global.GobanI18n ? global.GobanI18n.t(k, p) : k);
   const C1 = global.GobanAi;
 
   /**
@@ -322,7 +324,7 @@
       !degradeToastShown
     ) {
       degradeToastShown = true;
-      deps.toast("后台计算不可用，已降级速算");
+      deps.toast(tr("engine.degraded"));
     }
     if (useWorker) syncFallbacks++;
     return new Promise((resolve) => {

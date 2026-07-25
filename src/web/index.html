@@ -3,40 +3,40 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>五子棋</title>
+  <title data-i18n="app.name">五子棋</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 
   <div id="app">
     <header class="chrome">
-      <span class="brand">五子棋</span>
-      <span class="status-pill" id="status">黑棋落子</span>
+      <span class="brand" data-i18n="app.name">五子棋</span>
+      <span class="status-pill" id="status" data-i18n="status.blackTurn">黑棋落子</span>
       <span class="meta-chip num" id="moves">0/0</span>
       <span class="meta-chip num" id="clock">00:00</span>
       <span class="spacer"></span>
       <div class="chrome-actions">
-        <button type="button" class="tool-btn" id="undo" disabled title="悔棋 (Z)">悔棋</button>
-        <button type="button" class="tool-btn" id="btn-hint" title="提示一手 (H)">提示</button>
-        <button type="button" class="tool-btn primary" id="btn-new" title="新局 (N)">新局</button>
-        <button type="button" class="icon-btn" id="help-btn" title="快捷键 (?)">?</button>
-        <button type="button" class="icon-btn" id="toggle-panel" title="侧栏 (Tab)" aria-label="侧栏">☰</button>
+        <button type="button" class="tool-btn" id="undo" disabled title="悔棋 (Z)" data-i18n="btn.undo" data-i18n-title="btn.undo.title">悔棋</button>
+        <button type="button" class="tool-btn" id="btn-hint" title="提示一手 (H)" data-i18n="btn.hint" data-i18n-title="btn.hint.title">提示</button>
+        <button type="button" class="tool-btn primary" id="btn-new" title="新局 (N)" data-i18n="btn.new" data-i18n-title="btn.new.title">新局</button>
+        <button type="button" class="icon-btn" id="help-btn" title="快捷键 (?)" data-i18n-title="btn.help.title">?</button>
+        <button type="button" class="icon-btn" id="toggle-panel" title="侧栏 (Tab)" aria-label="侧栏" data-i18n-title="btn.panel.title" data-i18n-aria="aria.panel">☰</button>
       </div>
     </header>
 
     <div class="scrim" id="scrim"></div>
     <div class="stage">
       <div id="board-wrap">
-        <canvas id="board" width="900" height="900" aria-label="棋盘"></canvas>
+        <canvas id="board" width="900" height="900" aria-label="棋盘" data-i18n-aria="aria.board"></canvas>
         <div class="think-dot" id="think-dot" hidden aria-hidden="true"></div>
-        <div class="swap2-bar" id="swap2-bar" hidden role="group" aria-label="平衡开局选择">
+        <div class="swap2-bar" id="swap2-bar" hidden role="group" aria-label="平衡开局选择" data-i18n-aria="aria.swap2">
           <span class="swap2-msg" id="swap2-msg"></span>
           <div class="swap2-btns" id="swap2-btns"></div>
         </div>
       </div>
     </div>
 
-    <aside class="side" id="side" aria-label="对局面板">
+    <aside class="side" id="side" aria-label="对局面板" data-i18n-aria="aria.side">
       <!-- 本局摘要：无折叠、无重复主按钮（顶栏已有悔棋/新局） -->
       <section class="side-head">
         <div class="vs">
@@ -44,106 +44,113 @@
             <span class="stone black" aria-hidden="true"></span>
             <div>
               <div class="vs-name">
-                黑
-                <span class="badge" id="black-turn" hidden>行</span>
+                <span data-i18n="side.black">黑</span>
+                <span class="badge" id="black-turn" hidden data-i18n="side.turnBadge">行</span>
               </div>
-              <div class="vs-role muted" id="black-role">你</div>
+              <div class="vs-role muted" id="black-role" data-i18n="role.you">你</div>
             </div>
           </div>
-          <div class="vs-mid muted">对</div>
+          <div class="vs-mid muted" data-i18n="side.vs">对</div>
           <div class="vs-side vs-right">
             <div>
               <div class="vs-name">
-                <span class="badge" id="white-turn" hidden>行</span>
-                白
+                <span class="badge" id="white-turn" hidden data-i18n="side.turnBadge">行</span>
+                <span data-i18n="side.white">白</span>
               </div>
-              <div class="vs-role muted" id="white-role">电脑</div>
+              <div class="vs-role muted" id="white-role" data-i18n="role.computer">电脑</div>
             </div>
             <span class="stone white" aria-hidden="true"></span>
           </div>
         </div>
         <div class="side-meta">
-          <span><strong class="num" id="info-moves">0</strong> 手</span>
+          <span><strong class="num" id="info-moves">0</strong> <span data-i18n="side.moves">手</span></span>
           <span class="sep"></span>
           <span class="num" id="info-time">00:00</span>
           <span class="sep"></span>
           <span id="info-mode"></span>
           <span class="sep"></span>
-          <span id="save-hint" class="save-hint">自动存档</span>
+          <span id="save-hint" class="save-hint" data-i18n="side.autosave">自动存档</span>
         </div>
       </section>
 
       <section class="side-section">
-        <h2 class="side-h">对局</h2>
+        <h2 class="side-h" data-i18n="sec.game">对局</h2>
         <div class="setting-list">
           <div class="setting-row">
-            <span class="setting-k">模式</span>
-            <div class="pill" id="mode-seg" role="group" aria-label="模式">
-              <button type="button" data-mode="ai" class="active">人机</button>
-              <button type="button" data-mode="pvp">双人</button>
+            <span class="setting-k" data-i18n="set.mode">模式</span>
+            <div class="pill" id="mode-seg" role="group" aria-label="模式" data-i18n-aria="aria.mode">
+              <button type="button" data-mode="ai" class="active" data-i18n="mode.ai">人机</button>
+              <button type="button" data-mode="pvp" data-i18n="mode.pvp">双人</button>
             </div>
           </div>
           <div class="setting-row" id="diff-field">
-            <span class="setting-k">难度</span>
-            <div class="pill" id="diff-seg" role="group" aria-label="难度">
-              <button type="button" data-diff="easy" title="随机贪心">简</button>
-              <button type="button" data-diff="normal" class="active" title="棋型 + 浅搜索">普</button>
-              <button type="button" data-diff="hard" title="C2 引擎：深搜索 + 战术级联">难</button>
-              <button type="button" data-diff="extreme" title="C2 引擎 · 5–8 秒深算">极</button>
+            <span class="setting-k" data-i18n="set.difficulty">难度</span>
+            <div class="pill" id="diff-seg" role="group" aria-label="难度" data-i18n-aria="aria.difficulty">
+              <button type="button" data-diff="easy" title="随机贪心" data-i18n="diff.easy" data-i18n-title="diff.easy.title">简</button>
+              <button type="button" data-diff="normal" class="active" title="棋型 + 浅搜索" data-i18n="diff.normal" data-i18n-title="diff.normal.title">普</button>
+              <button type="button" data-diff="hard" title="C2 引擎：深搜索 + 战术级联" data-i18n="diff.hard" data-i18n-title="diff.hard.title">难</button>
+              <button type="button" data-diff="extreme" title="C2 引擎 · 5–8 秒深算" data-i18n="diff.extreme" data-i18n-title="diff.extreme.title">极</button>
             </div>
           </div>
           <div class="setting-row" id="think-field" hidden>
-            <span class="setting-k">思考</span>
-            <div class="pill" id="think-seg" role="group" aria-label="困难思考时间">
-              <button type="button" data-think="fast" title="约 0.8 秒">快</button>
-              <button type="button" data-think="normal" class="active" title="约 2 秒">标</button>
-              <button type="button" data-think="deep" title="约 3.5 秒">深</button>
+            <span class="setting-k" data-i18n="set.think">思考</span>
+            <div class="pill" id="think-seg" role="group" aria-label="困难思考时间" data-i18n-aria="aria.think">
+              <button type="button" data-think="fast" title="约 0.8 秒" data-i18n="think.fast" data-i18n-title="think.fast.hard.title">快</button>
+              <button type="button" data-think="normal" class="active" title="约 2 秒" data-i18n="think.normal" data-i18n-title="think.normal.hard.title">标</button>
+              <button type="button" data-think="deep" title="约 3.5 秒" data-i18n="think.deep" data-i18n-title="think.deep.hard.title">深</button>
             </div>
           </div>
           <div class="setting-row" id="color-field">
-            <span class="setting-k">执子</span>
-            <div class="pill" id="color-seg" role="group" aria-label="执子">
-              <button type="button" data-human="b" class="active">黑</button>
-              <button type="button" data-human="w">白</button>
+            <span class="setting-k" data-i18n="set.color">执子</span>
+            <div class="pill" id="color-seg" role="group" aria-label="执子" data-i18n-aria="aria.color">
+              <button type="button" data-human="b" class="active" data-i18n="side.black">黑</button>
+              <button type="button" data-human="w" data-i18n="side.white">白</button>
             </div>
           </div>
           <div class="setting-row" id="opening-field">
-            <span class="setting-k">开局</span>
-            <div class="pill" id="opening-seg" role="group" aria-label="开局规则">
-              <button type="button" data-opening="standard" class="active" title="标准开局">标准</button>
-              <button type="button" data-opening="swap2" title="平衡开局：先手放 3 子，对手选边或加两手">swap2</button>
+            <span class="setting-k" data-i18n="set.opening">开局</span>
+            <div class="pill" id="opening-seg" role="group" aria-label="开局规则" data-i18n-aria="aria.opening">
+              <button type="button" data-opening="standard" class="active" title="标准开局" data-i18n="opening.standard" data-i18n-title="opening.standard.title">标准</button>
+              <button type="button" data-opening="swap2" title="平衡开局：先手放 3 子，对手选边或加两手" data-i18n-title="opening.swap2.title">swap2</button>
             </div>
           </div>
         </div>
       </section>
 
       <section class="side-section">
-        <h2 class="side-h">外观</h2>
+        <h2 class="side-h" data-i18n="sec.look">外观</h2>
         <div class="setting-list">
           <div class="setting-row stack">
-            <span class="setting-k">主题</span>
-            <div class="theme-row" id="theme-seg" role="group" aria-label="主题">
-              <button type="button" data-theme="wood" class="active" title="木盘">木</button>
-              <button type="button" data-theme="night" title="夜盘">夜</button>
-              <button type="button" data-theme="day" title="日间">日</button>
-              <button type="button" data-theme="notebook" title="练习本">本</button>
+            <span class="setting-k" data-i18n="set.theme">主题</span>
+            <div class="theme-row" id="theme-seg" role="group" aria-label="主题" data-i18n-aria="aria.theme">
+              <button type="button" data-theme="wood" class="active" title="木盘" data-i18n="theme.wood" data-i18n-title="theme.wood.title">木</button>
+              <button type="button" data-theme="night" title="夜盘" data-i18n="theme.night" data-i18n-title="theme.night.title">夜</button>
+              <button type="button" data-theme="day" title="日间" data-i18n="theme.day" data-i18n-title="theme.day.title">日</button>
+              <button type="button" data-theme="notebook" title="练习本" data-i18n="theme.notebook" data-i18n-title="theme.notebook.title">本</button>
             </div>
           </div>
           <div class="setting-row">
-            <span class="setting-k">坐标</span>
-            <button type="button" class="switch" id="opt-coords" aria-pressed="false" title="坐标标注（A–O / 15–1）">
+            <span class="setting-k" data-i18n="set.coords">坐标</span>
+            <button type="button" class="switch" id="opt-coords" aria-pressed="false" title="坐标标注（A–O / 15–1）" data-i18n-title="set.coords.title">
               <span class="switch-knob"></span>
             </button>
           </div>
           <div class="setting-row">
-            <span class="setting-k">复盘分析</span>
-            <button type="button" class="switch" id="opt-analysis" aria-pressed="false" title="复盘时标注手数优劣与更优点">
+            <span class="setting-k" data-i18n="set.analysis">复盘分析</span>
+            <button type="button" class="switch" id="opt-analysis" aria-pressed="false" title="复盘时标注手数优劣与更优点" data-i18n-title="set.analysis.title">
               <span class="switch-knob"></span>
             </button>
           </div>
           <div class="setting-row">
-            <span class="setting-k">音效</span>
-            <button type="button" class="switch" id="opt-sound" aria-pressed="true" title="落子音效">
+            <span class="setting-k" data-i18n="set.lang">语言</span>
+            <div class="pill" id="lang-seg" role="group" aria-label="界面语言" data-i18n-aria="aria.lang">
+              <button type="button" data-lang="zh" class="active" data-i18n-raw>中文</button>
+              <button type="button" data-lang="en" data-i18n-raw>EN</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span class="setting-k" data-i18n="set.sound">音效</span>
+            <button type="button" class="switch" id="opt-sound" aria-pressed="true" title="落子音效" data-i18n-title="set.sound.title">
               <span class="switch-knob"></span>
             </button>
           </div>
@@ -152,36 +159,36 @@
 
       <section class="side-section grow-sec">
         <div class="side-h-row">
-          <h2 class="side-h">棋谱</h2>
+          <h2 class="side-h" data-i18n="sec.record">棋谱</h2>
           <span class="side-h-meta num" id="replay-pos">0 / 0</span>
         </div>
-        <div class="move-list" id="move-list" aria-label="手数列表"></div>
+        <div class="move-list" id="move-list" aria-label="手数列表" data-i18n-aria="aria.moveList"></div>
         <div class="replay-bar" id="replay-seg">
-          <button type="button" id="rep-start" title="开局 (Home)">«</button>
-          <button type="button" id="rep-prev" title="上一手 (←)">‹</button>
-          <button type="button" id="rep-live" disabled title="回到最新">●</button>
-          <button type="button" id="rep-next" title="下一手 (→)">›</button>
-          <button type="button" id="rep-end" title="终局 (End)">»</button>
+          <button type="button" id="rep-start" title="开局 (Home)" data-i18n-title="rep.start.title">«</button>
+          <button type="button" id="rep-prev" title="上一手 (←)" data-i18n-title="rep.prev.title">‹</button>
+          <button type="button" id="rep-live" disabled title="回到最新" data-i18n-title="rep.live.title">●</button>
+          <button type="button" id="rep-next" title="下一手 (→)" data-i18n-title="rep.next.title">›</button>
+          <button type="button" id="rep-end" title="终局 (End)" data-i18n-title="rep.end.title">»</button>
         </div>
         <div class="coach-verdict" id="coach-verdict" hidden aria-live="polite"></div>
         <div class="link-row">
-          <button type="button" class="text-link" id="sgf-copy">复制</button>
-          <button type="button" class="text-link" id="sgf-download">导出</button>
-          <button type="button" class="text-link" id="sgf-import">导入</button>
-          <button type="button" class="text-link" id="sgf-paste" title="从剪贴板粘贴 SGF">粘贴</button>
-          <button type="button" class="text-link" id="sgf-slots" title="命名存档与历史对局">存档</button>
-          <button type="button" class="text-link" id="sgf-review" title="全局复盘：评分曲线与失着">复盘</button>
+          <button type="button" class="text-link" id="sgf-copy" data-i18n="sgf.copy">复制</button>
+          <button type="button" class="text-link" id="sgf-download" data-i18n="sgf.export">导出</button>
+          <button type="button" class="text-link" id="sgf-import" data-i18n="sgf.import">导入</button>
+          <button type="button" class="text-link" id="sgf-paste" title="从剪贴板粘贴 SGF" data-i18n="sgf.paste" data-i18n-title="sgf.paste.title">粘贴</button>
+          <button type="button" class="text-link" id="sgf-slots" title="命名存档与历史对局" data-i18n="sgf.slots" data-i18n-title="sgf.slots.title">存档</button>
+          <button type="button" class="text-link" id="sgf-review" title="全局复盘：评分曲线与失着" data-i18n="sgf.review" data-i18n-title="sgf.review.title">复盘</button>
         </div>
-        <button type="button" class="continue-btn" id="sgf-continue" hidden title="从导入局面继续对局">续下</button>
-        <p class="hint">拖入 .sgf 或粘贴棋谱 · 导入后不自动续下</p>
+        <button type="button" class="continue-btn" id="sgf-continue" hidden title="从导入局面继续对局" data-i18n="sgf.continue" data-i18n-title="sgf.continue.title">续下</button>
+        <p class="hint" data-i18n="sgf.dropHint">拖入 .sgf 或粘贴棋谱 · 导入后不自动续下</p>
       </section>
 
       <div class="side-foot">
-        <button type="button" class="text-link" id="open-practice" title="战术练习：找制胜一手 / 找防守点">练习</button>
-        <button type="button" class="text-link" id="open-daily" title="每日挑战：每天固定 5 题，连续打卡">每日</button>
-        <button type="button" class="text-link" id="open-stats" title="对局统计">统计</button>
-        <button type="button" class="text-link danger" id="clear-save">清除存档</button>
-        <button type="button" class="text-link" id="collapse">收起</button>
+        <button type="button" class="text-link" id="open-practice" title="战术练习：找制胜一手 / 找防守点" data-i18n="foot.practice" data-i18n-title="foot.practice.title">练习</button>
+        <button type="button" class="text-link" id="open-daily" title="每日挑战：每天固定 5 题，连续打卡" data-i18n="foot.daily" data-i18n-title="foot.daily.title">每日</button>
+        <button type="button" class="text-link" id="open-stats" title="对局统计" data-i18n="foot.stats" data-i18n-title="foot.stats.title">统计</button>
+        <button type="button" class="text-link danger" id="clear-save" data-i18n="foot.clear">清除存档</button>
+        <button type="button" class="text-link" id="collapse" data-i18n="foot.collapse">收起</button>
       </div>
     </aside>
 
@@ -189,106 +196,107 @@
 
     <div class="modal-bg" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
       <div class="modal">
-        <h3 id="confirm-title">确认</h3>
+        <h3 id="confirm-title" data-i18n="dlg.confirm">确认</h3>
         <p id="confirm-message" class="muted" style="margin:0 0 16px;font-size:14px;line-height:1.5;color:var(--text)"></p>
         <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end">
-          <button type="button" class="tool-btn" id="confirm-cancel">取消</button>
-          <button type="button" class="tool-btn primary" id="confirm-ok">确定</button>
+          <button type="button" class="tool-btn" id="confirm-cancel" data-i18n="dlg.cancel">取消</button>
+          <button type="button" class="tool-btn primary" id="confirm-ok" data-i18n="dlg.ok">确定</button>
         </div>
       </div>
     </div>
 
-    <div class="modal-bg" id="help-modal" role="dialog" aria-modal="true" aria-label="快捷键">
+    <div class="modal-bg" id="help-modal" role="dialog" aria-modal="true" aria-label="快捷键" data-i18n-aria="help.title">
       <div class="modal">
-        <h3>快捷键</h3>
+        <h3 data-i18n="help.title">快捷键</h3>
         <table>
-          <tr><td>点击交叉点</td><td>落子（须在最新一手；悬停有预览）</td></tr>
-          <tr><td>H · 提示</td><td>提示一手（虚线十字，不自动落子）</td></tr>
-          <tr><td>← →</td><td>复盘：上一手 / 下一手</td></tr>
-          <tr><td>Home / End</td><td>复盘：开局 / 终局</td></tr>
-          <tr><td>Z / ⌘Z</td><td>悔棋（以本应用为准）</td></tr>
-          <tr><td>N / ⌘N</td><td>新局</td></tr>
-          <tr><td>Tab / ☰ · [ ]</td><td>切换 / 收起 / 展开侧栏</td></tr>
-          <tr><td>⌘1 / ⌘2</td><td>双人 / 人机（确认后新局）</td></tr>
-          <tr><td>侧栏·棋谱</td><td>复制 / 导出 / 导入 / 粘贴 SGF；导入后可「续下」</td></tr>
-          <tr><td>⌘⌃F · 绿键 · F</td><td>系统全屏 / 窗口 Zoom / 提示入口</td></tr>
-          <tr><td>?</td><td>打开本说明</td></tr>
-          <tr><td>Esc</td><td>关闭弹层（说明 / 存档 / 复盘 / 统计 / 练习）· 收起侧栏</td></tr>
+          <tr><td data-i18n="help.click">点击交叉点</td><td data-i18n="help.click.d">落子（须在最新一手；悬停有预览）</td></tr>
+          <tr><td data-i18n="help.hint">H · 提示</td><td data-i18n="help.hint.d">提示一手（虚线十字，不自动落子）</td></tr>
+          <tr><td data-i18n="help.arrows">← →</td><td data-i18n="help.arrows.d">复盘：上一手 / 下一手</td></tr>
+          <tr><td data-i18n="help.homeEnd">Home / End</td><td data-i18n="help.homeEnd.d">复盘：开局 / 终局</td></tr>
+          <tr><td data-i18n="help.undo">Z / ⌘Z</td><td data-i18n="help.undo.d">悔棋（以本应用为准）</td></tr>
+          <tr><td data-i18n="help.new">N / ⌘N</td><td data-i18n="help.new.d">新局</td></tr>
+          <tr><td data-i18n="help.panel">Tab / ☰ · [ ]</td><td data-i18n="help.panel.d">切换 / 收起 / 展开侧栏</td></tr>
+          <tr><td data-i18n="help.modes">⌘1 / ⌘2</td><td data-i18n="help.modes.d">双人 / 人机（确认后新局）</td></tr>
+          <tr><td data-i18n="help.sgf">侧栏·棋谱</td><td data-i18n="help.sgf.d">复制 / 导出 / 导入 / 粘贴 SGF；导入后可「续下」</td></tr>
+          <tr><td data-i18n="help.fullscreen">⌘⌃F · 绿键 · F</td><td data-i18n="help.fullscreen.d">系统全屏 / 窗口 Zoom / 提示入口</td></tr>
+          <tr><td data-i18n="help.question">?</td><td data-i18n="help.question.d">打开本说明</td></tr>
+          <tr><td data-i18n="help.esc">Esc</td><td data-i18n="help.esc.d">关闭弹层（说明 / 存档 / 复盘 / 统计 / 练习）· 收起侧栏</td></tr>
         </table>
         <div class="close-row">
-          <button type="button" class="tool-btn primary" id="help-close">知道了</button>
+          <button type="button" class="tool-btn primary" id="help-close" data-i18n="dlg.gotIt">知道了</button>
         </div>
       </div>
     </div>
 
-    <div class="modal-bg" id="slots-modal" role="dialog" aria-modal="true" aria-label="对局存档">
+    <div class="modal-bg" id="slots-modal" role="dialog" aria-modal="true" aria-label="对局存档" data-i18n-aria="slots.title">
       <div class="modal">
-        <h3>对局存档</h3>
+        <h3 data-i18n="slots.title">对局存档</h3>
         <div class="slots-head">
-          <button type="button" class="tool-btn primary" id="slot-save-current">另存当前对局</button>
-          <span class="muted" id="slots-empty" hidden>还没有存档</span>
+          <button type="button" class="tool-btn primary" id="slot-save-current" data-i18n="slots.saveCurrent">另存当前对局</button>
+          <span class="muted" id="slots-empty" hidden data-i18n="slots.empty">还没有存档</span>
         </div>
         <div class="slots-list" id="slots-list"></div>
         <div class="close-row">
-          <button type="button" class="tool-btn" id="slots-close">关闭</button>
+          <button type="button" class="tool-btn" id="slots-close" data-i18n="dlg.close">关闭</button>
         </div>
       </div>
     </div>
 
-    <div class="modal-bg" id="practice-modal" role="dialog" aria-modal="true" aria-label="战术练习">
+    <div class="modal-bg" id="practice-modal" role="dialog" aria-modal="true" aria-label="战术练习" data-i18n-aria="practice.title">
       <div class="modal practice-modal">
-        <h3 id="practice-title">战术练习</h3>
+        <h3 id="practice-title" data-i18n="practice.title">战术练习</h3>
         <div class="practice-head">
           <span id="practice-task" class="practice-task"></span>
           <span id="practice-progress" class="muted practice-progress"></span>
         </div>
-        <canvas id="practice-board" class="practice-board" title="点击落子作答"></canvas>
+        <canvas id="practice-board" class="practice-board" title="点击落子作答" data-i18n-title="practice.board.title"></canvas>
         <div class="practice-foot">
           <span id="practice-source" class="muted practice-source"></span>
           <div id="practice-feedback" class="practice-feedback"></div>
         </div>
         <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
-          <button type="button" class="text-link" id="practice-wrong" title="只做做错过、还没做对的题">错题本</button>
+          <button type="button" class="text-link" id="practice-wrong" title="只做做错过、还没做对的题" data-i18n="practice.wrongBook" data-i18n-title="practice.wrongBook.title">错题本</button>
           <span class="spacer" style="flex:1"></span>
-          <button type="button" class="tool-btn primary" id="practice-next" hidden>下一题</button>
-          <button type="button" class="tool-btn" id="practice-close">关闭</button>
+          <button type="button" class="tool-btn primary" id="practice-next" hidden data-i18n="practice.next">下一题</button>
+          <button type="button" class="tool-btn" id="practice-close" data-i18n="dlg.close">关闭</button>
         </div>
       </div>
     </div>
 
-    <div class="modal-bg" id="stats-modal" role="dialog" aria-modal="true" aria-label="对局统计">
+    <div class="modal-bg" id="stats-modal" role="dialog" aria-modal="true" aria-label="对局统计" data-i18n-aria="stats.title">
       <div class="modal">
-        <h3>对局统计</h3>
-        <div id="stats-empty" class="muted" hidden>还没有完成的对局</div>
+        <h3 data-i18n="stats.title">对局统计</h3>
+        <div id="stats-empty" class="muted" hidden data-i18n="stats.empty">还没有完成的对局</div>
         <div id="stats-body" hidden></div>
         <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end">
-          <button type="button" class="tool-btn" id="stats-clear">清空</button>
-          <button type="button" class="tool-btn primary" id="stats-close">关闭</button>
+          <button type="button" class="tool-btn" id="stats-clear" data-i18n="stats.clear">清空</button>
+          <button type="button" class="tool-btn primary" id="stats-close" data-i18n="dlg.close">关闭</button>
         </div>
       </div>
     </div>
 
-    <div class="modal-bg" id="review-modal" role="dialog" aria-modal="true" aria-label="复盘分析">
+    <div class="modal-bg" id="review-modal" role="dialog" aria-modal="true" aria-label="复盘分析" data-i18n-aria="review.title">
       <div class="modal review-modal">
-        <h3>复盘分析</h3>
-        <div id="review-empty" class="muted" hidden>先下几手再来复盘</div>
+        <h3 data-i18n="review.title">复盘分析</h3>
+        <div id="review-empty" class="muted" hidden data-i18n="review.empty">先下几手再来复盘</div>
         <div id="review-body" hidden>
-          <p class="review-hint">评分曲线（黑上 · 白下）· 红点为失着 · 点曲线或下方失着可跳转</p>
-          <canvas id="review-curve" class="review-curve" title="点击跳到对应手"></canvas>
+          <p class="review-hint" data-i18n="review.curveHint">评分曲线（黑上 · 白下）· 红点为失着 · 点曲线或下方失着可跳转</p>
+          <canvas id="review-curve" class="review-curve" title="点击跳到对应手" data-i18n-title="review.curve.title"></canvas>
           <div class="review-stat" id="review-stat"></div>
           <div class="review-actions">
-            <button type="button" class="text-link" id="review-pv" title="从当前查看的一手起，引擎推演后续着法（虚影）">推演当前局面</button>
-            <button type="button" class="text-link" id="review-export">导出带评注 SGF</button>
+            <button type="button" class="text-link" id="review-pv" title="从当前查看的一手起，引擎推演后续着法（虚影）" data-i18n="review.pv" data-i18n-title="review.pv.title">推演当前局面</button>
+            <button type="button" class="text-link" id="review-export" data-i18n="review.exportSgf">导出带评注 SGF</button>
           </div>
           <div class="review-blunders" id="review-blunders"></div>
         </div>
         <div class="close-row">
-          <button type="button" class="tool-btn" id="review-close">关闭</button>
+          <button type="button" class="tool-btn" id="review-close" data-i18n="dlg.close">关闭</button>
         </div>
       </div>
     </div>
   </div>
   
+  <script src="js/i18n.js"></script>
   <script src="js/core.js"></script>
   <script src="js/sgf.js"></script>
   <script src="js/ai.js"></script>

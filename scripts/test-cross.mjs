@@ -363,6 +363,74 @@ async function enableSwap2Pvp(page) {
   await page.close();
 }
 
+// ---- Test G: 中英切换 — static markup, runtime strings and persistence ----
+{
+  const page = await newPage();
+  await page.keyboard.press("]");
+  await page.waitForTimeout(420);
+  const zh = await page.evaluate(() => ({
+    undo: document.getElementById("undo").textContent,
+    status: document.getElementById("status").textContent,
+    practice: document.getElementById("open-practice").textContent,
+    lang: document.documentElement.getAttribute("lang"),
+  }));
+
+  await page.click('#lang-seg button[data-lang="en"]');
+  await page.waitForTimeout(300);
+  const en = await page.evaluate(() => ({
+    undo: document.getElementById("undo").textContent,
+    status: document.getElementById("status").textContent,
+    practice: document.getElementById("open-practice").textContent,
+    title: document.getElementById("undo").getAttribute("title"),
+    lang: document.documentElement.getAttribute("lang"),
+    stored: localStorage.getItem("goban.v12.lang"),
+  }));
+  const CJK = /[\u4e00-\u9fa5]/;
+  // the whole visible chrome + sidebar must be free of Chinese in English mode
+  const leftovers = await page.evaluate(() => {
+    const out = [];
+    const scope = [document.querySelector(".chrome"), document.getElementById("side")];
+    for (const root of scope) {
+      root.querySelectorAll("*").forEach((el) => {
+        if (el.children.length) return; // leaf nodes only
+        const txt = (el.textContent || "").trim();
+        if (/[\u4e00-\u9fa5]/.test(txt) && !el.hasAttribute("data-i18n-raw")) out.push(txt.slice(0, 12));
+      });
+    }
+    return out;
+  });
+
+  // a runtime-rendered string too: play one move so the status line is derived
+  await clicker(page)(7, 7);
+  await page.waitForTimeout(400);
+  const runtimeEn = await page.evaluate(() => document.getElementById("status").textContent);
+
+  // persistence across reload
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  const afterReload = await page.evaluate(() => ({
+    undo: document.getElementById("undo").textContent,
+    lang: document.documentElement.getAttribute("lang"),
+  }));
+
+  // …and back to 中文
+  await page.keyboard.press("]");
+  await page.waitForTimeout(420);
+  await page.click('#lang-seg button[data-lang="zh"]');
+  await page.waitForTimeout(300);
+  const backZh = await page.evaluate(() => document.getElementById("undo").textContent);
+
+  report("G 中英切换：静态文案 + 运行时文案 + 持久化",
+    zh.undo === "悔棋" && en.undo === "Undo" && en.title === "Undo (Z)" &&
+      en.practice === "Practice" && !CJK.test(en.status) && en.lang === "en" &&
+      en.stored === "en" && leftovers.length === 0 && !CJK.test(runtimeEn) &&
+      afterReload.undo === "Undo" && afterReload.lang === "en" && backZh === "悔棋" &&
+      page.__errors.length === 0,
+    JSON.stringify({ zh: zh.undo, en: en.undo, runtimeEn, leftovers: leftovers.slice(0, 3),
+      afterReload: afterReload.undo, backZh, errs: page.__errors }));
+  await page.close();
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");

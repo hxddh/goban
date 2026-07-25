@@ -23,8 +23,14 @@
  * @module practice
  */
 (function (global) {
+  const t = (k, p) => (global.GobanI18n ? global.GobanI18n.t(k, p) : k);
   const Core = global.GobanCore;
   const Ai = global.GobanAi;
+  /** Stored puzzle provenance. ASCII so the source carries no display text;
+   *  daily snapshots written before v1.29 still hold the old Chinese tag. */
+  const SRC_GAME = "game";
+  const SRC_BANK = "builtin";
+  const isFromGame = (src) => src === SRC_GAME || src === "\u5bf9\u5c40";
   const SIZE = Core.SIZE;
 
   /**
@@ -374,12 +380,12 @@
         if (Core.wouldWin(pre, played.r, played.c, side)) continue; // played the win
         let p = null;
         if (Ai.listWinCells(pre, side).length) {
-          p = makePuzzle(pre, side, "win1", "对局");
+          p = makePuzzle(pre, side, "win1", SRC_GAME);
         } else {
           const after = cloneBoard(pre);
           after[played.r][played.c] = side;
           if (Ai.listWinCells(after, Core.opp(side)).length) {
-            p = makePuzzle(pre, side, "defend", "对局"); // null when hopeless
+            p = makePuzzle(pre, side, "defend", SRC_GAME); // null when hopeless
           }
         }
         if (p) {
@@ -396,7 +402,7 @@
   function buildCandidates() {
     const list = [];
     for (const def of BUILTINS) {
-      const p = makePuzzle(boardOf(def), def.side, def.type, "内置", def.sol);
+      const p = makePuzzle(boardOf(def), def.side, def.type, SRC_BANK, def.sol);
       if (p) list.push(p);
     }
     list.push(...fromGames());
@@ -611,7 +617,7 @@
     const pool = [];
     for (const def of st.puzzles) {
       // re-validate through the same predicates as every other puzzle
-      const p = makePuzzle(boardOf(def), def.side, def.type, def.source || "内置", def.sol);
+      const p = makePuzzle(boardOf(def), def.side, def.type, def.source || SRC_BANK, def.sol);
       if (p) pool.push(p);
     }
     return { state: st, pool: pool };
@@ -704,10 +710,10 @@
   }
 
   function taskText() {
-    const who = cur.side === "b" ? "黑" : "白";
-    if (cur.type === "win1") return who + "先 · 找出一步成五的制胜点";
-    if (cur.type === "vcf") return who + "先 · 找出连续冲四取胜的第一手";
-    return who + "先 · 挡住对方的成五威胁";
+    const who = t(cur.side === "b" ? "side.black" : "side.white");
+    if (cur.type === "win1") return t("practice.task.win1", { who: who });
+    if (cur.type === "vcf") return t("practice.task.vcf", { who: who });
+    return t("practice.task.defend", { who: who });
   }
 
   function setFeedback(html, cls) {
@@ -720,14 +726,14 @@
     if (el) {
       if (!cur) {
         el.textContent = pool.length
-          ? "共 " + pool.length + " 题 · 答对 " + score
+          ? t("practice.progress.done", { total: pool.length, score: score })
           : "";
       } else {
-        el.textContent = "第 " + (idx + 1) + " / " + pool.length + " 题 · 答对 " + score;
+        el.textContent = t("practice.progress.at", { n: idx + 1, total: pool.length, score: score });
       }
     }
     const src = document.getElementById("practice-source");
-    if (src) src.textContent = cur ? (cur.source === "对局" ? "来自你的对局" : "内置题") : "";
+    if (src) src.textContent = cur ? t(isFromGame(cur.source) ? "practice.src.fromGame" : "practice.src.fromBank") : "";
   }
 
   function setTitle(text) {
@@ -737,7 +743,7 @@
 
   function setModalLabel(label) {
     const m = document.getElementById("practice-modal");
-    if (m) m.setAttribute("aria-label", label || "战术练习");
+    if (m) m.setAttribute("aria-label", label || t("practice.title"));
   }
 
   function focusPracticeClose() {
@@ -771,23 +777,26 @@
       // streak but never re-counts it.
       const st = advanceDaily(loadDaily() || {}, dailyDate, score, pool.length);
       saveDaily(st);
-      if (task) task.textContent = "今日挑战完成";
+      if (task) task.textContent = t("daily.done");
       setFeedback(
-        "答对 " + score + " / " + pool.length + " · 连续打卡 " + (st.streak || 1) + " 天 🔥",
+        t("daily.summary", { score: score, total: pool.length, streak: st.streak || 1 }),
         "good");
-      if (next) { next.hidden = false; next.textContent = "再练一遍"; }
+      if (next) { next.hidden = false; next.textContent = t("daily.replay"); }
     } else if (runMode === "wrong") {
-      if (task) task.textContent = "错题本完成";
+      if (task) task.textContent = t("practice.book.done");
       const left = unmastered(buildCandidates(), loadProgress()).length;
       setFeedback(
-        "答对 " + score + " / " + pool.length + " 题" +
-          (left ? " · 还剩 " + left + " 题未攻克" : " · 错题本已清空 🎉"),
+        t(left ? "practice.book.left" : "practice.book.cleared",
+          { score: score, total: pool.length, left: left }),
         left ? "" : "good");
-      if (next) { next.hidden = false; next.textContent = left ? "再来一轮" : "回到练习"; }
+      if (next) {
+        next.hidden = false;
+        next.textContent = t(left ? "practice.again" : "practice.book.backToPractice");
+      }
     } else {
-      if (task) task.textContent = "本轮完成";
-      setFeedback("答对 " + score + " / " + pool.length + " 题 🎉", "good");
-      if (next) { next.hidden = false; next.textContent = "再来一轮"; }
+      if (task) task.textContent = t("practice.roundDone");
+      setFeedback(t("practice.roundScore", { score: score, total: pool.length }), "good");
+      if (next) { next.hidden = false; next.textContent = t("practice.again"); }
     }
     syncWrongButton();
     setProgress(); // reflects score with cur=null ("共 N 题 · 答对 X")
@@ -825,18 +834,16 @@
     }
     drawBoard(line.length ? line : marks, line.length ? marks : null);
     if (good) {
-      setFeedback("✓ 正解！", "good");
+      setFeedback(t("practice.correct"), "good");
     } else {
       setFeedback(
-        cur.type === "win1"
-          ? "✗ 这一点不能一步成五。绿色点位可直接连五。"
-          : cur.type === "vcf"
-            ? "✗ 这一手无法把对方逼死。棋盘上按顺序摆出了正解：绿圈是你的冲四，对方每一手应手都是唯一的，最终成五。"
-            : "✗ 对方下一手就会成五。必须挡在成五点上（或自己抢先成五）——绿色点位。",
+        t(cur.type === "win1" ? "practice.wrong.win1"
+          : cur.type === "vcf" ? "practice.wrong.vcf"
+          : "practice.wrong.defend"),
         "bad");
     }
     const next = document.getElementById("practice-next");
-    if (next) { next.hidden = false; next.textContent = idx + 1 < pool.length ? "下一题" : "看结果"; }
+    if (next) { next.hidden = false; next.textContent = t(idx + 1 < pool.length ? "practice.next" : "practice.seeResult"); }
   }
 
   function onNext() {
@@ -858,7 +865,7 @@
     score = 0;
     if (!pool.length) {
       const task = document.getElementById("practice-task");
-      if (task) task.textContent = "暂无可用题目";
+      if (task) task.textContent = t("practice.empty");
       return;
     }
     showPuzzle();
@@ -870,13 +877,13 @@
     pool = unmastered(buildCandidates(), loadProgress());
     idx = 0;
     score = 0;
-    setTitle("错题本");
-    setModalLabel("错题本");
+    setTitle(t("practice.wrongBook"));
+    setModalLabel(t("practice.wrongBook"));
     if (!pool.length) {
       cur = null;
       const task = document.getElementById("practice-task");
-      if (task) task.textContent = "错题本是空的";
-      setFeedback("做错的题会收进这里，答对一次就移出。", "");
+      if (task) task.textContent = t("practice.book.empty");
+      setFeedback(t("practice.book.emptyHint"), "");
       clearMiniBoard();
       setProgress();
       const next = document.getElementById("practice-next");
@@ -892,7 +899,7 @@
     const btn = document.getElementById("practice-wrong");
     if (!btn) return;
     const n = unmastered(buildCandidates(), loadProgress()).length;
-    btn.textContent = n ? "错题本 " + n : "错题本";
+    btn.textContent = n ? t("practice.book.count", { n: n }) : t("practice.wrongBook");
     btn.disabled = runMode === "wrong" && !n;
   }
 
@@ -919,7 +926,7 @@
     score = 0;
     if (!pool.length) {
       const task = document.getElementById("practice-task");
-      if (task) task.textContent = "暂无可用题目";
+      if (task) task.textContent = t("practice.empty");
       return;
     }
     if (r.state.lastDoneDate === dailyDate) {
@@ -927,13 +934,16 @@
       cur = null;
       score = r.state.lastScore != null ? r.state.lastScore : 0;
       const task = document.getElementById("practice-task");
-      if (task) task.textContent = "今日挑战已完成";
+      if (task) task.textContent = t("daily.doneToday");
       setFeedback(
-        "今天答对 " + (r.state.lastScore != null ? r.state.lastScore : 0) + " / " +
-          (r.state.lastTotal || pool.length) + " · 连续打卡 " + (r.state.streak || 1) + " 天",
+        t("daily.summaryToday", {
+          score: r.state.lastScore != null ? r.state.lastScore : 0,
+          total: r.state.lastTotal || pool.length,
+          streak: r.state.streak || 1,
+        }),
         "good");
       const next = document.getElementById("practice-next");
-      if (next) { next.hidden = false; next.textContent = "再练一遍"; }
+      if (next) { next.hidden = false; next.textContent = t("daily.replay"); }
       setProgress();
       clearMiniBoard();
       return;
@@ -944,8 +954,8 @@
   function open() {
     const m = document.getElementById("practice-modal");
     if (m) m.classList.add("show");
-    setTitle("战术练习");
-    setModalLabel("战术练习");
+    setTitle(t("practice.title"));
+    setModalLabel(t("practice.title"));
     const wrongBtn = document.getElementById("practice-wrong");
     if (wrongBtn) wrongBtn.hidden = false;
     start();
@@ -956,8 +966,8 @@
   function openDaily() {
     const m = document.getElementById("practice-modal");
     if (m) m.classList.add("show");
-    setTitle("每日挑战");
-    setModalLabel("每日挑战");
+    setTitle(t("daily.title"));
+    setModalLabel(t("daily.title"));
     const wrongBtn = document.getElementById("practice-wrong");
     if (wrongBtn) wrongBtn.hidden = true; // 每日 is its own fixed set
     startDaily();
@@ -984,7 +994,7 @@
     if (closeBtn) closeBtn.addEventListener("click", close);
     const wrongBtn = document.getElementById("practice-wrong");
     if (wrongBtn) wrongBtn.addEventListener("click", () => {
-      if (runMode === "wrong") { setTitle("战术练习"); setModalLabel("战术练习"); start(); }
+      if (runMode === "wrong") { setTitle(t("practice.title")); setModalLabel(t("practice.title")); start(); }
       else startWrong();
       syncWrongButton();
     });
