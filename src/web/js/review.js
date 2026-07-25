@@ -6,6 +6,7 @@
  * @module review
  */
 (function (global) {
+  const t = (k, p) => (global.GobanI18n ? global.GobanI18n.t(k, p) : k);
   const SQUASH = 1200;      // static-eval scale → tanh spread
   const BLUNDER_DROP = 0.3; // squashed-advantage loss that flags a mistake
 
@@ -57,7 +58,7 @@
         // advantage from the mover's own perspective before vs after
         const before = color === "b" ? adv[i - 1] : -adv[i - 1];
         const after = color === "b" ? adv[i] : -adv[i];
-        if (before - after >= BLUNDER_DROP) reason = "评分下滑";
+        if (before - after >= BLUNDER_DROP) reason = t("review.blunderReason");
       }
       if (reason) {
         blunders.push({ i, color, reason });
@@ -136,8 +137,7 @@
     const stat = document.getElementById("review-stat");
     if (stat) {
       const s = data.summary;
-      stat.textContent = "失着 · 黑 " + s.b + " · 白 " + s.w +
-        (s.b + s.w === 0 ? " · 双方无明显失误" : "");
+      stat.textContent = t(s.b + s.w === 0 ? "review.statClean" : "review.stat", { b: s.b, w: s.w });
     }
     const list = document.getElementById("review-blunders");
     if (list) {
@@ -145,7 +145,7 @@
       if (!data.blunders.length) {
         const p = document.createElement("div");
         p.className = "muted review-none";
-        p.textContent = "没有检出明显失着 👍";
+        p.textContent = t("review.none");
         list.appendChild(p);
       }
       for (const b of data.blunders) {
@@ -153,13 +153,13 @@
         row.type = "button";
         row.className = "review-blunder-row";
         row.dataset.i = b.i;
-        const who = b.color === "b" ? "黑" : "白";
+        const who = t(b.color === "b" ? "side.black" : "side.white");
         const reason = document.createElement("span");
         reason.className = "rb-reason";
         reason.textContent = b.reason; // textContent — never HTML-inject reasons
         const move = document.createElement("span");
         move.className = "rb-move";
-        move.textContent = "第" + b.i + "手 " + who;
+        move.textContent = t("review.blunderRow", { n: b.i, color: who });
         row.appendChild(move);
         row.appendChild(reason);
         list.appendChild(row);

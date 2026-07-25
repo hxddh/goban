@@ -21,6 +21,7 @@ function load(rel) {
   vm.runInContext(code, ctx, { filename: rel });
 }
 
+load("src/web/js/i18n.js");
 load("src/web/js/core.js");
 load("src/web/js/sgf.js");
 load("src/web/js/ai.js");
@@ -841,6 +842,61 @@ const Practice = ctx.GobanPractice;
   assert(Ui.formatDuration(-5000) === "00:00", "formatDuration clamps negatives");
   const t = new Date(2026, 6, 25, 9, 5).getTime();
   assert(Ui.formatTime(t) === "07-25 09:05", "formatTime local, zero-padded — got " + Ui.formatTime(t));
+}
+
+// --- i18n: no user-visible Chinese may bypass the dictionary ---
+{
+  const I18n = ctx.GobanI18n;
+  const zhKeys = Object.keys(I18n.DICT.zh);
+  const enKeys = Object.keys(I18n.DICT.en);
+  assert(zhKeys.length > 300, "dictionary has the full UI (" + zhKeys.length + " keys)");
+  assert(
+    zhKeys.filter((k) => !I18n.DICT.en[k]).length === 0 &&
+      enKeys.filter((k) => !I18n.DICT.zh[k]).length === 0,
+    "zh and en cover exactly the same keys"
+  );
+  // every {placeholder} in zh must exist in en, or a translated message would
+  // silently drop a number
+  const holes = [];
+  for (const k of zhKeys) {
+    const of = (s) => [...new Set(s.match(/\{(\w+)\}/g) || [])].sort().join(",");
+    if (of(I18n.DICT.zh[k]) !== of(I18n.DICT.en[k])) holes.push(k);
+  }
+  assert(holes.length === 0, "placeholders match across languages (" + holes.join(",") + ")");
+
+  // Source scan: the whole point is that adding a Chinese string later without
+  // a dictionary entry breaks the build instead of silently shipping half a
+  // translation. Comments are exempt; i18n.js is the dictionary itself.
+  const CJK = /[\u4e00-\u9fa5]/;
+  const offenders = [];
+  const jsDir = path.join(root, "src/web/js");
+  for (const file of fs.readdirSync(jsDir)) {
+    if (!file.endsWith(".js") || file === "i18n.js" || file === "worker-src.js") continue;
+    const text = fs.readFileSync(path.join(jsDir, file), "utf8");
+    text.split("\n").forEach((line, i) => {
+      const code = line.replace(/\/\/.*$/, "").replace(/^\s*\*.*$/, "");
+      if (!CJK.test(code)) return;
+      // string literals only — a Chinese identifier is impossible here
+      const lits = code.match(/"[^"\n]*[\u4e00-\u9fa5][^"\n]*"/g) || [];
+      for (const lit of lits) offenders.push(file + ":" + (i + 1) + " " + lit);
+    });
+  }
+  assert(offenders.length === 0,
+    "no Chinese string literals outside the dictionary (" + offenders.slice(0, 3).join(" | ") + ")");
+
+  // index.html: every Chinese text node / title / aria-label must be tagged
+  const html = fs.readFileSync(path.join(root, "src/web/index.html"), "utf8");
+  const untagged = [];
+  for (const m of html.matchAll(/<([a-z0-9]+)([^>]*)>([^<>]*[\u4e00-\u9fa5][^<>]*)</gi)) {
+    if (!/data-i18n(=|\s|>)/.test(m[2]) && !/data-i18n-raw/.test(m[2])) {
+      untagged.push(m[3].trim().slice(0, 20));
+    }
+  }
+  for (const m of html.matchAll(/<[^>]*\b(title|aria-label)="[^"]*[\u4e00-\u9fa5][^"]*"[^>]*>/gi)) {
+    if (!/data-i18n-(title|aria)/.test(m[0])) untagged.push("attr:" + m[1]);
+  }
+  assert(untagged.length === 0,
+    "every Chinese string in index.html is tagged (" + untagged.slice(0, 4).join(" | ") + ")");
 }
 
 if (failed) {

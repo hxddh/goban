@@ -12,6 +12,7 @@
  * @module ui
  */
 (function (global) {
+  const t = (k, p) => (global.GobanI18n ? global.GobanI18n.t(k, p) : k);
   const SIZE = (global.GobanCore && global.GobanCore.SIZE) || 15;
 
   let toastTimer = 0;
@@ -127,17 +128,17 @@
     if (swap2.phase === "place" || swap2.phase === "place2") {
       const target = swap2.phase === "place" ? 3 : 5;
       btns.innerHTML = "";
-      msg.textContent = "平衡开局 · 请落第 " + (placed + 1) + " 子（共 " + target + "）";
+      msg.textContent = t("swap2.place", { n: placed + 1, total: target });
       bar.hidden = false;
       return;
     }
     let items;
     if (swap2.phase === "p2choose") {
-      msg.textContent = "开局已布 3 子 · 由你选择：";
-      items = [["black", "执黑"], ["white", "执白"], ["add2", "加两手"]];
+      msg.textContent = t("swap2.p2choose");
+      items = [["black", t("swap2.takeBlack")], ["white", t("swap2.takeWhite")], ["add2", t("swap2.add2")]];
     } else { // p1choose
-      msg.textContent = "对手已加两手 · 请选择执子：";
-      items = [["black", "执黑"], ["white", "执白"]];
+      msg.textContent = t("swap2.p1choose");
+      items = [["black", t("swap2.takeBlack")], ["white", t("swap2.takeWhite")]];
     }
     btns.innerHTML = "";
     for (const it of items) {

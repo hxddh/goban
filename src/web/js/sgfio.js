@@ -10,6 +10,7 @@
  * @module sgfio
  */
 (function (global) {
+  const t = (k, p) => (global.GobanI18n ? global.GobanI18n.t(k, p) : k);
   const Sgf = global.GobanSgf;
   const Host = global.GobanHost;
 
@@ -48,34 +49,34 @@
     const toast = deps.toast;
     if (Host.hasZero()) {
       try {
-        const path = await Host.saveFileDialog({ title: "导出 SGF", defaultName: name });
-        if (path == null) { toast("已取消导出"); return; }
+        const path = await Host.saveFileDialog({ title: t("export.title"), defaultName: name });
+        if (path == null) { toast(t("export.cancelled")); return; }
         await Host.writeTextFile(path, sgf);
         await Host.revealPath(path);
-        toast("已导出 " + name);
+        toast(t("export.done", { name: name }));
         return;
       } catch (e) {}
     }
     try {
       downloadBlob(sgf, name);
-      toast("已导出 " + name);
+      toast(t("export.done", { name: name }));
     } catch (_) {
-      try { await copyText(sgf); toast("导出受限，SGF 已复制到剪贴板"); }
-      catch (e2) { toast("导出失败"); }
+      try { await copyText(sgf); toast(t("export.toClipboard")); }
+      catch (e2) { toast(t("export.fail")); }
     }
   }
 
   async function download() {
-    if (!deps.getGame().history.length) { deps.toast("还没有棋谱可导出"); return; }
+    if (!deps.getGame().history.length) { deps.toast(t("export.nothing")); return; }
     await exportString(buildSgf(), fileName());
   }
 
   async function copy() {
-    if (!deps.getGame().history.length) { deps.toast("还没有棋谱可复制"); return; }
+    if (!deps.getGame().history.length) { deps.toast(t("copy.nothing")); return; }
     try {
       await copyText(buildSgf());
-      deps.toast("SGF 已复制到剪贴板");
-    } catch (_) { deps.toast("复制失败，请用导出文件"); }
+      deps.toast(t("copy.done"));
+    } catch (_) { deps.toast(t("copy.fail")); }
   }
 
   global.GobanSgfIo = { init, buildSgf, fileName, exportString, copyText, download, copy };

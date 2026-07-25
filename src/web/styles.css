@@ -631,10 +631,14 @@
     .review-blunder-row .rb-move { font-weight: 600; }
     .review-blunder-row .rb-reason { color: var(--muted); }
 
+    /* Fixed 3-column grid rather than a wrapping flex row: with English labels
+       the six links wrap, and space-between then flings the last two to the
+       panel edges. A grid lays out identically whatever the language. */
     .link-row {
-      display: flex; gap: 4px; margin-top: 14px;
-      justify-content: space-between; flex-wrap: wrap;
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 2px 4px; margin-top: 14px;
     }
+    .link-row .text-link { text-align: center; }
     .text-link {
       appearance: none; border: 0; background: transparent;
       color: var(--accent);
