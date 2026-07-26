@@ -730,6 +730,62 @@ async function enableSwap2Pvp(page) {
   await page.close();
 }
 
+// P 渐变底上的文字也要过 AA。此前每一次对比度审计都把 background-image 是渐变的
+// 元素整个跳过（"渐变底跳过 7~9"），于是「新局」这个主按钮的白字在日间/笔记本主题下
+// 一直是 2.79（顶边）/ 3.44–4.20（文字所在的那条带），从 v1.9 活到 v1.33.1，
+// 连过四次审计。跳过等于没测 —— 这一条按色标插值算，不再回避。
+{
+  const bad = [];
+  const page = await newPage();
+  for (const theme of ["wood", "night", "day", "notebook"]) {
+    await page.evaluate((t) => document.querySelector(`#theme-seg button[data-theme="${t}"]`)?.click(), theme);
+    await page.waitForTimeout(150);
+    const rows = await page.evaluate((t) => {
+      const parse = (s) => {
+        const n = (s.match(/[\d.]+/g) || []).map(Number);
+        if (/^color\(srgb/.test(s)) return [n[0] * 255, n[1] * 255, n[2] * 255];
+        return [n[0], n[1], n[2]];
+      };
+      const lum = ([r, g, b]) => {
+        const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+      };
+      const ratio = (a, b) => {
+        const x = lum(a), y = lum(b);
+        return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+      };
+      const mix = (a, b, u) => a.map((v, i) => v + (b[i] - v) * u);
+      const out = [];
+      for (const el of document.querySelectorAll("*")) {
+        const cs = getComputedStyle(el);
+        if (!/gradient/.test(cs.backgroundImage)) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1) continue;
+        if (![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+        const stops = (cs.backgroundImage.match(/rgba?\([^)]+\)|color\(srgb[^)]+\)/g) || []).map(parse);
+        if (stops.length < 2) continue;
+        const fg = parse(cs.color);
+        // 采样整只元素（含边缘）：文字可能不居中，保守一点
+        const worst = Math.min(...[0, 0.25, 0.5, 0.75, 1].map((u) => {
+          const i = Math.min(stops.length - 2, Math.floor(u * (stops.length - 1)));
+          const local = (u * (stops.length - 1)) - i;
+          return ratio(fg, mix(stops[i], stops[i + 1], local));
+        }));
+        const size = parseFloat(cs.fontSize), wt = Number(cs.fontWeight) || 400;
+        const large = size >= 18 || (size >= 14 && wt >= 700);
+        out.push({ theme: t, txt: (el.textContent || "").trim().slice(0, 6),
+                   worst: +worst.toFixed(2), need: large ? 3 : 4.5 });
+      }
+      return out;
+    }, theme);
+    for (const r of rows) if (r.worst < r.need) bad.push(r);
+  }
+  report("P 渐变背景上的文字同样过 AA（按色标插值，不跳过）",
+    bad.length === 0 && page.__errors.length === 0,
+    JSON.stringify({ bad, errs: page.__errors }));
+  await page.close();
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");
