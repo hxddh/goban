@@ -50,6 +50,9 @@ execFileSync(process.execPath, [path.join(__dirname, "gen-worker-src.mjs"), WORK
 const WORKER_SRC_FILE = path.join(WORKER_SRC_DIR, "worker-src.js");
 
 const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" };
+/** Flipped by gate V; the stylesheet is linked from index.html, so the request
+ *  for it carries no query of ours — a server flag is the only handle. */
+let NOMIX = false;
 const server = http.createServer((req, res) => {
   const urlPath = decodeURIComponent((req.url || "/").split("?")[0]);
   const rel = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
@@ -61,6 +64,23 @@ const server = http.createServer((req, res) => {
   const file = path.join(webRoot, rel);
   if (!file.startsWith(webRoot) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.writeHead(404); res.end("not found"); return;
+  }
+  // NOMIX serves the stylesheet an engine without color-mix() effectively
+  // sees: every color-mix declaration dropped, and @supports not(...) taken.
+  // Only "prop: …color-mix(" lines go — striking the @supports condition line
+  // would leave an orphan block, and striking a comment line that carries the
+  // closing */ would swallow everything after it. Both mistakes corrupt the
+  // sheet from that point on and make the simulation measure nothing real.
+  if (rel === "styles.css" && NOMIX) {
+    const css = fs.readFileSync(file, "utf8")
+      .split("\n")
+      .filter((l) => !/^\s*[-a-z][-a-z]*\s*:.*color-mix\(/.test(l))
+      .join("\n")
+      .replace("@supports not (background: color-mix(in srgb, red 50%, blue))",
+               "@supports (display: block)");
+    res.writeHead(200, { "content-type": "text/css" });
+    res.end(css);
+    return;
   }
   res.writeHead(200, { "content-type": MIME[path.extname(file)] || "application/octet-stream" });
   res.end(fs.readFileSync(file));
@@ -1069,6 +1089,138 @@ async function enableSwap2Pvp(page) {
   report("U 侧栏滚动区两端按需淡出（到底就不再压暗）",
     bad.length === 0, JSON.stringify({ bad }));
   await page.close();
+}
+
+// V 去掉 color-mix 之后，界面必须还在。
+// 这套回归跑在 Chromium，而应用跑 WKWebView / WebView2，且发出去的 Info.plist 写着
+// LSMinimumSystemVersion 11.0（SDK 打包器写死，app.zon 改不了）。样式表用了 37 处
+// color-mix，老 WebKit 不认这个函数时整条声明作废。在 v1.37 的样式表上模拟这一点：
+// 侧栏、toast、swap2 条、badge、主题选中态五处背景直接算成 rgba(0,0,0,0)，开关的
+// 「开」退回「关」的颜色，棋谱行退回按钮的 UA 黑字压在近黑面板上。单测那两道闸门
+// 守的是源码形态，这一道守的是渲染结果。
+{
+  const bad = [];
+  NOMIX = true;
+  try {
+    const page = await newPage();
+    const click = clicker(page);
+    await click(7, 7);
+    await page.waitForTimeout(1400);
+    const r = await page.evaluate(() => {
+      const opaque = (c) => !/rgba\(0, 0, 0, 0\)|transparent/.test(c);
+      const lum = (c) => {
+        const m = c.match(/[\d.]+/g);
+        return m ? 0.2126 * +m[0] + 0.7152 * +m[1] + 0.0722 * +m[2] : null;
+      };
+      const out = { surfaces: [], text: [] };
+      for (const [sel, label] of [[".side", "侧栏"], [".toast", "toast"],
+                                  [".swap2-bar", "swap2 条"], [".badge", "badge"],
+                                  [".theme-row button.active", "主题选中态"],
+                                  ['.switch[aria-pressed="true"]', "开关开启态"]]) {
+        const el = document.querySelector(sel);
+        if (!el) { out.surfaces.push([label, "缺元素"]); continue; }
+        out.surfaces.push([label, getComputedStyle(el).backgroundColor,
+                           opaque(getComputedStyle(el).backgroundColor)]);
+      }
+      // 文字必须仍然读得出来：拿它和所在面板的亮度差说话
+      const panel = lum(getComputedStyle(document.querySelector(".side")).backgroundColor);
+      for (const [sel, label] of [[".move-list button", "棋谱行"]]) {
+        const el = document.querySelector(sel);
+        if (!el) { out.text.push([label, "缺元素"]); continue; }
+        const c = getComputedStyle(el).color;
+        out.text.push([label, c, Math.abs(lum(c) - panel)]);
+      }
+      return out;
+    });
+    for (const [label, val, ok] of r.surfaces) {
+      if (ok !== true) bad.push(label + " 背景 " + val);
+    }
+    for (const [label, val, sep] of r.text) {
+      if (!(sep > 30)) bad.push(label + " 文字 " + val + " 与面板亮度差仅 " + sep);
+    }
+    if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+    await page.close();
+  } finally {
+    NOMIX = false;
+  }
+  report("V 引擎不支持 color-mix 时界面不塌（表面不透明、文字仍可读）",
+    bad.length === 0, JSON.stringify({ bad }));
+}
+
+// W 布局要有余量，不能刚好放得下。
+// 这套回归在容器里渲染中文用的是 WenQuanYi Zen Hei —— macOS 装的是苹方、Windows
+// 装的是微软雅黑，两个平台都没有这个字体。所以「在 100% 下正好放得下」证明不了
+// 发布版应用放得下。把字号推到 125% 再断言同样的性质，才是能跨字体成立的那条。
+{
+  const bad = [];
+  for (const scale of [1.0, 1.25]) {
+    for (const lang of ["zh", "en"]) {
+      const page = await newPage();
+      if (lang === "en") {
+        await page.evaluate(() => document.querySelector('button[data-lang="en"]').click());
+        await page.waitForTimeout(350);
+      }
+      if (scale !== 1) {
+        await page.addStyleTag({ content:
+          `body,.side,.modal,.chrome{font-size:${Math.round(14 * scale)}px}` +
+          `.side-meta,.setting-row,.tool-btn,.text-link,.pill button{font-size:${Math.round(12 * scale)}px}` });
+      }
+      await page.waitForTimeout(350);
+      const r = await page.evaluate(() => {
+        const H = innerHeight, W = innerWidth;
+        const foot = [...document.querySelectorAll(".side-foot .text-link")];
+        const out = foot.filter((e) => {
+          const b = e.getBoundingClientRect();
+          return !(b.width > 0 && b.height > 0 && b.top >= 0 && b.bottom <= H + 0.5 &&
+                   b.left >= 0 && b.right <= W + 0.5);
+        }).map((e) => e.textContent.trim());
+        const m = document.querySelector(".side-meta");
+        const mb = m.getBoundingClientRect();
+        const kids = [...m.querySelectorAll(":scope > .meta-stats > *, :scope > :not(.meta-stats)")];
+        const rows = {};
+        for (const k of kids) {
+          const b = k.getBoundingClientRect();
+          (rows[Math.round(b.top)] = rows[Math.round(b.top)] || []).push((k.textContent || "").trim());
+        }
+        return {
+          footOut: out,
+          metaOver: +(Math.max(...kids.map((k) => k.getBoundingClientRect().right)) - mb.right).toFixed(1),
+          dotOnly: Object.values(rows).filter((v) => v.every((t) => t === "")).length,
+        };
+      });
+      const tag = Math.round(scale * 100) + "%" + lang;
+      if (r.footOut.length) bad.push(tag + ":脚栏出视口 " + r.footOut.join(","));
+      if (r.metaOver > 0.5) bad.push(tag + ":元信息溢出 " + r.metaOver + "px");
+      if (r.dotOnly) bad.push(tag + ":有 " + r.dotOnly + " 行只剩分隔点");
+      if (page.__errors.length) bad.push(tag + ":errs " + page.__errors.join("|"));
+      await page.close();
+    }
+  }
+  report("W 文字放大到 125% 布局仍不塌（跨字体的那条性质）",
+    bad.length === 0, JSON.stringify({ bad }));
+}
+
+// X 记住这套回归到底在拿什么字体量。
+// 容器换一次基础镜像，全仓库的文字像素数字就会集体平移，而没有任何东西会出声。
+// 这一条把它钉住：字体变了就报红，逼人重新量而不是继续引用旧数字。
+{
+  const bad = [];
+  const page = await newPage();
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send("DOM.enable");
+  await cdp.send("CSS.enable");
+  const { root } = await cdp.send("DOM.getDocument");
+  const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: ".brand" });
+  const { fonts } = await cdp.send("CSS.getPlatformFontsForNode", { nodeId });
+  const used = fonts.map((f) => f.familyName).sort();
+  // 已知的量测字体。换了就必须改这里，顺便重新审一遍受影响的数字。
+  const KNOWN = ["WenQuanYi Zen Hei"];
+  if (used.join(",") !== KNOWN.join(",")) {
+    bad.push("量测字体变了：" + JSON.stringify(used) + " ≠ " + JSON.stringify(KNOWN));
+  }
+  await page.close();
+  report("X 量测字体仍是已记录的那一个（换了就重新量）",
+    bad.length === 0, JSON.stringify({ used, bad }));
 }
 
 console.log("---");
