@@ -5,6 +5,23 @@
        exact conflict shipped an empty pill onto the board in v1.23. */
     [hidden] { display: none !important; }
 
+    /* 两条贯穿全表的约定，别当成手误清理掉 —— 1.38 之前它们都不在，代价见下。
+     *
+     * 一、每条 color-mix() 前面都有一条同属性的纯色声明。这不是重复：不认
+     *     color-mix 的引擎会丢掉整条声明，属性落回初始值。按此模拟 v1.37 的样式表，
+     *     侧栏 / toast / swap2 条 / badge / 主题选中态五处背景直接算成 rgba(0,0,0,0)，
+     *     开关的「开」退回「关」的颜色，棋谱行退回按钮的 UA 黑字压在近黑面板上。
+     *     支持 color-mix 的引擎上这些前置声明一律被后一条覆盖 —— 实测 139 个元素的
+     *     背景/文字/描边/阴影差异 0 处。自定义属性是唯一救不了的（它接受任何 token
+     *     序列，失效发生在代换阶段，结果是 unset 而非回退），那一处用 @supports。
+     *
+     * 二、backdrop-filter / user-select / appearance / mask-image 一律带 -webkit-
+     *     成对出现。.side 从 v1.9 起就带着前缀而另外三处 backdrop-filter 没有，
+     *     其中一处是 .modal-bg —— 每个弹层背后的虚化。
+     *
+     * 两条都有单测闸门（含反证）盯着，交叉闸门 V 再从渲染结果这一侧兜一道。
+     * 这个应用跑 WKWebView / WebView2，而回归跑 Chromium，闸门是唯一的替代品。 */
+
     :root, [data-theme="wood"] {
       --bg: #14100e;
       --panel: #241c18;
@@ -122,6 +139,7 @@
       font-feature-settings: "kern" 1;
       line-height: var(--lh-ui);
       -webkit-font-smoothing: antialiased;
+      -webkit-user-select: none;
       user-select: none;
       overflow: hidden;
     }
@@ -151,6 +169,7 @@
       background: var(--btn-ghost);
       border: 1px solid var(--card-border);
       backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       transition: color .2s var(--ease), border-color .2s var(--ease), background .2s var(--ease);
       /* Long status strings (导入复盘…) must not shove chrome actions off-screen */
       max-width: min(42vw, 280px);
@@ -166,12 +185,16 @@
     }
     .status-pill.win {
       color: var(--win);
+      border-color: var(--card-border);
       border-color: color-mix(in srgb, var(--win) 35%, transparent);
+      background: var(--btn-ghost);
       background: color-mix(in srgb, var(--win) 12%, transparent);
     }
     .status-pill.thinking {
       color: var(--accent-text);
+      border-color: var(--card-border);
       border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+      background: var(--btn-ghost);
       background: color-mix(in srgb, var(--accent) 10%, transparent);
     }
     .status-pill.replay {
@@ -186,7 +209,7 @@
     .chrome-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
     .icon-btn, .tool-btn {
       line-height: var(--lh-tight);
-      appearance: none; border: 0; border-radius: var(--radius-sm);
+      -webkit-appearance: none; appearance: none; border: 0; border-radius: var(--radius-sm);
       background: var(--btn-ghost); color: var(--text);
       border: 1px solid var(--card-border);
       font: inherit; cursor: pointer;
@@ -258,6 +281,7 @@
          where the actions no longer fit beside the panel). */
       position: absolute; top: var(--chrome-h); right: 0; bottom: 0;
       width: var(--side-w); z-index: 30;
+      background: var(--panel);
       background: color-mix(in srgb, var(--panel) 94%, transparent);
       border-left: 1px solid var(--panel-border);
       backdrop-filter: blur(22px) saturate(1.15);
@@ -381,7 +405,7 @@
     }
     .pill button {
       line-height: var(--lh-tight);
-      appearance: none; border: 0; background: transparent;
+      -webkit-appearance: none; appearance: none; border: 0; background: transparent;
       color: var(--muted);
       font: inherit; font-size: 12px; font-weight: 500;
       padding: 8px 12px; border-radius: 6px;
@@ -390,6 +414,7 @@
     }
     .pill button:hover { color: var(--text); }
     .pill button.active {
+      background: var(--btn-hover);
       background: color-mix(in srgb, var(--panel) 88%, var(--text));
       color: var(--text);
       box-shadow: 0 1px 2px rgba(0,0,0,.12);
@@ -422,6 +447,12 @@
     }
     [data-theme="day"] .theme-row,
     [data-theme="notebook"] .theme-row { --sw-active-bg: #fff; }
+    /* 自定义属性接受任何 token 序列，所以「前一条声明兜底」这招对它无效：不支持
+       color-mix 的引擎不会退回上一条，而是让用到它的 background 变成 unset ——
+       主题按钮的选中态会整个消失。只有 @supports 能替它挡住。 */
+    @supports not (background: color-mix(in srgb, red 50%, blue)) {
+      .theme-row { --sw-active-bg: var(--btn-hover); }
+    }
     /* Single glyphs (木/夜/日/本), so they get a narrower floor than the 40px
        word-sized buttons in the other capsules — still past the 24px hit min. */
     .theme-row button { min-width: 32px; color: var(--sw-fg); }
@@ -429,6 +460,7 @@
     .theme-row button.active {
       background: var(--sw-active-bg);
       color: var(--sw-fg-strong);
+      border-color: var(--accent);
       border-color: color-mix(in srgb, var(--accent) 55%, transparent);
       font-weight: 600;
     }
@@ -437,7 +469,7 @@
     .switch {
       position: relative;
       width: 44px; height: 28px;
-      appearance: none; border: 0; padding: 0;
+      -webkit-appearance: none; appearance: none; border: 0; padding: 0;
       border-radius: 999px;
       background: var(--btn);
       border: 1px solid var(--card-border);
@@ -452,6 +484,7 @@
       transition: transform .2s var(--ease), opacity .2s, background .2s;
     }
     .switch[aria-pressed="true"] {
+      background: var(--accent);
       background: color-mix(in srgb, var(--accent) 55%, var(--btn));
       border-color: transparent;
     }
@@ -474,6 +507,7 @@
     .move-list button {
       border: 0;
       background: transparent;
+      color: var(--muted);
       color: color-mix(in srgb, var(--text) 60%, transparent);
       font-size: 12px;
       font-variant-numeric: tabular-nums;
@@ -485,6 +519,7 @@
     }
     .move-list button:hover { background: var(--btn); color: var(--text); }
     .move-list button.cur {
+      background: var(--btn-hover);
       background: color-mix(in srgb, var(--accent) 32%, transparent);
       color: var(--text);
       font-weight: 600;
@@ -499,7 +534,7 @@
     }
     .replay-bar button {
       flex: 1;
-      appearance: none; border: 0; background: transparent;
+      -webkit-appearance: none; appearance: none; border: 0; background: transparent;
       color: var(--text);
       font: inherit; font-size: 16px; line-height: 1;
       padding: 8px 0; border-radius: 10px;
@@ -507,6 +542,7 @@
       transition: background .12s;
     }
     .replay-bar button:hover:not(:disabled) {
+      background: var(--btn-ghost);
       background: color-mix(in srgb, var(--text) 8%, transparent);
     }
     .replay-bar button:disabled { opacity: 0.28; cursor: default; }
@@ -522,18 +558,27 @@
       color: var(--fg);
     }
     .coach-verdict.grade-best {
+      color: #2f9e5e;
       color: color-mix(in srgb, #2f9e5e 82%, var(--fg));
+      border-color: var(--card-border);
       border-color: color-mix(in srgb, #2f9e5e 40%, var(--card-border));
+      background: var(--btn-ghost);
       background: color-mix(in srgb, #2f9e5e 10%, transparent);
     }
     .coach-verdict.grade-ok {
+      color: #c9911e;
       color: color-mix(in srgb, #c9911e 85%, var(--fg));
+      border-color: var(--card-border);
       border-color: color-mix(in srgb, #c9911e 40%, var(--card-border));
+      background: var(--btn-ghost);
       background: color-mix(in srgb, #c9911e 10%, transparent);
     }
     .coach-verdict.grade-blunder {
+      color: var(--win);
       color: color-mix(in srgb, var(--win) 88%, var(--fg));
+      border-color: var(--card-border);
       border-color: color-mix(in srgb, var(--win) 42%, var(--card-border));
+      background: var(--btn-ghost);
       background: color-mix(in srgb, var(--win) 10%, transparent);
     }
     .coach-verdict.grade-pending { opacity: 0.72; font-weight: 500; }
@@ -560,7 +605,7 @@
     }
     .slot-name {
       grid-area: name;
-      appearance: none;
+      -webkit-appearance: none; appearance: none;
       border: 1px solid transparent;
       background: transparent;
       color: var(--fg);
@@ -606,11 +651,13 @@
       display: flex; flex-direction: column; align-items: center; gap: 8px;
       max-width: min(90%, 420px);
       padding: 12px 16px;
+      background: var(--panel);
       background: color-mix(in srgb, var(--panel) 92%, transparent);
       border: 1px solid var(--card-border);
       border-radius: 10px;
       box-shadow: 0 6px 24px rgba(0,0,0,0.22);
       backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
       z-index: 6;
     }
     .swap2-msg {
@@ -618,8 +665,10 @@
     }
     .swap2-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
     .swap2-btn {
-      appearance: none;
+      -webkit-appearance: none; appearance: none;
+      border: 1px solid var(--card-border);
       border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--card-border));
+      background: var(--btn-ghost);
       background: color-mix(in srgb, var(--accent) 12%, transparent);
       color: var(--accent-text);
       font: inherit; font-size: 13px; font-weight: 600;
@@ -627,7 +676,9 @@
       transition: background .12s, border-color .12s;
     }
     .swap2-btn:hover {
+      background: var(--btn-hover);
       background: color-mix(in srgb, var(--accent) 20%, transparent);
+      border-color: var(--accent);
       border-color: color-mix(in srgb, var(--accent) 60%, var(--card-border));
     }
 
@@ -649,7 +700,7 @@
     .practice-source { font-size: 12px; display: block; margin-bottom: 2px; }
     .practice-feedback { font-size: 13px; font-weight: 600; line-height: 1.4; }
     .practice-feedback.good { color: #2f9e5e; }
-    .practice-feedback.bad { color: color-mix(in srgb, var(--win) 85%, var(--fg)); }
+    .practice-feedback.bad { color: var(--win); color: color-mix(in srgb, var(--win) 85%, var(--fg)); }
 
     .stats-table {
       width: 100%; border-collapse: collapse;
@@ -671,7 +722,7 @@
     }
     .review-none { font-size: 13px; padding: 4px 2px; }
     .review-blunder-row {
-      appearance: none; text-align: left;
+      -webkit-appearance: none; appearance: none; text-align: left;
       display: flex; justify-content: space-between; align-items: center; gap: 8px;
       padding: 8px 12px;
       border: 1px solid var(--card-border);
@@ -682,7 +733,9 @@
       cursor: pointer;
     }
     .review-blunder-row:hover {
+      border-color: var(--card-border);
       border-color: color-mix(in srgb, var(--accent) 45%, var(--card-border));
+      background: var(--btn-ghost);
       background: color-mix(in srgb, var(--accent) 8%, transparent);
     }
     .review-blunder-row .rb-move { font-weight: 600; }
@@ -707,7 +760,7 @@
     .backup-row .muted { margin-right: auto; }
     .text-link {
       line-height: var(--lh-tight);
-      appearance: none; border: 0; background: transparent;
+      -webkit-appearance: none; appearance: none; border: 0; background: transparent;
       color: var(--accent-text);
       font: inherit; font-size: 12px; font-weight: 500;
       padding: 8px 4px; cursor: pointer;
@@ -719,8 +772,10 @@
     .text-link.danger { color: var(--muted); }
     .text-link.danger:hover { color: var(--win); }
     .continue-btn {
-      appearance: none; width: 100%; margin-top: 8px;
+      -webkit-appearance: none; appearance: none; width: 100%; margin-top: 8px;
+      border: 1px solid var(--card-border);
       border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--card-border));
+      background: var(--btn-ghost);
       background: color-mix(in srgb, var(--accent) 12%, transparent);
       color: var(--accent-text);
       font: inherit; font-size: 13px; font-weight: 600;
@@ -729,7 +784,9 @@
       transition: background .12s, border-color .12s;
     }
     .continue-btn:hover:not(:disabled) {
+      background: var(--btn-hover);
       background: color-mix(in srgb, var(--accent) 20%, transparent);
+      border-color: var(--accent);
       border-color: color-mix(in srgb, var(--accent) 55%, var(--card-border));
     }
     .continue-btn:disabled { opacity: 0.4; cursor: default; }
@@ -821,6 +878,7 @@
     }
     .badge {
       font-size: 11px; padding: 2px 4px; border-radius: 999px;
+      background: var(--accent);
       background: color-mix(in srgb, var(--accent) 80%, #000);
       color: #1a120a; font-weight: 600; letter-spacing: 0.02em;
     }
@@ -836,6 +894,7 @@
       /* Above every modal (confirm is 60) so saves/errors remain readable */
       z-index: 70;
       transform: translateX(-50%) translateY(10px);
+      background: var(--panel);
       background: color-mix(in srgb, var(--panel) 94%, #000);
       color: var(--text);
       border: 1px solid var(--panel-border);
@@ -854,6 +913,7 @@
       display: none; position: absolute; inset: 0; z-index: 50;
       background: rgba(0,0,0,.45); place-items: center;
       backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
     }
     .modal-bg.show { display: grid; }
     /* The in-app confirm can be opened from within another modal (e.g. the
@@ -955,6 +1015,7 @@
 }
 
 .board-frame-win #board-wrap {
+  box-shadow: var(--board-shadow);
   box-shadow: var(--board-shadow), 0 0 0 1px color-mix(in srgb, var(--win) 35%, transparent);
   transition: box-shadow .35s var(--ease);
 }

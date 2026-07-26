@@ -1291,6 +1291,112 @@ const Practice = ctx.GobanPractice;
   assert(deadKeys.length <= KNOWN_ORPHANS.length,
     "the known-orphan list does not grow silently (" + deadKeys.join(", ") + ")");
 
+  // ---- Engine-floor gates -------------------------------------------------
+  // The browser regression runs in Chromium. The app runs in WKWebView (macOS)
+  // and WebView2 (Windows), and its shipped Info.plist declares
+  // LSMinimumSystemVersion 11.0 — a floor the SDK's packager hard-codes and
+  // app.zon cannot override. Nothing in that suite can see a feature the CSS
+  // uses that an older WebKit does not have; these two gates are the only
+  // thing standing between the stylesheet and a whole platform generation.
+  const cssSrc = fs.readFileSync(path.join(root, "src/web/styles.css"), "utf8");
+
+  /** Declaration blocks, comments stripped: [{ sel, decls: ["prop: value"] }] */
+  function cssBlocks(css) {
+    const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const out = [];
+    let depth = 0, selStart = 0, bodyStart = -1, sel = "";
+    for (let i = 0; i < clean.length; i++) {
+      if (clean[i] === "{") {
+        if (depth === 0) { sel = clean.slice(selStart, i).trim(); bodyStart = i + 1; }
+        depth++;
+      } else if (clean[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          const body = clean.slice(bodyStart, i);
+          // At-rules (@media/@supports) wrap further blocks — recurse instead.
+          if (body.includes("{")) out.push(...cssBlocks(body));
+          else out.push({ sel, decls: body.split(";").map((d) => d.trim()).filter(Boolean) });
+          selStart = i + 1;
+        }
+      }
+    }
+    return out;
+  }
+
+  // Every color-mix() declaration needs a plain-colour declaration for the same
+  // property EARLIER in the same rule. An engine that cannot parse color-mix
+  // drops the later declaration and keeps the earlier one; without it the
+  // property falls to its initial value. Simulated on the v1.37 stylesheet,
+  // that cost five surfaces their background outright — the sidebar, the toast,
+  // the swap2 bar, the badge and the theme-picker's selected state all computed
+  // to rgba(0,0,0,0) — the switch's ON state became its OFF colour, and the
+  // move list fell back to the UA's black button text on a near-black panel.
+  const mixNoFallback = [];
+  for (const blk of cssBlocks(cssSrc)) {
+    const seen = new Set();
+    for (const d of blk.decls) {
+      const prop = d.slice(0, d.indexOf(":")).trim();
+      if (!prop) continue;
+      if (/color-mix\(/.test(d)) {
+        // Custom properties accept any token sequence, so a preceding
+        // declaration cannot shield them — they fail at substitution time and
+        // compute to unset. @supports is the only cover; assert it separately.
+        if (prop.startsWith("--")) {
+          if (!/@supports not \([^{]*color-mix/.test(cssSrc)) {
+            mixNoFallback.push(blk.sel + " { " + prop + " } 无 @supports 兜底");
+          }
+        } else if (!seen.has(prop)) {
+          mixNoFallback.push(blk.sel + " { " + prop + " }");
+        }
+      } else {
+        seen.add(prop);
+      }
+    }
+  }
+  assert(mixNoFallback.length === 0,
+    "每条 color-mix 声明前都有同属性的纯色兜底 (" + mixNoFallback.join(", ") + ")");
+
+  // Properties WebKit only ships prefixed. .side carried -webkit-backdrop-filter
+  // from v1.9 while three other backdrop-filter rules — including .modal-bg,
+  // the blur behind every dialog — did not: the author knew the prefix was
+  // needed and the codebase drifted anyway.
+  const PREFIXED = ["backdrop-filter", "user-select", "appearance", "mask-image"];
+  const missingPrefix = [];
+  for (const blk of cssBlocks(cssSrc)) {
+    const props = blk.decls.map((d) => d.slice(0, d.indexOf(":")).trim());
+    for (const p of PREFIXED) {
+      if (props.includes(p) && !props.includes("-webkit-" + p)) {
+        missingPrefix.push(blk.sel + " { " + p + " }");
+      }
+    }
+  }
+  assert(missingPrefix.length === 0,
+    "WebKit 需要前缀的属性都成对出现 (" + missingPrefix.join(", ") + ")");
+
+  // Negative controls against fabricated source, so they cannot go stale.
+  {
+    const bad = ".x { background: color-mix(in srgb, red 50%, blue); }";
+    const good = ".x { background: red; background: color-mix(in srgb, red 50%, blue); }";
+    const scanMix = (css) => cssBlocks(css).flatMap((b) => {
+      const seen = new Set(); const hits = [];
+      for (const d of b.decls) {
+        const prop = d.slice(0, d.indexOf(":")).trim();
+        if (/color-mix\(/.test(d)) { if (!seen.has(prop)) hits.push(prop); } else seen.add(prop);
+      }
+      return hits;
+    });
+    assert(scanMix(bad).length === 1, "color-mix 闸门认得出没有兜底的声明");
+    assert(scanMix(good).length === 0, "color-mix 闸门放过有兜底的声明");
+    const scanPre = (css) => cssBlocks(css).flatMap((b) => {
+      const props = b.decls.map((d) => d.slice(0, d.indexOf(":")).trim());
+      return PREFIXED.filter((p) => props.includes(p) && !props.includes("-webkit-" + p));
+    });
+    assert(scanPre(".y { backdrop-filter: blur(2px); }").length === 1,
+      "前缀闸门认得出漏掉的 -webkit-");
+    assert(scanPre(".y { -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }").length === 0,
+      "前缀闸门放过成对出现的声明");
+  }
+
   // A stone may be rendered in exactly one place. Three copies of the disc
   // (board / hover preview / 推演 variation) each carried their own radius and
   // their own gradient stops, and they drifted the moment one of them changed:
