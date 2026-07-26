@@ -1269,6 +1269,28 @@ const Practice = ctx.GobanPractice;
   }
   assert(dangling.length === 0,
     "every unguarded getElementById target exists in index.html (" + dangling.join(", ") + ")");
+  // Every dictionary key must be reachable. v1.32 deleted the sidebar
+  // paragraph that read "拖入 .sgf 或粘贴棋谱" — drag-and-drop import kept
+  // working (Host.onDropFiles), but the only thing that told anyone it existed
+  // was gone, and sgf.dropHint sat in both dictionaries referenced by nobody.
+  // A dead string is the fingerprint of a capability that lost its last door.
+  const i18nSrc = fs.readFileSync(path.join(root, "src/web/js/i18n.js"), "utf8");
+  const zhBlock = i18nSrc.slice(i18nSrc.indexOf("zh:"), i18nSrc.indexOf("en:"));
+  const dictKeys = [...zhBlock.matchAll(/^\s*"([a-zA-Z0-9_.]+)":/gm)].map((m) => m[1]);
+  let uses = fs.readFileSync(path.join(root, "src/web/index.html"), "utf8");
+  for (const f of fs.readdirSync(path.join(root, "src/web/js"))) {
+    if (f.endsWith(".js") && f !== "i18n.js") uses += "\n" + fs.readFileSync(path.join(root, "src/web/js", f), "utf8");
+  }
+  // Keys assembled at runtime (t("diff." + difficulty + ".full")) never appear
+  // literally; they are covered by the suites that render those strings.
+  const DYNAMIC = /^(diff|think|coach|status|result|practice\.kind)\./;
+  const deadKeys = dictKeys.filter((k) => !DYNAMIC.test(k) && !uses.includes('"' + k + '"'));
+  const KNOWN_ORPHANS = ["slots.saved", "practice.src.game", "practice.src.builtin"];
+  const fresh = deadKeys.filter((k) => !KNOWN_ORPHANS.includes(k));
+  assert(fresh.length === 0, "no unreachable i18n strings (" + fresh.join(", ") + ")");
+  assert(deadKeys.length <= KNOWN_ORPHANS.length,
+    "the known-orphan list does not grow silently (" + deadKeys.join(", ") + ")");
+
   // Negative controls, run against fabricated source so they cannot go stale:
   // the matcher must flag the unguarded form and must not flag the guarded one.
   const scan = (js, ids) =>
