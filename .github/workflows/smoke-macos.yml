@@ -1,0 +1,104 @@
+name: smoke-macos
+
+# 真机冒烟：在 macOS runner 上把应用带 automation 编译出来、真的启动它，
+# 然后用 SDK 自己的 `native automate` 问它三件事。
+#
+# 为什么需要它:交叉回归跑在 Playwright + Chromium,而应用在 macOS 跑 WKWebView。
+# 那套回归结构上证明不了「打包后的应用起不起得来」和「JS↔Zig 桥通不通」——这两件
+# 今天是零覆盖,而 v1.32 的初始化崩溃正是这个形状(界面照画,什么都不响应)。
+#
+# 这个工作流不进 ci.yml,只手动触发。第一次运行的目的就是回答一个未知数:
+# GitHub 的 macOS runner 到底给不给一个能开窗口的会话。答案无论是什么都记进
+# docs/ROADMAP.md,而不是留在某个人的印象里。
+#
+# 明确不在范围内:WebView 的像素。`native automate screenshot` 只覆盖 gpu_surface
+# 画布视图,SDK 文档写着 "WebView DOM interaction is intentionally out of scope"。
+# 所以这个工作流回答不了「界面长什么样」,只回答「它活着吗、桥通吗」。
+on:
+  workflow_dispatch:
+    inputs:
+      timeout_s:
+        description: "等待应用 ready 的秒数"
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: install Native SDK CLI
+        run: |
+          npm install -g @native-sdk/cli
+          native --version
+          echo "SDK_PATH=$(npm root -g)/@native-sdk/cli" >> "$GITHUB_ENV"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: sync frontend dist
+        run: |
+          rm -rf frontend/dist && mkdir -p frontend/dist/js
+          cp src/web/index.html src/web/styles.css frontend/dist/
+          cp src/web/js/*.js frontend/dist/js/
+          node scripts/gen-worker-src.mjs frontend/dist/js
+
+      # 环境探测先于一切:runner 有没有窗口会话,是这次实验唯一要回答的问题。
+      # 无论成败都打印出来,后面的步骤失败时才知道该归因于哪一边。
+      - name: 探测 GUI 会话
+        run: |
+          echo "--- launchctl managername ---"
+          launchctl managername || echo "(launchctl managername 失败)"
+          echo "--- 当前 session 类型 ---"
+          /usr/bin/python3 -c "
+          import subprocess
+          out = subprocess.run(['ps','-o','stat=','-p',str(__import__('os').getpid())],
+                               capture_output=True, text=True).stdout.strip()
+          print('进程状态:', out)
+          " || true
+          echo "--- WindowServer 在不在 ---"
+          pgrep -x WindowServer >/dev/null && echo "WindowServer: 在" || echo "WindowServer: 不在"
+          echo "--- native doctor ---"
+          native doctor || echo "(native doctor 返回非零,继续)"
+
+      - name: build (automation + js-bridge)
+        run: |
+          zig build -Doptimize=Debug \
+            -Dnative-sdk-path="$SDK_PATH" \
+            -Dautomation=true -Djs-bridge=true
+
+      # `wait` 不接超时参数(那是 `assert` 的),所以用 assert 一步到位:它轮询到
+      # 超时为止,同时把「ready=true 确实出现在快照里」这件事断言掉。
+      - name: 启动应用并断言 ready
+        id: run
+        run: |
+          rm -rf .zig-cache/native-sdk-automation
+          ./zig-out/bin/goban > app.log 2>&1 &
+          echo "APP_PID=$!" >> "$GITHUB_ENV"
+          native automate assert --timeout-ms "$(( ${{ inputs.timeout_s }} * 1000 ))" 'ready=true'
+
+      - name: 快照
+        if: always()
+        run: |
+          native automate snapshot || true
+          echo "--- snapshot.txt ---"
+          cat .zig-cache/native-sdk-automation/snapshot.txt || echo "(没有快照文件)"
+
+      # 桥往返:这是 Playwright 结构上到不了的那条路 —— goban.writeTextFile /
+      # readTextFile 是 Zig 侧的处理器,网页测试里根本不存在。
+      - name: 桥往返（native.ping）
+        if: always()
+        run: native automate bridge '{"command":"native.ping","payload":{}}' || true
+
+      - name: 应用日志
+        if: always()
+        run: cat app.log || true
+
+      - name: 收尾
+        if: always()
+        run: kill "$APP_PID" 2>/dev/null || true
