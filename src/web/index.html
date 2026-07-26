@@ -283,9 +283,12 @@
         <h3 data-i18n="stats.title">对局统计</h3>
         <div id="stats-empty" class="muted" hidden data-i18n="stats.empty">还没有完成的对局</div>
         <div id="stats-body" hidden></div>
-        <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end">
-          <button type="button" class="tool-btn" id="stats-clear" data-i18n="stats.clear">清空</button>
-          <button type="button" class="tool-btn primary" id="stats-close" data-i18n="dlg.close">关闭</button>
+        <!-- 关闭在六个弹层里只有这里曾是主按钮，而它旁边那个「清空」是不可逆地
+             删掉全部对局统计 —— 分量正好装反了。现在与存档弹层同一套写法：
+             破坏性动作走 .text-link.danger，关闭是普通按钮。 -->
+        <div class="close-row" style="display:flex;gap:8px;justify-content:space-between;align-items:center">
+          <button type="button" class="text-link danger" id="stats-clear" data-i18n="stats.clear">清空</button>
+          <button type="button" class="tool-btn" id="stats-close" data-i18n="dlg.close">关闭</button>
         </div>
       </div>
     </div>

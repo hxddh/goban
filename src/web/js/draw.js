@@ -150,7 +150,15 @@
    * recomputed from it so the board stays centred rather than drifting right.
    */
   function geometry() {
-    const w = _canvas.width;
+    return pitchFor(_canvas.width);
+  }
+
+  /**
+   * 整数格距,给定位图宽度。抽成独立函数是因为练习棋盘也要用同一条规则 ——
+   * 它此前自己算 pad = w*0.04、step = (w-2pad)/14,得到 13.44 / 22.08 两个小数,
+   * 30 条线全落在半像素上,正是 v1.35 在主棋盘上修掉的那个缺陷。
+   */
+  function pitchFor(w) {
     const step = Math.max(1, Math.round((w - 2 * (w * 0.045)) / (SIZE - 1)));
     const pad = Math.round((w - step * (SIZE - 1)) / 2);
     return { pad, step, w };
@@ -193,8 +201,7 @@
     return { r, c };
   }
 
-  function drawOutlineTriangle(x, y, size, color, lineW) {
-    const ctx = _ctx;
+  function drawOutlineTriangle(ctx, x, y, size, color, lineW) {
     const h = size * 0.92;
     const half = size * 0.82;
     ctx.beginPath();
@@ -209,8 +216,7 @@
     ctx.stroke();
   }
 
-  function drawOutlineCircle(x, y, radius, color, lineW) {
-    const ctx = _ctx;
+  function drawOutlineCircle(ctx, x, y, radius, color, lineW) {
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.strokeStyle = color;
@@ -276,6 +282,7 @@
   // contrast — the two things that make a real stone sit ON the board.
   function paintStone(ctx, x, y, rr, s, themeId, opts) {
     const ghost = !!(opts && opts.ghost);
+    const dpr = (opts && opts.dpr) || 1;
     const mute = ghost ? (c) => mixHex(c, GHOST_GREY, GHOST_MIX) : (c) => c;
     const sg = ctx.createRadialGradient(
       x - rr * 0.38, y - rr * 0.42, rr * 0.08, x, y, rr
@@ -334,7 +341,7 @@
       ctx.beginPath();
       ctx.arc(x, y, rr, 0, Math.PI * 2);
       ctx.strokeStyle = "rgba(0,0,0," + (0.16 + 0.30 * need).toFixed(3) + ")";
-      ctx.lineWidth = Math.max(1, _dpr * (0.5 + 0.5 * need));
+      ctx.lineWidth = Math.max(1, dpr * (0.5 + 0.5 * need));
       ctx.stroke();
     } else if (need > 0.02) {
       const rim = ctx.createLinearGradient(x - rr, y - rr, x + rr, y + rr);
@@ -344,7 +351,7 @@
       ctx.beginPath();
       ctx.arc(x, y, rr - 0.5, 0, Math.PI * 2);
       ctx.strokeStyle = rim;
-      ctx.lineWidth = Math.max(1, _dpr);
+      ctx.lineWidth = Math.max(1, dpr);
       ctx.stroke();
     }
 
@@ -354,9 +361,9 @@
       // does — dark under a light preview, light under a dark one — so the ring
       // reads as the edge of a stone rather than as an outline drawn around it.
       ctx.beginPath();
-      ctx.arc(x, y, rr - _dpr * 0.5, 0, Math.PI * 2);
+      ctx.arc(x, y, rr - dpr * 0.5, 0, Math.PI * 2);
       ctx.strokeStyle = stoneLum > boardLum ? "rgba(0,0,0,0.34)" : "rgba(255,255,255,0.26)";
-      ctx.lineWidth = Math.max(1, _dpr);
+      ctx.lineWidth = Math.max(1, dpr);
       ctx.stroke();
     }
   }
@@ -388,14 +395,38 @@
     return h;
   }
 
-  function paintBase(m, w) {
-    const board = m.board;
-    const themeId = m.themeId;
-    const ctx = baseCtx;
-    const { pad, step } = geometry();
+  /**
+   * The whole static layer — board fill, grain, grid, stars, coordinate
+   * labels, stones — painted into ANY context at ANY size, reading no module
+   * state whatsoever.
+   *
+   * It exists because the app had two board renderers. practice.js carried its
+   * own drawBoard(): fractional pitch (pad 13.44 / step 22.08, so all 30 lines
+   * sat on half-pixels — the exact defect v1.35 fixed here), a fourth stone
+   * radius (0.42 against STONE_R's 0.46), flat discs with no gradient, no
+   * shadow and no contrast-adaptive edge, no star points and no board at all.
+   * Every refinement v1.35–v1.37 landed stopped at the dialog's edge, and the
+   * gap widened with each one. 练习 (130 puzzles) and 每日 are a whole mode
+   * rendered by that second painter.
+   *
+   * Everything the live board needs and a still position does not — the place
+   * animation, hover, hint, win glow — stays in draw(). What is shared is
+   * exactly what "a position on a board" means.
+   *
+   * opts: { board, themeId, w, pad, step, dpr, coords, scaleFor }
+   *   scaleFor(r, c) -> 1 for a still position; draw() passes stoneScale so the
+   *   place animation keeps working.
+   */
+  function paintPosition(ctx, opts) {
+    const board = opts.board;
+    const themeId = opts.themeId;
+    const w = opts.w;
+    const pad = opts.pad;
+    const step = opts.step;
+    const dpr = opts.dpr || 1;
+    const coords = !!opts.coords;
+    const scaleFor = opts.scaleFor || function () { return 1; };
     const th = THEMES[themeId] || THEMES.wood;
-    const savedCtx = _ctx;
-    _ctx = baseCtx; // outline helpers + stoneScale draw into the base layer
     ctx.clearRect(0, 0, w, w);
 
     if (th.style === "pencil") {
@@ -457,13 +488,13 @@
           if (!s) continue;
           const x = pad + c * step;
           const y = pad + r * step;
-          const sc = stoneScale(r, c);
+          const sc = scaleFor(r, c);
           ctx.save();
           ctx.translate(x, y);
           ctx.scale(sc, sc);
           ctx.translate(-x, -y);
-          if (s === "b") drawOutlineTriangle(x, y, step * 0.78, inkB, lw);
-          else drawOutlineCircle(x, y, markR, inkW, lw);
+          if (s === "b") drawOutlineTriangle(ctx, x, y, step * 0.78, inkB, lw);
+          else drawOutlineCircle(ctx, x, y, markR, inkW, lw);
           ctx.restore();
         }
       }
@@ -515,7 +546,7 @@
       // really only those two settings anyway. One CSS pixel is the classic
       // hairline and stays that at every size; the border keeps its weight so
       // the frame still reads above the grid.
-      const gridW = inkW(_dpr);
+      const gridW = inkW(dpr);
       ctx.lineWidth = gridW;
       ctx.lineCap = "square";
       const a0 = crisp(pad, gridW);
@@ -531,7 +562,7 @@
         ctx.lineTo(p, a1);
         ctx.stroke();
       }
-      const edgeW = inkW(_dpr * 2);
+      const edgeW = inkW(dpr * 2);
       ctx.lineWidth = edgeW;
       const e0 = crisp(pad - 1, edgeW);
       const e1 = crisp(pad + step * (SIZE - 1) + 1, edgeW);
@@ -557,14 +588,14 @@
           if (!s) continue;
           paintStone(
             ctx, pad + c * step, pad + r * step,
-            radius * stoneScale(r, c), s, themeId
+            radius * scaleFor(r, c), s, themeId, { dpr: dpr }
           );
         }
       }
     }
 
     // Coordinate labels: columns A-O along the bottom, rows 15-1 down the left
-    if (m.coords) {
+    if (coords) {
       ctx.save();
       ctx.fillStyle = th.style === "pencil" ? (th.pencil || th.line) : th.line;
       ctx.globalAlpha = 0.5;
@@ -580,7 +611,6 @@
       ctx.restore();
     }
 
-    _ctx = savedCtx;
   }
 
   function draw() {
@@ -609,7 +639,10 @@
     const animActive = !!m.placeAnim;
     const sig = themeId + "|" + (m.coords ? 1 : 0) + "|" + boardSig(board);
     if (animActive || sig !== baseSig) {
-      paintBase(m, w);
+      paintPosition(baseCtx, {
+        board: board, themeId: themeId, w: w, pad: pad, step: step,
+        dpr: _dpr, coords: !!m.coords, scaleFor: stoneScale,
+      });
       baseSig = animActive ? "" : sig;
     }
 
@@ -627,10 +660,10 @@
       if (th.style === "pencil") {
         const ink = color === "b" ? (th.pencilB || th.pencil) : (th.pencilW || th.pencil);
         const lw = Math.max(1.5, step * 0.07);
-        if (color === "b") drawOutlineTriangle(x, y, step * 0.72, ink, lw);
-        else drawOutlineCircle(x, y, step * 0.34, ink, lw);
+        if (color === "b") drawOutlineTriangle(ctx, x, y, step * 0.72, ink, lw);
+        else drawOutlineCircle(ctx, x, y, step * 0.34, ink, lw);
       } else {
-        paintStone(ctx, x, y, step * STONE_R, color, themeId, { ghost: true });
+        paintStone(ctx, x, y, step * STONE_R, color, themeId, { ghost: true, dpr: _dpr });
       }
       ctx.restore();
     }
@@ -705,7 +738,7 @@
         const x = pad + v.c * step;
         const y = pad + v.r * step;
         ctx.globalAlpha = 1;
-        paintStone(ctx, x, y, rr, v.color, themeId, { ghost: true });
+        paintStone(ctx, x, y, rr, v.color, themeId, { ghost: true, dpr: _dpr });
         // move number
         ctx.globalAlpha = 0.95;
         ctx.fillStyle = v.color === "b" ? "#fff" : "#1a1a1a";
@@ -768,6 +801,13 @@
     /** Exported so the regression gate can measure against the real value
      *  instead of restating 0.46 and passing whatever draw.js drifts to. */
     STONE_R: STONE_R,
+    /** 无状态静态层画家。练习/每日的棋盘走的是这一个,而不是自己再写一份 —— 
+     *  第二份画家正是 v1.35–v1.37 的每一次改进都停在弹层边缘的原因。 */
+    paintPosition: paintPosition,
+    /** 一颗棋子。虚影(ghost)与真子共用,见 paintStone 的注释。 */
+    paintStone: paintStone,
+    /** 整数格距:同一条规则给两块棋盘用,否则又会各算各的。 */
+    pitchFor: pitchFor,
     attach: attach,
     geometry: geometry,
     resizeCanvas: resizeCanvas,

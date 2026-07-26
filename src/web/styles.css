@@ -692,9 +692,13 @@
     .practice-board {
       width: 100%; aspect-ratio: 1 / 1; display: block;
       border: 1px solid var(--card-border);
-      border-radius: 10px;
+      border-radius: var(--radius-md);
+      /* 画布自己画满整块盘面(v1.39 起与主棋盘同一个画家),这条底色只在
+         首帧之前露一下。留着是因为 canvas 尚未绘制时不该是一个透明洞。 */
       background: var(--btn-ghost);
       cursor: crosshair;
+      /* 主棋盘的木框有阴影托着,弹层里这块也该有同样的重量,否则它像一张贴纸。 */
+      box-shadow: 0 4px 14px rgba(0,0,0,.18);
     }
     .practice-foot { margin: 8px 0 4px; min-height: 34px; }
     .practice-source { font-size: 12px; display: block; margin-bottom: 2px; }

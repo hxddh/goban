@@ -1223,6 +1223,99 @@ async function enableSwap2Pvp(page) {
     bad.length === 0, JSON.stringify({ used, bad }));
 }
 
+// Y 练习/每日的棋盘必须和主棋盘同一个画家。
+// 它此前自带一份 drawBoard():pad = w*0.04 / step = (w-2pad)/14 得出 13.44 与 22.08
+// 两个小数(30 条线全在半像素上,正是 v1.35 在主棋盘修掉的缺陷)、半径 0.42(全应用
+// 第四个各写各的值)、纯色圆片无渐变阴影与自适应边缘、没有星位也没有盘面,而且不封
+// dpr 上限。于是 v1.35–v1.37 的每一次改进都停在弹层边缘,而 练习 + 每日 是一整个模式。
+{
+  const bad = [];
+  for (const theme of ["wood", "night", "day"]) {
+    const page = await newPage();
+    await page.evaluate((t) => document.querySelector('[data-theme="' + t + '"]').click(), theme);
+    await page.waitForTimeout(250);
+    await page.evaluate(() => document.getElementById("open-practice").click());
+    await page.waitForTimeout(700);
+    const r = await page.evaluate(() => {
+      const cv = document.getElementById("practice-board");
+      const D = window.GobanDraw;
+      const p = D.pitchFor(cv.width);
+      const g = cv.getContext("2d");
+      // 盘面中央偏上的一格中心 —— 避开交叉点(网格线)也避开棋子密集区
+      const px = (x, y) => { const d = g.getImageData(x, y, 1, 1).data; return [d[0], d[1], d[2], d[3]]; };
+      const probe = px(Math.round(p.pad + 1.5 * p.step), Math.round(p.pad + 1.5 * p.step));
+      // 格距不能拿 pitchFor 重算来断言 —— 那是同义反复,practice.js 怎么写它都返回
+      // 整数(闸门 R 第一版栽过一模一样的坑)。要量的是渲染结果:共享规则说竖线在
+      // x = pad + k*step,那里就必须真有一条线,而两侧 4px 处必须没有。
+      const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+      const y = Math.round(p.pad + 1.5 * p.step);      // 两条横线之间,避开交叉点
+      const lx = Math.round(p.pad + 3 * p.step);
+      const onLine = lum(px(lx, y));
+      const offL = lum(px(lx - 4, y)), offR = lum(px(lx + 4, y));
+      return {
+        bmp: cv.width, box: cv.clientWidth,
+        ratio: +(cv.width / cv.clientWidth).toFixed(4),
+        want: Math.min(window.devicePixelRatio || 1, 2),
+        lineDelta: +Math.abs(onLine - (offL + offR) / 2).toFixed(1),
+        sideSpread: +Math.abs(offL - offR).toFixed(1),
+        step: p.step, pad: p.pad, r: D.STONE_R, boardPx: probe,
+      };
+    });
+    const tag = theme;
+    // 线在共享规则说的位置上,且两侧是干净盘面(否则说明它按自己那套小数格距在画)
+    if (!(r.lineDelta > 12)) bad.push(tag + ":共享格距处没有网格线 Δ" + r.lineDelta);
+    if (r.sideSpread > 10) bad.push(tag + ":线两侧不对称 Δ" + r.sideSpread + "（线不在该在的地方）");
+    if (Math.abs(r.ratio - r.want) > 0.005) bad.push(tag + ":位图比 " + r.ratio + " ≠ " + r.want);
+    if (r.r !== 0.46) bad.push(tag + ":STONE_R 变了 " + r.r);
+    // 画布必须真的画满一块盘 —— 透明就说明它又变回了「面板上的几个圆片」
+    if (r.boardPx[3] < 250) bad.push(tag + ":盘面没画满 alpha=" + r.boardPx[3]);
+    if (page.__errors.length) bad.push(tag + ":errs " + page.__errors.join("|"));
+    await page.close();
+  }
+  report("Y 练习棋盘与主棋盘同一画家（整数格距 / dpr 封顶 / 有盘面）",
+    bad.length === 0, JSON.stringify({ bad }));
+}
+
+// Z 弹层里「关闭」不该比它旁边的破坏性动作更重。
+// 六个弹层中只有统计把「关闭」提成主按钮,而它旁边的「清空」是不可逆地删掉全部
+// 对局统计,却用普通按钮 —— 分量正好装反。空态时它还照样可点,会弹确认框问你要不要
+// 清空一个空的东西。
+{
+  const bad = [];
+  const page = await newPage();
+  const opens = { slots: "sgf-slots", review: "sgf-review", practice: "open-practice", stats: "open-stats" };
+  for (const [name, id] of Object.entries(opens)) {
+    await page.evaluate((i) => document.getElementById(i).click(), id);
+    await page.waitForTimeout(400);
+    const r = await page.evaluate(() => {
+      const m = [...document.querySelectorAll(".modal-bg")].find((e) => e.classList.contains("show"));
+      if (!m) return null;
+      const box = m.querySelector(".modal");
+      const btns = [...box.querySelectorAll("button")].filter((b) => b.offsetParent !== null);
+      return btns.map((b) => ({ txt: (b.textContent || "").trim(), cls: b.className, dis: b.disabled }));
+    });
+    if (!r) { bad.push(name + ":没打开"); continue; }
+    for (const b of r) {
+      if (/关闭|Close/.test(b.txt) && /\bprimary\b/.test(b.cls)) {
+        bad.push(name + ":「" + b.txt + "」是主按钮");
+      }
+      if (/清空|清除|Clear/.test(b.txt) && !/danger/.test(b.cls)) {
+        bad.push(name + ":破坏性动作「" + b.txt + "」没有 danger 标记（" + b.cls + "）");
+      }
+    }
+    if (name === "stats") {
+      const c = r.find((b) => /清空|Clear/.test(b.txt));
+      if (c && !c.dis) bad.push("stats:零对局时「清空」仍可点");
+    }
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("Z 弹层的「关闭」不抢主按钮，破坏性动作有 danger 且空态禁用",
+    bad.length === 0, JSON.stringify({ bad }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");

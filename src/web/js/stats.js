@@ -126,6 +126,9 @@
     const hasAny = a.games > 0 || !!daily;
     if (empty) empty.hidden = hasAny;
     body.hidden = !hasAny;
+    // 没有任何记录时「清空」无事可做,却照样弹确认框问你要不要清空一个空的东西。
+    const clearBtn = document.getElementById("stats-clear");
+    if (clearBtn) clearBtn.disabled = !hasAny;
     if (!hasAny) { body.innerHTML = ""; return; }
     if (a.games === 0) { body.innerHTML = daily; return; }
     const names = {
