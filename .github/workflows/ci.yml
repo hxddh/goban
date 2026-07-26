@@ -8,6 +8,13 @@ on:
   pull_request:
   push:
     branches: [main]
+  # v1.33: GitHub stopped delivering the pull_request event for PR #30 — the
+  # repo ran nothing for hours while a manual dispatch of build-windows fired
+  # instantly on the same commit, so the events were lost, not the runners.
+  # With only pull_request and push:main there was no way to run CI on a
+  # branch by hand. Note this trigger only becomes usable once the file is on
+  # the default branch — that is a GitHub rule, not a choice here.
+  workflow_dispatch:
 
 jobs:
   unit:
