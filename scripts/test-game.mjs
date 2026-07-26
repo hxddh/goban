@@ -1291,8 +1291,29 @@ const Practice = ctx.GobanPractice;
   assert(deadKeys.length <= KNOWN_ORPHANS.length,
     "the known-orphan list does not grow silently (" + deadKeys.join(", ") + ")");
 
+  // A stone may be rendered in exactly one place. Three copies of the disc
+  // (board / hover preview / 推演 variation) each carried their own radius and
+  // their own gradient stops, and they drifted the moment one of them changed:
+  // v1.35 raised the board stone from 0.43 to 0.46 and left the other two at
+  // 0.40, so for two releases the preview of a stone was 13% smaller than the
+  // stone it previewed. Counting the gradient is what makes that structural —
+  // a fourth copy cannot be added without this failing.
+  const drawSrc = fs.readFileSync(path.join(root, "src/web/js/draw.js"), "utf8");
+  const stoneGradients = (js) => (js.match(/createRadialGradient/g) || []).length;
+  assert(stoneGradients(drawSrc) === 1,
+    "exactly one place renders a stone gradient (found " + stoneGradients(drawSrc) + ")");
+  // …and no call site may reinvent the radius as a literal.
+  const radiusLits = [...drawSrc.matchAll(/step \* 0\.4\d*/g)].map((m) => m[0]);
+  assert(radiusLits.length === 0,
+    "no hard-coded stone radius outside STONE_R (" + radiusLits.join(", ") + ")");
+  assert(/const STONE_R = 0\.\d+;/.test(drawSrc), "STONE_R is declared as the one radius");
+
   // Negative controls, run against fabricated source so they cannot go stale:
   // the matcher must flag the unguarded form and must not flag the guarded one.
+  assert(stoneGradients("a.createRadialGradient(1);\nb.createRadialGradient(2);") === 2,
+    "stone-gradient gate counts a second copy of the stone painter");
+  assert([...("const rr = step * 0.4;").matchAll(/step \* 0\.4\d*/g)].length === 1,
+    "stone-radius gate flags a re-hard-coded radius");
   const scan = (js, ids) =>
     [...js.matchAll(/getElementById\(\s*"([^"]+)"\s*\)\s*\./g)].filter((m) => !ids.has(m[1])).length;
   assert(scan('document.getElementById("gone").onclick = f;', new Set()) === 1,

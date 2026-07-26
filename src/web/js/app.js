@@ -997,6 +997,7 @@
           panelAnimActive = false;
           // After open animation, scroll move list without using scrollIntoView on page.
           if (want) scrollMoveListToCurrent();
+          syncScrollEdges();
         }
       };
       requestAnimationFrame(tick);
@@ -1488,8 +1489,25 @@
     }
   }
 
+  /**
+   * The sidebar's scroll region has no edge of its own: it just stops, cutting
+   * whatever row sits at the boundary in half. styles.css fades that edge, but
+   * only the side that actually has content past it — which is a fact about
+   * scroll position, so it has to be maintained here. Cheap enough to call from
+   * sync(); scroll/resize call it directly.
+   */
+  function syncScrollEdges() {
+    const el = document.getElementById("side-scroll");
+    if (!el) return;
+    const max = el.scrollHeight - el.clientHeight;
+    const scrollable = max > 1;
+    el.dataset.above = scrollable && el.scrollTop > 1 ? "1" : "0";
+    el.dataset.below = scrollable && el.scrollTop < max - 1 ? "1" : "0";
+  }
+
   function sync() {
     draw();
+    syncScrollEdges();
     const status = document.getElementById("status");
     const moves = document.getElementById("moves");
     const blackTurn = document.getElementById("black-turn");
@@ -2021,7 +2039,14 @@
     appEl.classList.toggle("scrim-on", appEl.classList.contains("panel-open") && window.innerWidth < 900);
     resizeCanvas();
     draw();
+    syncScrollEdges();
   });
+
+  {
+    const sc = document.getElementById("side-scroll");
+    if (sc) sc.addEventListener("scroll", syncScrollEdges, { passive: true });
+    syncScrollEdges();
+  }
 
   window.addEventListener("beforeunload", () => saveGame());
   window.addEventListener("pagehide", () => saveGame());

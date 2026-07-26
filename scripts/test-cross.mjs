@@ -889,6 +889,188 @@ async function enableSwap2Pvp(page) {
   await page.close();
 }
 
+// S 落子预览必须和真正落下的棋子同大小、同色系。
+// v1.35 把棋子半径从 0.43 提到 0.46，但预览、推演两处各自留着 0.40，缺口从 0.03
+// 拉到 0.06 —— 预览比它预览的那颗子小 13%，小到网格线从它身上跑出来。更糟的是
+// 它靠 alpha 变淡：黑子 0.38 叠在木色棋盘上合成 rgb(122,99,73)，一块橄榄棕色的
+// 斑，既不是黑也不是白，看不出将要落的是哪一色。现在预览是同一颗棋子按 42% 拉向
+// 中性灰、不透明画出，不投影 —— 所以这条闸门量三件事：半径、色相中性、和棋盘分离。
+{
+  const bad = [];
+  for (const theme of ["wood", "night", "day"]) {
+    const page = await newPage();
+    await page.evaluate((t) => {
+      const b = document.querySelector('[data-theme="' + t + '"]');
+      if (!b) throw new Error("no theme button " + t);
+      b.click();
+    }, theme);
+    await page.waitForTimeout(300);
+    const geo = await page.evaluate(() => {
+      const c = document.getElementById("board");
+      const r = c.getBoundingClientRect();
+      return { rect: { x: r.x, y: r.y, w: r.width }, g: window.GobanDraw.geometry(),
+               stoneR: window.GobanDraw.STONE_R };
+    });
+    const { pad, step, w } = geo.g;
+    const scale = geo.rect.w / w;
+    // 悬停在 (5,5)：空点，离星位和边框都远
+    await page.mouse.move(geo.rect.x + (pad + 5 * step) * scale,
+                          geo.rect.y + (pad + 5 * step) * scale);
+    await page.waitForTimeout(250);
+    const r = await page.evaluate(({ pad, step }) => {
+      const g = document.getElementById("board").getContext("2d");
+      const cx = Math.round(pad + 5 * step), cy = Math.round(pad + 5 * step);
+      const n = Math.round(step * 0.75);
+      const d = g.getImageData(cx - n, cy - n, 2 * n + 1, 2 * n + 1).data;
+      const at = (dx, dy) => ((n + dy) * (2 * n + 1) + (n + dx)) * 4;
+      const lum = (i) => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      // 沿中心行向右走，最大亮度跃变处即预览的轮廓
+      let best = 0, edge = 0;
+      for (let x = 2; x <= n; x++) {
+        const dl = Math.abs(lum(at(x, 0)) - lum(at(x - 1, 0)));
+        if (dl > best) { best = dl; edge = x; }
+      }
+      const c0 = at(0, 0);
+      // 网格线是否还从预览里透出来：同一行上，压线的采样点 vs 两侧等距采样点。
+      // 棋子自己的径向渐变沿这条行单调变化，所以线漏出来的表现是中间那点比两侧
+      // 的平均值更暗；不受渐变影响。
+      const yOff = -Math.round(step * 0.2), dx = Math.round(step * 0.14);
+      const bleed = Math.max(0,
+        (lum(at(-dx, yOff)) + lum(at(dx, yOff))) / 2 - lum(at(0, yOff)));
+      return {
+        edge, edgeDelta: +best.toFixed(1), bleed: +bleed.toFixed(1),
+        rgb: [d[c0], d[c0 + 1], d[c0 + 2]],
+        centre: +lum(c0).toFixed(1),
+        // 取样必须走对角线。从交叉点垂直或水平走出去，走的是网格线本身 —— 量到的
+        // 「棋盘」其实是线色（木 rgb(61,41,20)、日 rgb(107,83,68)），差了一百多级。
+        board: +lum(at(Math.round(step * 0.72), -Math.round(step * 0.72))).toFixed(1),
+      };
+    }, { pad, step });
+    // 轮廓找的是最大梯度像素，抗锯齿会让它落在真边内 1–2 个像素，所以余量按像素
+    // 给（2.5px），不按比例 —— 比例余量在小棋盘上会松到放过 0.40 那次倒退。
+    const want = geo.stoneR * step;
+    if (Math.abs(r.edge - want) > 2.5) {
+      bad.push(theme + ":预览半径 " + r.edge + "px ≠ STONE_R×step " + want.toFixed(1) +
+               "（" + (r.edge / step).toFixed(3) + "×step）");
+    }
+    const [R, G, B] = r.rgb;
+    if (Math.max(R, G, B) - Math.min(R, G, B) > 14) {
+      bad.push(theme + ":预览带色相 rgb(" + R + "," + G + "," + B + ") 极差 " + (Math.max(R, G, B) - Math.min(R, G, B)));
+    }
+    if (Math.abs(r.centre - r.board) < 25) {
+      bad.push(theme + ":预览与棋盘几乎同亮 " + r.centre + " vs " + r.board);
+    }
+    if (r.bleed > 8) bad.push(theme + ":网格线仍从预览里透出 Δ" + r.bleed);
+    if (page.__errors.length) bad.push(theme + ":errs " + page.__errors.join("|"));
+    await page.close();
+  }
+  report("S 落子预览与真棋子同径、无色偏、盖住网格",
+    bad.length === 0, JSON.stringify({ bad }));
+}
+
+// T 侧栏那行元信息不能把分隔点甩成孤行。
+// 原来是 4 段文字 + 3 个 <span class="sep"> 共 7 个平级 flex 子元素。243px 放不下
+// 一行，flex-wrap 就在它必须断的地方断 —— 实测中英两版都是三个点一起换到第 2 行，
+// 「· · ·」孤零零挂在中间。现在分隔点是后一项的 ::before，根本不是元素，排版层面
+// 就不可能被甩出去；并且这一行只剩两个子元素：对局状态，和存档状态。
+{
+  const bad = [];
+  for (const lang of ["zh", "en"]) {
+    const page = await newPage();
+    if (lang === "en") {
+      await page.evaluate(() => document.querySelector('button[data-lang="en"]').click());
+      await page.waitForTimeout(400);
+    }
+    // newPage() 把 storageSet 换成了空函数（防止卸载时的自动存档把 clear 撤销），
+    // 那样存档提示会显示「存档失败」。这里换回真货，测的才是它最长的那个形态。
+    await page.evaluate(() => {
+      window.GobanHost.storageSet = function (k, v) {
+        try { localStorage.setItem(k, v); return true; } catch (_) { return false; }
+      };
+    });
+    // 先落一子，让存档提示带上时间戳（它最长的形态）
+    await page.evaluate(() => {
+      const c = document.getElementById("board"); const b = c.getBoundingClientRect();
+      const g = window.GobanDraw.geometry(); const sc = b.width / g.w;
+      c.dispatchEvent(new MouseEvent("click", { bubbles: true,
+        clientX: b.x + (g.pad + 7 * g.step) * sc, clientY: b.y + (g.pad + 7 * g.step) * sc }));
+    });
+    await page.waitForTimeout(1400);
+    const r = await page.evaluate(() => {
+      const m = document.querySelector(".side-meta");
+      const mb = m.getBoundingClientRect();
+      const kids = [...m.querySelectorAll(":scope > .meta-stats > *, :scope > :not(.meta-stats)")];
+      const rows = {};
+      for (const k of kids) {
+        const b = k.getBoundingClientRect();
+        const key = Math.round(b.top);
+        (rows[key] = rows[key] || []).push((k.textContent || "").trim());
+      }
+      return {
+        sepEls: m.querySelectorAll(".sep").length,
+        rows: Object.keys(rows).sort((a, b) => a - b).map((k) => rows[k]),
+        over: +(Math.max(...kids.map((k) => k.getBoundingClientRect().right)) - mb.right).toFixed(1),
+        hint: (document.getElementById("save-hint").textContent || "").trim(),
+      };
+    });
+    if (r.sepEls) bad.push(lang + ":分隔点又成了元素 ×" + r.sepEls);
+    const empty = r.rows.filter((row) => row.every((t) => t === ""));
+    if (empty.length) bad.push(lang + ":有 " + empty.length + " 行只剩分隔点");
+    if (r.over > 0.5) bad.push(lang + ":内容溢出 " + r.over + "px");
+    if (!/\d/.test(r.hint)) bad.push(lang + ":存档提示没带时间戳 " + JSON.stringify(r.hint));
+    if (page.__errors.length) bad.push(lang + ":errs " + page.__errors.join("|"));
+    await page.close();
+  }
+  report("T 侧栏元信息行不会把分隔点甩成孤行，也不溢出",
+    bad.length === 0, JSON.stringify({ bad }));
+}
+
+// U 侧栏滚动区的边缘要淡出，而且只在那一侧真有内容时淡出。
+// 没有淡出时，滚动区就是一条硬横线，把正好落在边界上的那一行拦腰切断 —— 默认窗口下
+// 被切的是「复制 / 导出 / 导入」，四个主题里都是从字的中间切过去。反过来，已经滚到底
+// 了还继续压暗最后一行，那才是拿装饰盖住问题。所以两头都要断言。
+{
+  const bad = [];
+  const page = await newPage();
+  // 落几手，让棋谱区长出内容，滚动区确实溢出
+  const click = clicker(page);
+  for (const [r, c] of [[7, 7], [6, 8], [8, 6]]) { await click(r, c); await page.waitForTimeout(1300); }
+  const read = () => page.evaluate(() => {
+    const el = document.getElementById("side-scroll");
+    const mask = getComputedStyle(el).maskImage || getComputedStyle(el).webkitMaskImage;
+    // 末两个色标：… #000 <bottomStop>, transparent 100%
+    const m = /rgb\(0, 0, 0\)\s+(calc\(100% - (\d+)px\)|100%)/.exec(mask);
+    const top = /rgb\(0, 0, 0\)\s+(\d+)px/.exec(mask);
+    return {
+      above: el.dataset.above, below: el.dataset.below,
+      scrollable: el.scrollHeight - el.clientHeight,
+      scrollTop: Math.round(el.scrollTop),
+      fadeBot: m ? (m[2] ? +m[2] : 0) : null,
+      fadeTop: top ? +top[1] : null,
+      hasMask: mask !== "none",
+    };
+  });
+  const top0 = await read();
+  if (!top0.hasMask) bad.push("顶部:没有遮罩");
+  if (top0.scrollable <= 1) bad.push("滚动区没有溢出，这条闸门测不到东西（溢出 " + top0.scrollable + "px）");
+  if (top0.below !== "1" || !top0.fadeBot) bad.push("顶部:下方有内容却没淡出 " + JSON.stringify(top0));
+  if (top0.above !== "0" || top0.fadeTop) bad.push("顶部:上方没内容却淡出了 " + JSON.stringify(top0));
+
+  await page.evaluate(() => {
+    const el = document.getElementById("side-scroll");
+    el.scrollTop = el.scrollHeight;
+  });
+  await page.waitForTimeout(250);
+  const bot = await read();
+  if (bot.scrollTop === 0) bad.push("底部:没滚动成功");
+  if (bot.below !== "0" || bot.fadeBot) bad.push("底部:已到底还在压暗最后一行 " + JSON.stringify(bot));
+  if (bot.above !== "1" || !bot.fadeTop) bad.push("底部:上方有内容却没淡出 " + JSON.stringify(bot));
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  report("U 侧栏滚动区两端按需淡出（到底就不再压暗）",
+    bad.length === 0, JSON.stringify({ bad }));
+  await page.close();
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");

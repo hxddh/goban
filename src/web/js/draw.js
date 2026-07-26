@@ -11,6 +11,13 @@
    *  Drives how much edge a stone needs to keep its silhouette. */
   const BOARD_LUM = { wood: 188, night: 41, day: 227 };
 
+  /** Stone radius as a fraction of the grid pitch. THE radius — see paintStone. */
+  const STONE_R = 0.46;
+  /** A preview stone is the real stone muted toward neutral grey by this much.
+   *  Not made transparent: see paintStone. */
+  const GHOST_GREY = "#8a8a8a";
+  const GHOST_MIX = 0.42;
+
   const STARS = [
     [3, 3], [3, 7], [3, 11],
     [7, 3], [7, 7], [7, 11],
@@ -238,6 +245,122 @@
     return 0.88 + 0.12 * easeOutCubic(t);
   }
 
+  /** #rrggbb toward #rrggbb by t (six-digit hex only). Used to mute a stone into its own preview. */
+  function mixHex(hex, target, t) {
+    const a = parseInt(hex.slice(1), 16);
+    const b = parseInt(target.slice(1), 16);
+    const ch = (sh) => {
+      const v = Math.round((((a >> sh) & 255)) + t * ((((b >> sh) & 255)) - (((a >> sh) & 255))));
+      return (v < 16 ? "0" : "") + v.toString(16);
+    };
+    return "#" + ch(16) + ch(8) + ch(0);
+  }
+
+  // One stone, one place. The disc used to be drawn three times over — the
+  // board itself, the hover preview, the 推演 variation — each carrying its own
+  // radius and its own gradient stops. They drifted: v1.35 raised the board
+  // stone from 0.43 to 0.46 and left the other two at 0.40, so the preview of
+  // a stone was 13% smaller than the stone it previewed, small enough that the
+  // grid line ran out from under it and the thing read as a smudge rather than
+  // as "a stone lands here".
+  //
+  // opts.ghost is a preview: the same stone, muted rather than made
+  // transparent. Transparency was the old approach and it could not work —
+  // measured at the disc centre, a black stone at 0.38 alpha came out
+  // rgb(54,42,29) on the wood board, rgb(66,86,77) on 夜 and rgb(83,68,59) on
+  // 日: an olive cast that is neither of the two colours in the game, so the
+  // preview could not even tell you WHICH stone was about to land. Muting each
+  // gradient stop toward neutral grey keeps the hue honest on every board, and
+  // an opaque disc hides the grid under it exactly as the real stone will. What
+  // marks it as not-yet-placed is the missing cast shadow and the flattened
+  // contrast — the two things that make a real stone sit ON the board.
+  function paintStone(ctx, x, y, rr, s, themeId, opts) {
+    const ghost = !!(opts && opts.ghost);
+    const mute = ghost ? (c) => mixHex(c, GHOST_GREY, GHOST_MIX) : (c) => c;
+    const sg = ctx.createRadialGradient(
+      x - rr * 0.38, y - rr * 0.42, rr * 0.08, x, y, rr
+    );
+    if (s === "b") {
+      if (themeId === "night") {
+        sg.addColorStop(0, mute("#4a4a4a"));
+        sg.addColorStop(0.35, mute("#1c1c1c"));
+        sg.addColorStop(1, mute("#050505"));
+      } else {
+        sg.addColorStop(0, mute("#6a6a6a"));
+        sg.addColorStop(0.4, mute("#242424"));
+        sg.addColorStop(1, mute("#050505"));
+      }
+    } else {
+      sg.addColorStop(0, mute("#ffffff"));
+      sg.addColorStop(0.5, mute("#f2f2f2"));
+      sg.addColorStop(1, mute(themeId === "day" ? "#c8c8c8" : "#bcbcbc"));
+    }
+    // A real shadow, cast by the stone itself. What was here before was a
+    // second disc of the same radius offset by a flat 1.2/1.8 bitmap px
+    // (0.9 CSS px) and filled solid — a hard-edged crescent that never scaled
+    // with the stone, so it read as a printing slip rather than as weight.
+    // Blur and offset now derive from rr, so a stone on a 448px board and one
+    // on a 788px board sit the same way. Cost of the switch: +0.1ms/113 stones.
+    ctx.save();
+    if (!ghost) {
+      ctx.shadowColor = themeId === "night" ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.32)";
+      ctx.shadowBlur = rr * 0.36;
+      ctx.shadowOffsetX = rr * 0.05;
+      ctx.shadowOffsetY = rr * 0.13;
+    }
+    ctx.beginPath();
+    ctx.arc(x, y, rr, 0, Math.PI * 2);
+    ctx.fillStyle = sg;
+    ctx.fill();
+    ctx.restore();
+
+    // Edge definition, sized to how close this stone is to its board. A stone
+    // that shares the board's luminance loses its silhouette, and every theme
+    // has one such colour — measured edge contrast before this: 木 white 41.0
+    // vs black 158.9, 日 white 4.6 vs black 201.2, 夜 black 25.2 vs white
+    // 172.8. A shadow cannot fix the dark case (it only darkens, and 夜's board
+    // is already at luminance 41) and an outline alone flattens the light case,
+    // so each direction gets the treatment that suits it: light stones take a
+    // thin dark contour, dark stones take a graded rim-light strongest at the
+    // top-left, where the stone's own highlight already is.
+    const boardLum = BOARD_LUM[themeId] != null ? BOARD_LUM[themeId] : 188;
+    const raw = s === "b" ? 24 : 244;
+    // A ghost is muted toward grey, so it needs the edge treatment its ACTUAL
+    // luminance calls for, not the placed stone's.
+    const stoneLum = ghost ? raw + GHOST_MIX * (138 - raw) : raw;
+    const sep = Math.abs(stoneLum - boardLum) / 255;   // 0 = invisible
+    const need = Math.max(0, 1 - sep / 0.62);          // 0 when separated
+    if (s === "w") {
+      ctx.beginPath();
+      ctx.arc(x, y, rr, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(0,0,0," + (0.16 + 0.30 * need).toFixed(3) + ")";
+      ctx.lineWidth = Math.max(1, _dpr * (0.5 + 0.5 * need));
+      ctx.stroke();
+    } else if (need > 0.02) {
+      const rim = ctx.createLinearGradient(x - rr, y - rr, x + rr, y + rr);
+      rim.addColorStop(0, "rgba(255,255,255," + (0.42 * need).toFixed(3) + ")");
+      rim.addColorStop(0.45, "rgba(255,255,255," + (0.12 * need).toFixed(3) + ")");
+      rim.addColorStop(1, "rgba(255,255,255,0.02)");
+      ctx.beginPath();
+      ctx.arc(x, y, rr - 0.5, 0, Math.PI * 2);
+      ctx.strokeStyle = rim;
+      ctx.lineWidth = Math.max(1, _dpr);
+      ctx.stroke();
+    }
+
+    if (ghost) {
+      // Without a cast shadow the disc has nothing holding it to the board, so
+      // the silhouette has to come from a contour. It leans the way the stone
+      // does — dark under a light preview, light under a dark one — so the ring
+      // reads as the edge of a stone rather than as an outline drawn around it.
+      ctx.beginPath();
+      ctx.arc(x, y, rr - _dpr * 0.5, 0, Math.PI * 2);
+      ctx.strokeStyle = stoneLum > boardLum ? "rgba(0,0,0,0.34)" : "rgba(255,255,255,0.26)";
+      ctx.lineWidth = Math.max(1, _dpr);
+      ctx.stroke();
+    }
+  }
+
   function ensureAnimLoop() {
     if (rafId) return;
     const tick = () => {
@@ -427,81 +550,15 @@
       // four-in-a-row read as four separate discs. Real stones sit almost
       // edge to edge; 0.46 lets a line read as a line, which on a gomoku
       // board is the one thing the eye is there to do.
-      const radius = step * 0.46;
+      const radius = step * STONE_R;
       for (let r = 0; r < SIZE; r++) {
         for (let c = 0; c < SIZE; c++) {
           const s = board[r][c];
           if (!s) continue;
-          const x = pad + c * step;
-          const y = pad + r * step;
-          const sc = stoneScale(r, c);
-          const rr = radius * sc;
-          const sg = ctx.createRadialGradient(
-            x - rr * 0.38, y - rr * 0.42, rr * 0.08, x, y, rr
+          paintStone(
+            ctx, pad + c * step, pad + r * step,
+            radius * stoneScale(r, c), s, themeId
           );
-          if (s === "b") {
-            if (themeId === "night") {
-              sg.addColorStop(0, "#4a4a4a");
-              sg.addColorStop(0.35, "#1c1c1c");
-              sg.addColorStop(1, "#050505");
-            } else {
-              sg.addColorStop(0, "#6a6a6a");
-              sg.addColorStop(0.4, "#242424");
-              sg.addColorStop(1, "#050505");
-            }
-          } else {
-            sg.addColorStop(0, "#ffffff");
-            sg.addColorStop(0.5, "#f2f2f2");
-            sg.addColorStop(1, themeId === "day" ? "#c8c8c8" : "#bcbcbc");
-          }
-          // A real shadow, cast by the stone itself. What was here before was a
-          // second disc of the same radius offset by a flat 1.2/1.8 bitmap px
-          // (0.9 CSS px) and filled solid — a hard-edged crescent that never
-          // scaled with the stone, so it read as a printing slip rather than
-          // as weight. Blur and offset now derive from rr, so a stone on a
-          // 448px board and one on a 788px board sit the same way. Measured
-          // cost of the switch: +0.1ms for 113 stones.
-          ctx.save();
-          ctx.shadowColor = themeId === "night" ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.32)";
-          ctx.shadowBlur = rr * 0.36;
-          ctx.shadowOffsetX = rr * 0.05;
-          ctx.shadowOffsetY = rr * 0.13;
-          ctx.beginPath();
-          ctx.arc(x, y, rr, 0, Math.PI * 2);
-          ctx.fillStyle = sg;
-          ctx.fill();
-          ctx.restore();
-          // Edge definition, sized to how close this stone is to its board.
-          // A stone that shares the board's luminance loses its silhouette,
-          // and every theme has one such colour — measured edge contrast
-          // before this: 木 white 41.0 vs black 158.9, 日 white 4.6 vs black
-          // 201.2, 夜 black 25.2 vs white 172.8. A shadow cannot fix the dark
-          // case (it only darkens, and 夜's board is already at luminance 41)
-          // and an outline alone flattens the light case, so each direction
-          // gets the treatment that suits it: light stones take a thin dark
-          // contour, dark stones take a graded rim-light strongest at the
-          // top-left, where the stone's own highlight already is.
-          const boardLum = BOARD_LUM[themeId] != null ? BOARD_LUM[themeId] : 188;
-          const stoneLum = s === "b" ? 24 : 244;
-          const sep = Math.abs(stoneLum - boardLum) / 255;   // 0 = invisible
-          const need = Math.max(0, 1 - sep / 0.62);          // 0 when separated
-          if (s === "w") {
-            ctx.beginPath();
-            ctx.arc(x, y, rr, 0, Math.PI * 2);
-            ctx.strokeStyle = "rgba(0,0,0," + (0.16 + 0.30 * need).toFixed(3) + ")";
-            ctx.lineWidth = Math.max(1, _dpr * (0.5 + 0.5 * need));
-            ctx.stroke();
-          } else if (need > 0.02) {
-            const rim = ctx.createLinearGradient(x - rr, y - rr, x + rr, y + rr);
-            rim.addColorStop(0, "rgba(255,255,255," + (0.42 * need).toFixed(3) + ")");
-            rim.addColorStop(0.45, "rgba(255,255,255," + (0.12 * need).toFixed(3) + ")");
-            rim.addColorStop(1, "rgba(255,255,255,0.02)");
-            ctx.beginPath();
-            ctx.arc(x, y, rr - 0.5, 0, Math.PI * 2);
-            ctx.strokeStyle = rim;
-            ctx.lineWidth = Math.max(1, _dpr);
-            ctx.stroke();
-          }
         }
       }
     }
@@ -566,33 +623,14 @@
       const y = pad + hover.r * step;
       const color = hover.color === "w" ? "w" : "b";
       ctx.save();
-      ctx.globalAlpha = th.style === "pencil" ? 0.45 : 0.38;
+      ctx.globalAlpha = th.style === "pencil" ? 0.45 : 1;
       if (th.style === "pencil") {
         const ink = color === "b" ? (th.pencilB || th.pencil) : (th.pencilW || th.pencil);
         const lw = Math.max(1.5, step * 0.07);
         if (color === "b") drawOutlineTriangle(x, y, step * 0.72, ink, lw);
         else drawOutlineCircle(x, y, step * 0.34, ink, lw);
       } else {
-        const rr = step * 0.4;
-        const sg = ctx.createRadialGradient(
-          x - rr * 0.35, y - rr * 0.4, rr * 0.1, x, y, rr
-        );
-        if (color === "b") {
-          sg.addColorStop(0, "#5a5a5a");
-          sg.addColorStop(1, "#111");
-        } else {
-          sg.addColorStop(0, "#fff");
-          sg.addColorStop(1, "#c8c8c8");
-        }
-        ctx.beginPath();
-        ctx.arc(x, y, rr, 0, Math.PI * 2);
-        ctx.fillStyle = sg;
-        ctx.fill();
-        if (color === "w") {
-          ctx.strokeStyle = "rgba(0,0,0,0.2)";
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        }
+        paintStone(ctx, x, y, step * STONE_R, color, themeId, { ghost: true });
       }
       ctx.restore();
     }
@@ -660,24 +698,14 @@
     const variation = m.variation;
     if (variation && variation.length) {
       ctx.save();
-      const rr = step * 0.4;
+      const rr = step * STONE_R;
       const fontPx = Math.round(step * 0.34);
       for (const v of variation) {
         if (board[v.r] && board[v.r][v.c]) continue; // occupied — skip
         const x = pad + v.c * step;
         const y = pad + v.r * step;
-        ctx.globalAlpha = 0.5;
-        const sg = ctx.createRadialGradient(x - rr * 0.35, y - rr * 0.4, rr * 0.1, x, y, rr);
-        if (v.color === "b") { sg.addColorStop(0, "#5a5a5a"); sg.addColorStop(1, "#111"); }
-        else { sg.addColorStop(0, "#fff"); sg.addColorStop(1, "#c8c8c8"); }
-        ctx.beginPath();
-        ctx.arc(x, y, rr, 0, Math.PI * 2);
-        ctx.fillStyle = sg;
-        ctx.fill();
-        ctx.globalAlpha = 0.7;
-        ctx.strokeStyle = v.color === "b" ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.3)";
-        ctx.lineWidth = 1;
-        ctx.stroke();
+        ctx.globalAlpha = 1;
+        paintStone(ctx, x, y, rr, v.color, themeId, { ghost: true });
         // move number
         ctx.globalAlpha = 0.95;
         ctx.fillStyle = v.color === "b" ? "#fff" : "#1a1a1a";
@@ -698,7 +726,9 @@
       // between them, so they get the emphasis: a glow ring around each, in
       // the same --win the status pill and the frame flash already use.
       const glow = th.winGlow || th.win;
-      const rr = step * 0.46;
+      // The ring hugs the stone, so it is the stone's radius — not a copy of
+      // today's value of it.
+      const rr = step * STONE_R;
       ctx.save();
       ctx.lineCap = "round";
       // Connecting thread first, underneath the rings, so it reads as one
@@ -735,6 +765,9 @@
   global.GobanDraw = {
     THEMES: THEMES,
     STARS: STARS,
+    /** Exported so the regression gate can measure against the real value
+     *  instead of restating 0.46 and passing whatever draw.js drifts to. */
+    STONE_R: STONE_R,
     attach: attach,
     geometry: geometry,
     resizeCanvas: resizeCanvas,
