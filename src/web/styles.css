@@ -859,8 +859,15 @@
       width: 14px; height: 14px; border-radius: 50%;
       box-shadow: 0 1px 2px rgba(0,0,0,.3); flex-shrink: 0;
     }
-    .stone.black { background: radial-gradient(circle at 35% 30%, #555, #111 60%, #000); }
-    .stone.white { background: radial-gradient(circle at 35% 30%, #fff, #eee 55%, #c8c8c8); }
+    /* 色标与高光位置取自 draw.js 的 paintStone —— 这是同一颗棋子的第二种画法,
+       没有任何东西阻止它继续漂移。高光在 (-0.38r, -0.42r),换算成百分比即
+       31%/29%;色标 #6a6a6a → #242424(40%) → #050505 与 #fff → #f2f2f2(50%)
+       → #bcbcbc 均与画布逐字一致。夜间主题画布另有一组更暗的黑子色标,这里
+       跟上。 */
+    .stone.black { background: radial-gradient(circle at 31% 29%, #6a6a6a, #242424 40%, #050505); }
+    .stone.white { background: radial-gradient(circle at 31% 29%, #ffffff, #f2f2f2 50%, #bcbcbc); }
+    [data-theme="night"] .stone.black { background: radial-gradient(circle at 31% 29%, #4a4a4a, #1c1c1c 35%, #050505); }
+    [data-theme="day"] .stone.white { background: radial-gradient(circle at 31% 29%, #ffffff, #f2f2f2 50%, #c8c8c8); }
     [data-theme="notebook"] .stone {
       box-shadow: none; border-radius: 0; background: transparent !important;
       display: grid; place-items: center; font-size: 12px; line-height: 1;

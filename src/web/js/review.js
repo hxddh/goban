@@ -108,7 +108,9 @@
   function drawCurve() {
     const cv = document.getElementById("review-curve");
     if (!cv || !data) return;
-    const dpr = window.devicePixelRatio || 1;
+    // 上限与另外两块画布同一条:主棋盘实测 3× 重建 74.2ms(2× 为 33.5ms),
+    // 练习棋盘 v1.39 起也封在 2×。这里此前不封顶,实测 dpr=3 时位图 1008×282。
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cssW = cv.clientWidth || 320;
     const cssH = cv.clientHeight || 96;
     cv.width = Math.round(cssW * dpr);
@@ -126,16 +128,24 @@
     const css = getComputedStyle(document.documentElement);
     const line = css.getPropertyValue("--accent").trim() || "#3b82f6";
     const mid = css.getPropertyValue("--card-border").trim() || "#ccc";
-    // zero (even) midline
-    g.strokeStyle = mid; g.lineWidth = 1;
-    g.beginPath(); g.moveTo(pad, y(0)); g.lineTo(pad + w, y(0)); g.stroke();
+    // 零势中线是水平的,所以它该是清晰的一条。描边跨在路径两侧:落在整数上会被
+    // 光栅化成两行半调,落在 x.5 上奇数宽度才盖满整行 —— 与主棋盘 crisp() 同一条规则。
+    const snap = (v) => Math.round(v * dpr) / dpr + 0.5 / dpr;
+    g.strokeStyle = mid; g.lineWidth = 1 / dpr * Math.max(1, Math.round(dpr));
+    g.beginPath(); g.moveTo(pad, snap(y(0))); g.lineTo(pad + w, snap(y(0))); g.stroke();
     // advantage area
     g.beginPath();
     g.moveTo(x(0), y(adv[0]));
     for (let i = 1; i < n; i++) g.lineTo(x(i), y(adv[i]));
     g.lineTo(x(n - 1), y(0)); g.lineTo(x(0), y(0)); g.closePath();
-    g.fillStyle = (line || "#3b82f6") + "22";
+    // 此前是 line + "22" —— 把 alpha 拼到 CSS 颜色字符串后面。四个主题的 --accent
+    // 恰好都是 hex 才没出事;写成 rgb() 或色名就会拼出非法值,而 canvas 对非法
+    // fillStyle 是静默忽略的 —— 面积填充直接消失,不报任何错。改成用 globalAlpha,
+    // 与颜色写法无关。
+    g.fillStyle = line;
+    g.globalAlpha = 0.13;
     g.fill();
+    g.globalAlpha = 1;
     // advantage line
     g.beginPath();
     g.moveTo(x(0), y(adv[0]));
