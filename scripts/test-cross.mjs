@@ -786,6 +786,58 @@ async function enableSwap2Pvp(page) {
   await page.close();
 }
 
+// Q 滚动内容不得从脚栏底下经过。v1.33.0 用 position:sticky 钉住脚栏，等于在
+// 半透明面板上再叠一层半透明条——木色主题下能直接读出条底下滚过的「导入」。
+// 提高不透明度只是遮住症状；v1.34 改成结构保证：滚动区到脚栏为止，脚栏是它的
+// 兄弟节点。
+//
+// 判据只能是几何边界，不能是「矩形相交」：被 overflow 裁掉的元素，
+// getBoundingClientRect() 照样返回未裁剪的矩形，扫描相交必然误报（这个坑在
+// v1.29 和 v1.32 的审计里各踩过一次）。真正的不变式是滚动区的下边缘不越过
+// 脚栏的上边缘 —— 越不过去，就没有任何东西能被画到脚栏底下。
+{
+  const bad = [];
+  for (const [w, h] of [[1280, 600], [1280, 720], [1366, 768], [1440, 900]]) {
+    const page = await newPage();
+    await page.setViewportSize({ width: w, height: h });
+    await page.keyboard.press("]");
+    await page.waitForTimeout(350);
+    const r = await page.evaluate(() => {
+      const sc = document.querySelector(".side-scroll");
+      const foot = document.querySelector(".side-foot");
+      if (!sc || !foot) return { missing: true };
+      let worstGap = Infinity;
+      for (const t of [0, 0.5, 1]) {
+        sc.scrollTop = Math.round((sc.scrollHeight - sc.clientHeight) * t);
+        worstGap = Math.min(worstGap,
+          foot.getBoundingClientRect().top - sc.getBoundingClientRect().bottom);
+      }
+      sc.scrollTop = sc.scrollHeight;
+      const rows = [...sc.querySelectorAll(".setting-row")].filter((e) => e.getBoundingClientRect().height > 0);
+      const lb = rows[rows.length - 1].getBoundingClientRect();
+      const scb = sc.getBoundingClientRect();
+      return {
+        worstGap: Math.round(worstGap),
+        // 最后一行滚到底后必须真正落在滚动区的可视范围内
+        lastVisible: lb.bottom <= scb.bottom + 0.5 && lb.top >= scb.top - 0.5,
+        bg: getComputedStyle(foot).backgroundColor,
+        scrolls: sc.scrollHeight - sc.clientHeight,
+      };
+    });
+    const tag = w + "x" + h;
+    if (r.missing) bad.push(tag + ":缺少 .side-scroll/.side-foot");
+    else {
+      if (r.worstGap < -0.5) bad.push(tag + ":滚动区越过脚栏 " + (-r.worstGap) + "px");
+      if (!r.lastVisible) bad.push(tag + ":滚到底后最后一行仍不可见");
+      if (r.bg !== "rgba(0, 0, 0, 0)") bad.push(tag + ":脚栏有自己的背景 " + r.bg);
+    }
+    if (page.__errors.length) bad.push(tag + ":errs " + page.__errors.join("|"));
+    await page.close();
+  }
+  report("Q 滚动区止于脚栏，且脚栏没有自己的背景（结构保证，非遮挡）",
+    bad.length === 0, JSON.stringify({ bad }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");

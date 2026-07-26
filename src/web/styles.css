@@ -254,9 +254,10 @@
       transform: translateX(100%);
       transition: transform .28s var(--ease);
       box-shadow: -12px 0 40px rgba(0,0,0,.22);
-      overflow-y: auto;
-      overflow-x: hidden;
-      scrollbar-width: thin;
+      /* v1.34: the panel is no longer the scroller — .side-scroll is. See the
+         .side-foot note: a pinned bar over a scrolling panel means two
+         translucent layers, and the lower one reads through the upper one. */
+      overflow: hidden;
       /* Closed: ignore pointer/hit testing so half-visible glitches can't steal clicks */
       pointer-events: none;
     }
@@ -333,9 +334,6 @@
     /* author display:flex would otherwise override the [hidden] UA rule,
        leaving 思考/难度/执子 rows visible when they should be hidden */
     .setting-row[hidden] { display: none; }
-    .setting-row.stack {
-      flex-direction: column; align-items: stretch; gap: 8px;
-    }
     .setting-k {
       font-size: 13px; font-weight: 500; color: var(--text);
       flex-shrink: 0;
@@ -371,40 +369,36 @@
       box-shadow: 0 1px 3px rgba(0,0,0,.1);
     }
 
-    /* The four swatches sit inline with their label now (v1.32, to lift the
-       feature links above the sidebar fold). flex:1 was written for the old
-       full-width stacked row and collapsed them to 14px here — they carry a
-       hit target, so they get a floor instead of a share. */
+    /* 主题 is the same "pick one of N" control as 模式/难度/执子/开局/语言, and
+       since v1.34 it wears the same .pill capsule. It was the lone exception
+       from v1.9.1 on — a transparent row of separately bordered buttons next to
+       five filled capsules.
+
+       The catch, and why this is not just a class swap: every swatch carries
+       data-theme="…", which is exactly how the palettes are scoped, so each
+       button RE-DECLARES that theme's variables on itself. Any .pill rule
+       reaching for --muted / --text / --panel therefore resolves in the
+       PREVIEWED palette instead of the current one — that is how 日/本 came to
+       read 2.87:1 and 3.01:1 on the dark themes before v1.32. Capture the live
+       palette here, above the data-theme attributes, and let the buttons use
+       only the captured values. Every colour the pill rules would otherwise
+       pull from a variable needs an --sw-* twin, the active background
+       included. */
     .theme-row {
-      display: flex; gap: 4px;
-      /* Each swatch carries data-theme="…", which is exactly how the palettes
-         are scoped — so the button re-declares that theme's variables ON
-         ITSELF and its label was painted in the PREVIEWED theme's colour while
-         sitting on the CURRENT theme's panel. 日/本 read 2.87:1 and 3.01:1 on
-         the dark themes. Capture the current palette here, where no data-theme
-         attribute intercepts it, and let the buttons inherit the computed
-         value. The active state still carries the accent. */
       --sw-fg: var(--muted);
       --sw-fg-strong: var(--text);
-      --sw-border: var(--card-border);
-      --sw-ghost: var(--btn-ghost);
+      --sw-active-bg: color-mix(in srgb, var(--panel) 88%, var(--text));
     }
-    .theme-row button {
-      flex: 0 0 auto; min-width: 32px;
-      appearance: none; border: 1px solid var(--sw-border);
-      background: var(--sw-ghost);
-      color: var(--sw-fg);
-      font: inherit; font-size: 12px; font-weight: 500;
-      padding: 8px 0; border-radius: 10px;
-      cursor: pointer;
-      transition: border-color .15s, color .15s, background .15s, transform .12s;
-    }
+    [data-theme="day"] .theme-row,
+    [data-theme="notebook"] .theme-row { --sw-active-bg: #fff; }
+    /* Single glyphs (木/夜/日/本), so they get a narrower floor than the 40px
+       word-sized buttons in the other capsules — still past the 24px hit min. */
+    .theme-row button { min-width: 32px; color: var(--sw-fg); }
     .theme-row button:hover { color: var(--sw-fg-strong); }
-    .theme-row button:active { transform: scale(0.97); }
     .theme-row button.active {
+      background: var(--sw-active-bg);
       color: var(--sw-fg-strong);
-      border-color: color-mix(in srgb, var(--accent) 55%, var(--card-border));
-      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      border-color: color-mix(in srgb, var(--accent) 55%, transparent);
       font-weight: 600;
     }
 
@@ -714,21 +708,33 @@
     }
 
     .side-foot {
-      margin-top: auto;
-      /* Pinned, not just placed last. v1.32 shaved the sidebar to 856px so
-         these five entries cleared a 900px window — but 1280×720 is just as
-         ordinary a window, and there they fell below the fold again. Sticky
-         solves it at every height instead of at one: the settings above scroll,
-         练习/每日/统计 stay put. The negative bottom + padding swallow .side's
-         own 20px bottom padding, or a translucent strip shows under the bar. */
-      position: sticky;
-      bottom: -20px;
-      padding-top: 16px;
-      padding-bottom: 20px;
-      background: var(--panel);
+      /* Pinned by structure, not by position:sticky. v1.32 shaved the sidebar to
+         856px so these five entries cleared a 900px window — but 1280×720 is
+         just as ordinary a window, and there they fell below the fold again.
+         v1.33.0 pinned it with sticky, which put a translucent bar on top of a
+         translucent panel: at the panel's own 94% you could read 导入/复制
+         through it as they scrolled underneath, and raising the opacity would
+         only have hidden the symptom. Now the scroll region ends where this bar
+         begins, so nothing can pass under it — and with nothing behind it to
+         cover, it needs no background at all. It simply IS the panel, which is
+         the only way its colour can never drift from the panel's. */
+      margin: 0 -20px -20px;
+      padding: 16px 20px 20px;
       border-top: 1px solid var(--card-border);
       display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center;
       gap: 4px 8px;
+    }
+    .side-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: thin;
+      /* Let the scrollbar sit at the panel edge, where it was when the panel
+         itself scrolled, instead of inset by the panel's 20px padding. */
+      margin: 0 -20px;
+      padding: 0 20px;
+      display: flex; flex-direction: column;
     }
     /* 8px vertical keeps these three at the 24px minimum hit height; the 4px
        the spacing grid rounded them to left them at 23. */
