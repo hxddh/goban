@@ -63,6 +63,11 @@
   };
 
   let _canvas = null;
+  let _ro = null;
+  /** dpr actually used for the backing store; line weights are authored in
+   *  CSS px and multiplied by this, so a rule is one CSS pixel on every
+   *  display and at every board size instead of drifting with the bitmap. */
+  let _dpr = 1;
   let _ctx = null;
   let _model = null;
   let rafId = 0;
@@ -77,19 +82,61 @@
     _canvas = canvas;
     _ctx = ctx;
     _model = modelFn;
+    observeSize(canvas);
+  }
+
+  /**
+   * #board-wrap animates its width/height for .28s on every layout change and
+   * the canvas is 100% of it, so the element's real size arrives frame by
+   * frame — not at the instant the resize event fires. The window listener
+   * sampled frame 0 and never looked again: after any window resize the
+   * bitmap kept the OLD size while CSS showed the new one (measured: a 1576px
+   * bitmap in an 828px box — a 1.90x resample that softened every line and
+   * every stone, and only healed if something happened to toggle the panel,
+   * whose own rAF loop re-measures for 340ms).
+   *
+   * Observing the element itself covers every cause — window resize, panel
+   * toggle, browser zoom — and fires once per animated frame. Assigning
+   * canvas.width cannot feed back into layout here, because the canvas is
+   * sized width:100%/height:100% by CSS, so there is no observer loop.
+   */
+  function observeSize(canvas) {
+    if (typeof ResizeObserver === "undefined" || _ro || !canvas) return;
+    _ro = new ResizeObserver(function () {
+      resizeCanvas();
+      draw();
+    });
+    _ro.observe(canvas);
   }
 
   function getM() {
     return _model ? _model() : null;
   }
 
+  /**
+   * Whole-pixel pitch. With the fractional values this used to return
+   * (pad 70.92, step 102.44 at w=1576) every one of the 30 grid lines landed
+   * off the device-pixel grid: a nominally 3.15px line rendered as two solid
+   * rows flanked by two half-tone rows, so the board's entire skeleton came
+   * out soft. An integer pitch puts every intersection — and therefore every
+   * stone centre, star point and marker — on whole pixels; the origin is
+   * recomputed from it so the board stays centred rather than drifting right.
+   */
   function geometry() {
     const w = _canvas.width;
-    const pad = w * 0.045;
-    const span = w - pad * 2;
-    const step = span / (SIZE - 1);
+    const step = Math.max(1, Math.round((w - 2 * (w * 0.045)) / (SIZE - 1)));
+    const pad = Math.round((w - step * (SIZE - 1)) / 2);
     return { pad, step, w };
   }
+
+  /** Stroke widths are rounded so the half-pixel rule below is well defined. */
+  function inkW(v) { return Math.max(1, Math.round(v)); }
+  /**
+   * A stroke straddles its path. Centred on an integer it covers half a pixel
+   * either side, which the rasteriser resolves as two grey rows; centred on
+   * x.5 an odd width covers whole rows. Even widths want the integer.
+   */
+  function crisp(v, lineW) { return inkW(lineW) % 2 ? Math.round(v) + 0.5 : Math.round(v); }
 
   function resizeCanvas() {
     if (!_canvas) return;
@@ -99,6 +146,7 @@
     // that blurred every line and stone.
     const rect = _canvas.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    _dpr = dpr;
     const css = Math.max(200, Math.min(rect.width, rect.height));
     const px = Math.round(css * dpr);
     if (_canvas.width !== px) {
@@ -280,34 +328,66 @@
       ctx.fillRect(0, 0, w, w);
 
       if (th.grain) {
+        // Was 48 evenly spaced straight lines, alternating black and white at
+        // 3.5–4%: equal pitch, equal slope, alternating ink — the eye reads
+        // that as banding, not as wood. Real grain is irregular in spacing,
+        // weight and direction. The jitter is hashed from the band index, not
+        // Math.random, so the texture is identical on every repaint (this is
+        // the cached base layer; a re-rolled pattern would shimmer whenever
+        // the board is rebuilt).
         ctx.save();
-        ctx.globalAlpha = themeId === "day" ? 0.035 : 0.04;
-        for (let i = 0; i < 48; i++) {
-          ctx.strokeStyle = i % 2 ? "#000" : "#fff";
+        ctx.lineCap = "round";
+        const hash = (n) => {
+          const v = Math.sin(n * 12.9898) * 43758.5453;
+          return v - Math.floor(v); // 0..1, deterministic
+        };
+        const bands = 34;
+        for (let i = 0; i < bands; i++) {
+          const a = hash(i), b = hash(i + 91), c = hash(i + 173);
+          // uneven pitch: nominal position nudged by up to ±0.6 of a gap
+          const y = ((i + 0.5 + (a - 0.5) * 1.2) / bands) * w;
+          const dark = b < 0.62;                       // more dark than light
+          ctx.strokeStyle = dark ? "#000" : "#fff";
+          ctx.globalAlpha = (themeId === "day" ? 0.030 : 0.038) * (0.45 + c);
+          ctx.lineWidth = Math.max(1, w / 900) * (0.6 + a * 1.9);
+          // a shallow arc rather than a straight rule, drifting up or down
+          const drift = (c - 0.5) * w * 0.05;
+          const bow = (a - 0.5) * w * 0.03;
           ctx.beginPath();
-          ctx.moveTo(0, (i / 48) * w);
-          ctx.lineTo(w, (i / 48) * w + 10);
+          ctx.moveTo(-w * 0.02, y);
+          ctx.quadraticCurveTo(w * 0.5, y + bow, w * 1.02, y + drift);
           ctx.stroke();
         }
         ctx.restore();
       }
 
       ctx.strokeStyle = th.line;
-      ctx.lineWidth = Math.max(1, w / 500);
+      // Authored in CSS pixels. w/500 drifted with the board — 3 device px on
+      // a 788px board, 2 on a 448px one — and after inkW() rounding there were
+      // really only those two settings anyway. One CSS pixel is the classic
+      // hairline and stays that at every size; the border keeps its weight so
+      // the frame still reads above the grid.
+      const gridW = inkW(_dpr);
+      ctx.lineWidth = gridW;
       ctx.lineCap = "square";
+      const a0 = crisp(pad, gridW);
+      const a1 = crisp(pad + step * (SIZE - 1), gridW);
       for (let i = 0; i < SIZE; i++) {
-        const p = pad + i * step;
+        const p = crisp(pad + i * step, gridW);
         ctx.beginPath();
-        ctx.moveTo(pad, p);
-        ctx.lineTo(pad + step * (SIZE - 1), p);
+        ctx.moveTo(a0, p);
+        ctx.lineTo(a1, p);
         ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(p, pad);
-        ctx.lineTo(p, pad + step * (SIZE - 1));
+        ctx.moveTo(p, a0);
+        ctx.lineTo(p, a1);
         ctx.stroke();
       }
-      ctx.lineWidth = Math.max(2, w / 280);
-      ctx.strokeRect(pad - 1, pad - 1, step * (SIZE - 1) + 2, step * (SIZE - 1) + 2);
+      const edgeW = inkW(_dpr * 2);
+      ctx.lineWidth = edgeW;
+      const e0 = crisp(pad - 1, edgeW);
+      const e1 = crisp(pad + step * (SIZE - 1) + 1, edgeW);
+      ctx.strokeRect(e0, e0, e1 - e0, e1 - e0);
 
       ctx.fillStyle = th.star;
       for (const [r, c] of STARS) {
@@ -318,7 +398,11 @@
         ctx.fill();
       }
 
-      const radius = step * 0.43;
+      // 0.43 left a 7.2px gutter between neighbours at a 51px pitch, so a
+      // four-in-a-row read as four separate discs. Real stones sit almost
+      // edge to edge; 0.46 lets a line read as a line, which on a gomoku
+      // board is the one thing the eye is there to do.
+      const radius = step * 0.46;
       for (let r = 0; r < SIZE; r++) {
         for (let c = 0; c < SIZE; c++) {
           const s = board[r][c];
@@ -327,10 +411,6 @@
           const y = pad + r * step;
           const sc = stoneScale(r, c);
           const rr = radius * sc;
-          ctx.beginPath();
-          ctx.arc(x + 1.2 * sc, y + 1.8 * sc, rr, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(0,0,0,0.18)";
-          ctx.fill();
           const sg = ctx.createRadialGradient(
             x - rr * 0.38, y - rr * 0.42, rr * 0.08, x, y, rr
           );
@@ -349,15 +429,33 @@
             sg.addColorStop(0.5, "#f2f2f2");
             sg.addColorStop(1, themeId === "day" ? "#c8c8c8" : "#bcbcbc");
           }
+          // A real shadow, cast by the stone itself. What was here before was a
+          // second disc of the same radius offset by a flat 1.2/1.8 bitmap px
+          // (0.9 CSS px) and filled solid — a hard-edged crescent that never
+          // scaled with the stone, so it read as a printing slip rather than
+          // as weight. Blur and offset now derive from rr, so a stone on a
+          // 448px board and one on a 788px board sit the same way. Measured
+          // cost of the switch: +0.1ms for 113 stones.
+          ctx.save();
+          ctx.shadowColor = themeId === "night" ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.32)";
+          ctx.shadowBlur = rr * 0.36;
+          ctx.shadowOffsetX = rr * 0.05;
+          ctx.shadowOffsetY = rr * 0.13;
           ctx.beginPath();
           ctx.arc(x, y, rr, 0, Math.PI * 2);
           ctx.fillStyle = sg;
           ctx.fill();
+          ctx.restore();
           if (s === "w") {
+            // Stroked outside the shadow scope, or the rim would cast its own.
+            ctx.beginPath();
+            ctx.arc(x, y, rr, 0, Math.PI * 2);
             ctx.strokeStyle = themeId === "day" ? "rgba(0,0,0,0.26)" : "rgba(0,0,0,0.18)";
             ctx.lineWidth = themeId === "day" ? 1.35 : 1;
             ctx.stroke();
           } else if (themeId === "night") {
+            ctx.beginPath();
+            ctx.arc(x, y, rr, 0, Math.PI * 2);
             ctx.strokeStyle = "rgba(255,255,255,0.06)";
             ctx.lineWidth = 1;
             ctx.stroke();

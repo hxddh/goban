@@ -838,6 +838,57 @@ async function enableSwap2Pvp(page) {
     bad.length === 0, JSON.stringify({ bad }));
 }
 
+// R 棋盘必须始终按 1:dpr 渲染，且格距落在整设备像素上。
+// 两个都是 v1.35 修掉的清晰度缺陷：
+//  · #board-wrap 的 width/height 有 .28s 过渡，画布是它的 100%，所以尺寸是逐帧
+//    到位的。window 的 resize 处理器只采样了第 0 帧就再没复测，于是任何一次窗口
+//    缩放之后位图都停在旧尺寸（实测 828px 的框里放着 1576px 的位图 = 1.90×
+//    重采样），整盘的线与棋子全被磨软，直到有人碰一下侧栏才自愈。
+//  · pad = w×0.045 = 70.92、step = 102.44 都是小数，30 条线全部落在半像素上。
+{
+  const bad = [];
+  const page = await newPage();
+  const probe = () => page.evaluate(() => {
+    const cv = document.getElementById("board");
+    const r = cv.getBoundingClientRect();
+    const W = cv.width;
+    // 读 draw.js 实际使用的几何，不要在这里重算 —— 重算出来的整数是同义反复，
+    // 反证时怎么改 draw.js 都会通过。
+    const g = window.GobanDraw.geometry();
+    return {
+      ratio: +(W / r.width).toFixed(3),
+      dpr: Math.min(window.devicePixelRatio || 1, 2),
+      intPitch: Number.isInteger(g.step) && Number.isInteger(g.pad),
+      pitch: g.step, origin: g.pad,
+      css: Math.round(r.width), bmp: W,
+    };
+  });
+  const steps = [
+    ["初始", null],
+    ["关侧栏", "["],
+    ["开侧栏", "]"],
+  ];
+  for (const [label, key] of steps) {
+    if (key) { await page.keyboard.press(key); }
+    await page.waitForTimeout(650);
+    const r = await probe();
+    if (Math.abs(r.ratio - r.dpr) > 0.005) bad.push(label + ":比值 " + r.ratio + " ≠ dpr " + r.dpr + " (" + r.bmp + "/" + r.css + ")");
+    if (!r.intPitch) bad.push(label + ":格距非整数 step=" + r.pitch + " pad=" + r.origin);
+  }
+  for (const [w, h] of [[1320, 900], [760, 760], [1000, 820]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.waitForTimeout(700);
+    const r = await probe();
+    const tag = w + "x" + h;
+    if (Math.abs(r.ratio - r.dpr) > 0.005) bad.push(tag + ":比值 " + r.ratio + " ≠ dpr " + r.dpr + " (" + r.bmp + "/" + r.css + ")");
+    if (!r.intPitch) bad.push(tag + ":格距非整数 step=" + r.pitch + " pad=" + r.origin);
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  report("R 棋盘位图恒为 1:dpr，且格距为整数设备像素",
+    bad.length === 0, JSON.stringify({ bad }));
+  await page.close();
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");
