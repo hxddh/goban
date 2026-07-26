@@ -88,17 +88,36 @@ jobs:
           echo "$out" | grep -q '"code":"permission_denied"' \
             || { echo "::error::未登记的命令没有被策略拒绝：$out"; exit 1; }
 
-      # 路径在 Windows 上要经 JSON 转义（C:\… 会变成 C:\\…），
-      # 应用侧的 jsonUnescape 正是为此存在 —— 这条顺带把它测到。
+      # 这一步有两套路径,不能混:
+      #
+      #   bash 侧(test/cat/grep)要 MSYS 路径     /d/a/goban/goban/goban-smoke.txt
+      #   应用侧(createFileAbsolute)要 Windows 路径  D:\a\goban\goban\goban-smoke.txt
+      #
+      # 第一版两边都用 `$(pwd)`,于是把 MSYS 路径送进了桥,应用回 handler_failed ——
+      # 那是它该做的:`/d/...` 在 Windows 上不是绝对路径。断言没有白响。
+      #
+      # 顺带:`pwd -W` 拿到的路径里有反斜杠,JSON 里必须写成 `\\`,应用侧的
+      # jsonUnescape 正是为此存在。第一版的路径一个反斜杠都没有,那句注释说要测
+      # 转义,其实一点也没测到。现在才真的测到。
       - name: 桥往返（goban.writeTextFile → readTextFile）
         run: |
-          TMP="$(pwd)/goban-smoke.txt"
+          POSIX_PATH="$(pwd)/goban-smoke.txt"
+          WIN_DIR="$(pwd -W)"                          # D:/a/goban/goban
+          WIN_PATH="${WIN_DIR//\//\\}\\goban-smoke.txt"  # D:\a\goban\goban\goban-smoke.txt
+          JSON_PATH="${WIN_PATH//\\/\\\\}"             # JSON 里的 D:\\a\\...
+          echo "应用侧路径: $WIN_PATH"
+          case "$WIN_PATH" in
+            [A-Za-z]:\\*) ;;
+            *) echo "::error::没拿到 Windows 绝对路径：$WIN_PATH"; exit 1 ;;
+          esac
           B64=$(printf 'goban smoke %s' "$GITHUB_SHA" | base64 -w0)
-          native automate bridge "{\"id\":\"w\",\"command\":\"goban.writeTextFile\",\"payload\":{\"path\":\"$TMP\",\"b64\":\"$B64\"}}"
-          test -f "$TMP" || { echo "::error::桥没有把文件写出来"; exit 1; }
-          echo "写出的内容: $(cat "$TMP")"
-          grep -q "$GITHUB_SHA" "$TMP" || { echo "::error::写出的内容不对"; exit 1; }
-          out=$(native automate bridge "{\"id\":\"r\",\"command\":\"goban.readTextFile\",\"payload\":{\"path\":\"$TMP\"}}")
+          w=$(native automate bridge "{\"id\":\"w\",\"command\":\"goban.writeTextFile\",\"payload\":{\"path\":\"$JSON_PATH\",\"b64\":\"$B64\"}}")
+          echo "$w"
+          echo "$w" | grep -q '"ok":true' || { echo "::error::写入被拒：$w"; exit 1; }
+          test -f "$POSIX_PATH" || { echo "::error::桥没有把文件写出来"; exit 1; }
+          echo "写出的内容: $(cat "$POSIX_PATH")"
+          grep -q "$GITHUB_SHA" "$POSIX_PATH" || { echo "::error::写出的内容不对"; exit 1; }
+          out=$(native automate bridge "{\"id\":\"r\",\"command\":\"goban.readTextFile\",\"payload\":{\"path\":\"$JSON_PATH\"}}")
           echo "$out"
           echo "$out" | grep -q '"ok":true' || { echo "::error::读回失败"; exit 1; }
 
