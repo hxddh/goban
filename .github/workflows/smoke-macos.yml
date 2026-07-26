@@ -94,11 +94,16 @@ jobs:
       #
       # `id` 是必填的;第一次跑漏了它,应用回 invalid_request(请求确实送达并被
       # 处理了 —— 日志里 request_bytes=38 response_bytes=95 —— 只是报文不合法)。
-      - name: 桥往返（内建 ping）
+      # 第一版这里断言 native.ping 必须返回 ok —— 写错了。main.zig 的桥策略是
+      # 白名单(enabled: true,只登记 goban.writeTextFile / readTextFile),未登记的
+      # 命令被拒正是它该做的事,实测回 permission_denied。翻过来断言才对:这一条
+      # 现在证明的是白名单真的在生效,而不是「随便什么命令都能调进来」。
+      - name: 桥策略拒绝未登记的命令
         run: |
-          out=$(native automate bridge '{"id":"smoke","command":"native.ping","payload":{"source":"automation"}}')
+          out=$(native automate bridge '{"id":"smoke","command":"native.ping","payload":{}}')
           echo "$out"
-          echo "$out" | grep -q '"ok":true' || { echo "::error::内建 ping 未返回 ok"; exit 1; }
+          echo "$out" | grep -q '"code":"permission_denied"' \
+            || { echo "::error::未登记的命令没有被策略拒绝：$out"; exit 1; }
 
       # 应用自己的处理器。这一条是全套回归里唯一能碰到它的地方:写一个临时文件、
       # 读回来、比对内容,三步都过才算桥真的通。
