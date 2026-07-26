@@ -1418,6 +1418,29 @@ const Practice = ctx.GobanPractice;
     assert(scanPitch("const g = D.pitchFor(px);") === 0, "自算格距闸门放过共享写法");
   }
 
+  // 三块画布同一条 dpr 上限,且不许把 alpha 拼到颜色字符串后面。
+  // 复盘曲线是最后一块自成一套的画布:此前 dpr 不封顶(实测 3× 时位图 1008×282,
+  // 另两块都封在 2×),面积填充写成 `line + "22"` —— 四个主题的 --accent 恰好都是
+  // hex 才没出事,写成 rgb() 或色名就拼出非法值,而 canvas 对非法 fillStyle 是
+  // 静默忽略的:填充直接消失,不报任何错。这正是 v1.38 那类「引擎不认就整条丢掉」。
+  const revRaw = fs.readFileSync(path.join(root, "src/web/js/review.js"), "utf8");
+  const revSrc = revRaw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const concatAlpha = [...revSrc.matchAll(/\+\s*"[0-9a-fA-F]{2}"/g)].map((m) => m[0]);
+  assert(concatAlpha.length === 0,
+    "复盘曲线不把 alpha 拼到颜色后面 (" + concatAlpha.join(", ") + ")");
+  for (const [file, label] of [["review.js", "复盘曲线"], ["practice.js", "练习棋盘"]]) {
+    const js = fs.readFileSync(path.join(root, "src/web/js", file), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    if (!/devicePixelRatio/.test(js)) continue;
+    assert(/Math\.min\(window\.devicePixelRatio \|\| 1, 2\)/.test(js),
+      label + "的 dpr 与主棋盘同一条上限");
+  }
+  {
+    const scan = (js) => [...js.matchAll(/\+\s*"[0-9a-fA-F]{2}"/g)].length;
+    assert(scan('g.fillStyle = line + "22";') === 1, "拼接 alpha 闸门认得出老写法");
+    assert(scan('g.fillStyle = line; g.globalAlpha = 0.13;') === 0, "拼接 alpha 闸门放过新写法");
+  }
+
   // A stone may be rendered in exactly one place. Three copies of the disc
   // (board / hover preview / 推演 variation) each carried their own radius and
   // their own gradient stops, and they drifted the moment one of them changed:
