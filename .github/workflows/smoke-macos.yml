@@ -91,9 +91,35 @@ jobs:
 
       # 桥往返:这是 Playwright 结构上到不了的那条路 —— goban.writeTextFile /
       # readTextFile 是 Zig 侧的处理器,网页测试里根本不存在。
-      - name: 桥往返（native.ping）
-        if: always()
-        run: native automate bridge '{"command":"native.ping","payload":{}}' || true
+      #
+      # `id` 是必填的;第一次跑漏了它,应用回 invalid_request(请求确实送达并被
+      # 处理了 —— 日志里 request_bytes=38 response_bytes=95 —— 只是报文不合法)。
+      - name: 桥往返（内建 ping）
+        run: |
+          out=$(native automate bridge '{"id":"smoke","command":"native.ping","payload":{"source":"automation"}}')
+          echo "$out"
+          echo "$out" | grep -q '"ok":true' || { echo "::error::内建 ping 未返回 ok"; exit 1; }
+
+      # 应用自己的处理器。这一条是全套回归里唯一能碰到它的地方:写一个临时文件、
+      # 读回来、比对内容,三步都过才算桥真的通。
+      - name: 桥往返（goban.writeTextFile → readTextFile）
+        run: |
+          TMP="$RUNNER_TEMP/goban-smoke.txt"
+          B64=$(printf 'goban smoke %s' "$GITHUB_SHA" | base64)
+          native automate bridge "{\"id\":\"w\",\"command\":\"goban.writeTextFile\",\"payload\":{\"path\":\"$TMP\",\"b64\":\"$B64\"}}"
+          test -f "$TMP" || { echo "::error::桥没有把文件写出来"; exit 1; }
+          echo "写出的内容: $(cat "$TMP")"
+          grep -q "$GITHUB_SHA" "$TMP" || { echo "::error::写出的内容不对"; exit 1; }
+          out=$(native automate bridge "{\"id\":\"r\",\"command\":\"goban.readTextFile\",\"payload\":{\"path\":\"$TMP\"}}")
+          echo "$out"
+          echo "$out" | grep -q '"ok":true' || { echo "::error::读回失败"; exit 1; }
+
+      # 快照里的这两个计数是「有没有悄悄出事」的唯一出口:handler 报错不再让应用
+      # 退出,只留在这里。
+      - name: 无静默错误
+        run: |
+          native automate assert 'dispatch_errors=0'
+          native automate assert --absent 'error event='
 
       - name: 应用日志
         if: always()

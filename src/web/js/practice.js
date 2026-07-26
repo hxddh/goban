@@ -959,53 +959,45 @@
   function drawBoard(marks, dots) {
     const cv = document.getElementById("practice-board");
     if (!cv || !cur) return;
-    const dpr = window.devicePixelRatio || 1;
+    const D = global.GobanDraw;
+    // 位图按内容框算(clientWidth 不含边框),并和主棋盘用同一条 dpr 上限。
+    // 上限存在的理由在主棋盘那边实测过:3× 重建 74.2ms 对 2× 的 33.5ms。
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cssW = cv.clientWidth || 360;
-    cv.width = Math.round(cssW * dpr);
-    cv.height = Math.round(cssW * dpr);
+    const px = Math.round(cssW * dpr);
+    if (cv.width !== px) { cv.width = px; cv.height = px; }
     const g = cv.getContext("2d");
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, cssW, cssW);
-    const pad = cssW * 0.04;
-    const step = (cssW - pad * 2) / (SIZE - 1);
-    const css = getComputedStyle(document.documentElement);
-    const lineCol = css.getPropertyValue("--muted").trim() || "#999";
-    g.strokeStyle = lineCol;
-    g.globalAlpha = 0.55;
-    g.lineWidth = 1;
-    for (let i = 0; i < SIZE; i++) {
-      const t = pad + i * step;
-      g.beginPath(); g.moveTo(pad, t); g.lineTo(cssW - pad, t); g.stroke();
-      g.beginPath(); g.moveTo(t, pad); g.lineTo(t, cssW - pad); g.stroke();
-    }
-    g.globalAlpha = 1;
-    const rr = step * 0.42;
-    for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
-      const s = cur.board[r][c];
-      if (!s) continue;
-      const x = pad + c * step, y = pad + r * step;
-      g.beginPath();
-      g.arc(x, y, rr, 0, Math.PI * 2);
-      g.fillStyle = s === "b" ? "#1a1a1a" : "#f2f2f2";
-      g.fill();
-      g.strokeStyle = s === "b" ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.35)";
-      g.lineWidth = 1;
-      g.stroke();
-    }
+    g.setTransform(1, 0, 0, 1, 0, 0);   // 按位图像素作图,和主棋盘一致
+
+    // 这块棋盘曾经有自己的一套画法:pad = w*0.04 / step = (w-2pad)/14 得出
+    // 13.44 与 22.08 两个小数(30 条线全在半像素上)、半径 0.42(全应用第四个值)、
+    // 纯色圆片不带渐变阴影与自适应边缘、没有星位也没有盘面。于是 v1.35–v1.37
+    // 在主棋盘上做的每一次改进都停在弹层边缘,而 练习 + 每日 是一整个模式。
+    // 现在两块棋盘是同一个画家、同一条格距规则、同一个 STONE_R。
+    const { pad, step } = D.pitchFor(px);
+    const themeId = document.documentElement.getAttribute("data-theme") || "wood";
+    D.paintPosition(g, {
+      board: cur.board, themeId: themeId, w: px,
+      pad: pad, step: step, dpr: dpr, coords: false,
+    });
+
     const all = (marks || []).concat(dots || []);
     for (const m of all) {
       const x = pad + m.c * step, y = pad + m.r * step;
       if (m.stone) {
-        // sequence move: a translucent stone carrying its move number
-        g.globalAlpha = 0.92;
-        g.beginPath();
-        g.arc(x, y, rr, 0, Math.PI * 2);
-        g.fillStyle = m.stone === "b" ? "#1a1a1a" : "#f2f2f2";
-        g.fill();
-        g.lineWidth = m.key ? 2 : 1;
-        g.strokeStyle = m.key ? "rgba(47,158,94,0.95)" : "rgba(120,120,120,0.7)";
-        g.stroke();
-        g.globalAlpha = 1;
+        // 推演序列的一手:静音棋子 + 手数。虚影与主棋盘同一套 —— v1.37 把
+        // 「半透明」换成「拉向中性灰、不透明」,理由是半透明的黑子叠在木色盘上
+        // 合成出第三种颜色,答不出将落的是哪一色。
+        D.paintStone(g, x, y, step * D.STONE_R, m.stone, themeId, { ghost: true, dpr: dpr });
+        if (m.key) {
+          g.save();
+          g.beginPath();
+          g.arc(x, y, step * D.STONE_R + Math.max(1, dpr), 0, Math.PI * 2);
+          g.strokeStyle = "rgba(47,158,94,0.95)";
+          g.lineWidth = Math.max(1.5, dpr * 1.4);
+          g.stroke();
+          g.restore();
+        }
         g.fillStyle = m.stone === "b" ? "#fff" : "#1a1a1a";
         g.font = "600 " + Math.round(step * 0.5) + "px -apple-system, system-ui, sans-serif";
         g.textAlign = "center";
