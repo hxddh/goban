@@ -5,6 +5,38 @@
 > 每日挑战、对局统计、四套棋盘主题、SGF 全链路、多存档槽、中英双语、
 > macOS/Windows 双平台发布。
 
+## 已合入 main、尚未打 tag
+
+两件事,都不改前端,尚未随任何版本发布。
+
+- **关窗行为按平台给**。`app.zon` 没设 `close_policy`,SDK 默认 `.quit` —— macOS 上
+  关掉最后一个窗口即退出,不是原生行为。SDK 宿主已实现 `applicationShouldHandleReopen:`
+  (`reopenPolicyHiddenWindows`),所以 `.hide` 在 macOS 上有回来的路。不能直接写进
+  `app.zon`:那是窗口声明上的单一字段,没有按平台分设的写法,而 Windows 上 `.hide` 会被
+  SDK 在**启动期**拒绝(`error.UnsupportedWindowClosePolicy` —— 隐藏会拿掉任务栏项,
+  Windows 没有 dock 重开的路径,只有 tray 状态项能找回来;本应用没有 `tray` capability)。
+  所以在 `runner.zig` 按 `build_options.platform` 分设,`app.zon` 显式写了则以它为准。
+- **`smoke-windows`**:Windows 此前对「打包后的应用起不起得来」是**零覆盖**
+  (`build-windows.yml` 只构建、不运行),而上面那个分支一旦写错,包会**构建成功但一启动
+  就退出**,现有 CI 一条都拦不住。
+
+### 两条真机结论
+
+| 平台 | 结果 |
+|---|---|
+| macOS(runner `macos-14`) | 15 步全绿。`ready=true`,WKWebView 载入 `zero://app`,桥往返通,`dispatch_errors=0` |
+| Windows(runner `windows-latest`) | 15 步全绿。`ready=true`,窗口 960×749,**WebView2** 载入 `zero://app`,`webview-system: available`;桥白名单生效、往返通 |
+
+**首次 Windows 运行是红的,原因是我写的工作流,不是应用。** `TMP="$(pwd)/…"` 在 Git Bash
+里得到 `/d/a/goban/goban/…`,而 `writeTextFile` 走 `createFileAbsolute` —— `/d/...` 在
+Windows 上不是绝对路径,应用回 `handler_failed` 是**正确**的。附带暴露一处我吹过的牛:
+那一步的注释说要测 `jsonUnescape` 的 `C:\` → `C:\\` 转义,而旧路径里一个反斜杠都没有,
+一次都没测到。现在送进桥的是 `pwd -W` 转出的 `D:\a\goban\goban\goban-smoke.txt`,
+转义这条路才第一次被真的走过。
+
+**仍然做不到**:`.hide` 生效之后「关窗后应用还活着、点 Dock 图标窗口能回来」这条断言。
+`native automate` 没有关窗口的命令 —— 这是能力边界,不是待办。
+
 ## v1.40.0 · 本版内容
 
 v1.39 并掉第二块棋盘后,还剩两处同构的「同一个东西的第二种画法」。
