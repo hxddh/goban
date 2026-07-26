@@ -38,6 +38,17 @@
       --card: rgba(255,255,255,.04);
       --card-border: rgba(255,255,255,.06);
       --btn-ghost: rgba(255,255,255,.06);
+      /* v1.36 — 109 of the 124 text elements ran on the browser's
+         `line-height: normal`, which for CJK is ~1.15–1.2: tight to read, and
+         it moves with whatever Chinese font the machine happens to have, so
+         the same screen had different vertical rhythm on different machines.
+         The nine explicit declarations that did exist used six unrelated
+         ratios (1 / 1.3 / 1.35 / 1.4 / 1.45 / 1.5). Three steps instead:
+         controls stay compact so no button height moves, UI text gets room,
+         and anything that wraps gets reading leading. */
+      --lh-tight: 1.2;   /* single-line controls */
+      --lh-ui: 1.35;     /* labels, status, list rows */
+      --lh-text: 1.6;    /* prose that wraps */
       --ease: cubic-bezier(0.22, 1, 0.36, 1);
       --font-num: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
     }
@@ -109,6 +120,7 @@
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
         "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
       font-feature-settings: "kern" 1;
+      line-height: var(--lh-ui);
       -webkit-font-smoothing: antialiased;
       user-select: none;
       overflow: hidden;
@@ -173,6 +185,7 @@
     .spacer { flex: 1; min-width: 4px; }
     .chrome-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
     .icon-btn, .tool-btn {
+      line-height: var(--lh-tight);
       appearance: none; border: 0; border-radius: var(--radius-sm);
       background: var(--btn-ghost); color: var(--text);
       border: 1px solid var(--card-border);
@@ -350,6 +363,7 @@
       min-width: 0;
     }
     .pill button {
+      line-height: var(--lh-tight);
       appearance: none; border: 0; background: transparent;
       color: var(--muted);
       font: inherit; font-size: 12px; font-weight: 500;
@@ -675,6 +689,7 @@
     }
     .backup-row .muted { margin-right: auto; }
     .text-link {
+      line-height: var(--lh-tight);
       appearance: none; border: 0; background: transparent;
       color: var(--accent-text);
       font: inherit; font-size: 12px; font-weight: 500;
@@ -809,6 +824,13 @@
     #confirm-modal { z-index: 60; }
     .modal {
       width: min(380px, calc(100vw - 32px));
+      /* A dialog had no ceiling and no scroll: 说明 renders 732px tall, so in
+         a 720px or 600px window it was simply cut off with no way to reach the
+         rest — 600px was already clipped before v1.36 widened the leading.
+         Cap it to the viewport and let the overflow scroll. */
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
       background: var(--panel); border: 1px solid var(--panel-border);
       border-radius: var(--radius-lg); padding: 16px 20px;
       box-shadow: 0 24px 60px rgba(0,0,0,.4);
@@ -820,8 +842,15 @@
     }
     .modal h3 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
     .modal table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .modal td { padding: 8px 0; border-bottom: 1px solid var(--card-border); }
+    .modal td { padding: 8px 0; border-bottom: 1px solid var(--card-border); line-height: var(--lh-text); }
     .modal td:first-child {
+      /* Stays a flat 42%. Measured: the keys use only 7–96px of the 142px, and
+         five description cells wrap — but every alternative tried was worse.
+         width:1% shrank the column to 45px and made 9 of 13 KEYS wrap
+         (`Home / End` split across lines) and the dialog 150px taller;
+         white-space:nowrap let the longest key (⌘⌃F · 绿键 · F) alone push the
+         column to 175px. Trading a description wrap for a key wrap is a
+         downgrade, so the waste stays. */
       color: var(--accent-text); width: 42%;
       font-family: var(--font-num); font-size: 12px;
     }

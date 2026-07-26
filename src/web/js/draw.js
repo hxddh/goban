@@ -7,6 +7,10 @@
 (function (global) {
   const SIZE = (global.GobanCore && global.GobanCore.SIZE) || 15;
 
+  /** Rendered board luminance per theme, measured off the painted base.
+   *  Drives how much edge a stone needs to keep its silhouette. */
+  const BOARD_LUM = { wood: 188, night: 41, day: 227 };
+
   const STARS = [
     [3, 3], [3, 7], [3, 11],
     [7, 3], [7, 7], [7, 11],
@@ -15,6 +19,10 @@
 
   const THEMES = {
     wood: {
+      /* Matches the CSS --win token; before v1.36 the board used its own
+         muted brick while the status pill and the frame glow used this, so a
+         win wore two different colours in one app. */
+      winGlow: "#ffe08a",
       boardTop: "#e8c49a", boardMid: "#d4a574", boardBot: "#c28b52",
       grain: true, line: "#3d2914", star: "#3d2914",
       style: "stone",
@@ -25,6 +33,10 @@
       analysis: "rgba(210, 150, 30, 0.9)",
     },
     night: {
+      /* Matches the CSS --win token; before v1.36 the board used its own
+         muted brick while the status pill and the frame glow used this, so a
+         win wore two different colours in one app. */
+      winGlow: "#a8e6cf",
       boardTop: "#1e332c", boardMid: "#172822", boardBot: "#101c18",
       grain: false, line: "#5a7a6c", star: "#7dcea0",
       style: "stone",
@@ -35,6 +47,10 @@
       analysis: "rgba(240, 190, 90, 0.95)",
     },
     day: {
+      /* Matches the CSS --win token; before v1.36 the board used its own
+         muted brick while the status pill and the frame glow used this, so a
+         win wore two different colours in one app. */
+      winGlow: "#a65d2e",
       boardTop: "#f6ead4", boardMid: "#ecd9b5", boardBot: "#e2cba0",
       grain: true, line: "#6b5344", star: "#6b5344",
       style: "stone",
@@ -45,6 +61,10 @@
       analysis: "rgba(190, 130, 20, 0.9)",
     },
     notebook: {
+      /* Matches the CSS --win token; before v1.36 the board used its own
+         muted brick while the status pill and the frame glow used this, so a
+         win wore two different colours in one app. */
+      winGlow: "#c0392b",
       paper: "#fffcf5",
       grid: "#c5d4e8",
       gridStrong: "#9db4d0",
@@ -289,6 +309,11 @@
       ctx.strokeStyle = th.pencil;
       ctx.lineWidth = Math.max(1.2, w / 450);
       for (const [r, c] of STARS) {
+        // This theme's stones are outlines, not fills, so anything drawn
+        // underneath shows straight through them: the 天元 cross came up
+        // inside the triangle sitting on it and read as noise. A star marks an
+        // empty intersection; once a stone owns the point the mark has no job.
+        if (board[r][c]) continue;
         const x = pad + c * step;
         const y = pad + r * step;
         const s = Math.max(3, step * 0.12);
@@ -446,18 +471,35 @@
           ctx.fillStyle = sg;
           ctx.fill();
           ctx.restore();
+          // Edge definition, sized to how close this stone is to its board.
+          // A stone that shares the board's luminance loses its silhouette,
+          // and every theme has one such colour — measured edge contrast
+          // before this: 木 white 41.0 vs black 158.9, 日 white 4.6 vs black
+          // 201.2, 夜 black 25.2 vs white 172.8. A shadow cannot fix the dark
+          // case (it only darkens, and 夜's board is already at luminance 41)
+          // and an outline alone flattens the light case, so each direction
+          // gets the treatment that suits it: light stones take a thin dark
+          // contour, dark stones take a graded rim-light strongest at the
+          // top-left, where the stone's own highlight already is.
+          const boardLum = BOARD_LUM[themeId] != null ? BOARD_LUM[themeId] : 188;
+          const stoneLum = s === "b" ? 24 : 244;
+          const sep = Math.abs(stoneLum - boardLum) / 255;   // 0 = invisible
+          const need = Math.max(0, 1 - sep / 0.62);          // 0 when separated
           if (s === "w") {
-            // Stroked outside the shadow scope, or the rim would cast its own.
             ctx.beginPath();
             ctx.arc(x, y, rr, 0, Math.PI * 2);
-            ctx.strokeStyle = themeId === "day" ? "rgba(0,0,0,0.26)" : "rgba(0,0,0,0.18)";
-            ctx.lineWidth = themeId === "day" ? 1.35 : 1;
+            ctx.strokeStyle = "rgba(0,0,0," + (0.16 + 0.30 * need).toFixed(3) + ")";
+            ctx.lineWidth = Math.max(1, _dpr * (0.5 + 0.5 * need));
             ctx.stroke();
-          } else if (themeId === "night") {
+          } else if (need > 0.02) {
+            const rim = ctx.createLinearGradient(x - rr, y - rr, x + rr, y + rr);
+            rim.addColorStop(0, "rgba(255,255,255," + (0.42 * need).toFixed(3) + ")");
+            rim.addColorStop(0.45, "rgba(255,255,255," + (0.12 * need).toFixed(3) + ")");
+            rim.addColorStop(1, "rgba(255,255,255,0.02)");
             ctx.beginPath();
-            ctx.arc(x, y, rr, 0, Math.PI * 2);
-            ctx.strokeStyle = "rgba(255,255,255,0.06)";
-            ctx.lineWidth = 1;
+            ctx.arc(x, y, rr - 0.5, 0, Math.PI * 2);
+            ctx.strokeStyle = rim;
+            ctx.lineWidth = Math.max(1, _dpr);
             ctx.stroke();
           }
         }
@@ -648,24 +690,44 @@
     }
 
     if (winLine && winLine.length) {
+      // The win used to be one translucent rule drawn THROUGH the stones:
+      // its colour carried alpha 0.5–0.55 and was then multiplied by a 0.62
+      // globalAlpha, landing at an effective 0.31–0.34 — measured on the wood
+      // board as rgb(88,46,28), a dull scratch across the five stones that
+      // decided the game. The five stones are the subject, not the line
+      // between them, so they get the emphasis: a glow ring around each, in
+      // the same --win the status pill and the frame flash already use.
+      const glow = th.winGlow || th.win;
+      const rr = step * 0.46;
       ctx.save();
-      ctx.globalAlpha = th.style === "pencil" ? 0.72 : 0.62;
-      ctx.strokeStyle = th.win;
-      ctx.lineWidth = Math.max(2, step * 0.09);
       ctx.lineCap = "round";
-      if (th.style === "pencil") {
-        ctx.setLineDash([Math.max(4, step * 0.15), Math.max(3, step * 0.1)]);
-      }
+      // Connecting thread first, underneath the rings, so it reads as one
+      // group rather than five separate marks.
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = glow;
+      ctx.lineWidth = Math.max(1, step * 0.05);
       ctx.beginPath();
       for (let i = 0; i < winLine.length; i++) {
         const p = winLine[i];
-        const x = pad + p.c * step;
-        const y = pad + p.r * step;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        if (i === 0) ctx.moveTo(pad + p.c * step, pad + p.r * step);
+        else ctx.lineTo(pad + p.c * step, pad + p.r * step);
       }
       ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      for (const p of winLine) {
+        const x = pad + p.c * step;
+        const y = pad + p.r * step;
+        ctx.save();
+        ctx.shadowColor = glow;
+        ctx.shadowBlur = rr * 0.75;
+        ctx.beginPath();
+        ctx.arc(x, y, rr + Math.max(1, _dpr), 0, Math.PI * 2);
+        ctx.strokeStyle = glow;
+        ctx.lineWidth = Math.max(1.5, _dpr * 1.4);
+        ctx.stroke();
+        ctx.stroke();  // second pass deepens the bloom without a wider ring
+        ctx.restore();
+      }
       ctx.restore();
     }
   }
