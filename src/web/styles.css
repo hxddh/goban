@@ -715,7 +715,17 @@
 
     .side-foot {
       margin-top: auto;
+      /* Pinned, not just placed last. v1.32 shaved the sidebar to 856px so
+         these five entries cleared a 900px window — but 1280×720 is just as
+         ordinary a window, and there they fell below the fold again. Sticky
+         solves it at every height instead of at one: the settings above scroll,
+         练习/每日/统计 stay put. The negative bottom + padding swallow .side's
+         own 20px bottom padding, or a translucent strip shows under the bar. */
+      position: sticky;
+      bottom: -20px;
       padding-top: 16px;
+      padding-bottom: 20px;
+      background: var(--panel);
       border-top: 1px solid var(--card-border);
       display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center;
       gap: 4px 8px;
@@ -850,7 +860,18 @@
   0%, 100% { transform: scale(0.7); opacity: 0.35; }
   50% { transform: scale(1.15); opacity: 0.85; }
 }
+/* v1.33: this block used to cover exactly one element (.think-dot) while 57
+   others kept animating — the preference was declared, not implemented.
+   Transitions are collapsed rather than removed: 0.01ms still fires
+   transitionend, so anything sequenced off it keeps working. The board's own
+   stone-drop animation is JS-driven and is handled in draw.js. */
 @media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
   .think-dot { animation: none; }
 }
 

@@ -176,13 +176,17 @@
           <button type="button" class="text-link" id="sgf-download" data-i18n="sgf.export">导出</button>
           <button type="button" class="text-link" id="sgf-import" data-i18n="sgf.import">导入</button>
           <button type="button" class="text-link" id="sgf-paste" title="从剪贴板粘贴 SGF" data-i18n="sgf.paste" data-i18n-title="sgf.paste.title">粘贴</button>
-          <button type="button" class="text-link" id="sgf-slots" title="命名存档与历史对局" data-i18n="sgf.slots" data-i18n-title="sgf.slots.title">存档</button>
-          <button type="button" class="text-link" id="sgf-review" title="全局复盘：评分曲线与失着" data-i18n="sgf.review" data-i18n-title="sgf.review.title">复盘</button>
         </div>
         <button type="button" class="continue-btn" id="sgf-continue" hidden title="从导入局面继续对局" data-i18n="sgf.continue" data-i18n-title="sgf.continue.title">续下</button>
       </section>
 
+      <!-- One rule decides what lives here: entries that OPEN something get
+           pinned, actions that operate on the current game (复制/导出/导入/粘贴)
+           stay with 棋谱 above. The foot is sticky, so these five are reachable
+           at any window height — 1280×720 used to bury 存档/复盘 below the fold. -->
       <div class="side-foot">
+        <button type="button" class="text-link" id="sgf-slots" title="命名存档与历史对局" data-i18n="sgf.slots" data-i18n-title="sgf.slots.title">存档</button>
+        <button type="button" class="text-link" id="sgf-review" title="全局复盘：评分曲线与失着" data-i18n="sgf.review" data-i18n-title="sgf.review.title">复盘</button>
         <button type="button" class="text-link" id="open-practice" title="战术练习：找制胜一手 / 找防守点" data-i18n="foot.practice" data-i18n-title="foot.practice.title">练习</button>
         <button type="button" class="text-link" id="open-daily" title="每日挑战：每天固定 5 题，连续打卡" data-i18n="foot.daily" data-i18n-title="foot.daily.title">每日</button>
         <button type="button" class="text-link" id="open-stats" title="对局统计" data-i18n="foot.stats" data-i18n-title="foot.stats.title">统计</button>
@@ -286,7 +290,9 @@
         <div id="review-empty" class="muted" hidden data-i18n="review.empty">先下几手再来复盘</div>
         <div id="review-body" hidden>
           <p class="review-hint" data-i18n="review.curveHint">评分曲线（黑上 · 白下）· 红点为失着 · 点曲线或下方失着可跳转</p>
-          <canvas id="review-curve" class="review-curve" title="点击跳到对应手" data-i18n-title="review.curve.title"></canvas>
+          <canvas id="review-curve" class="review-curve" role="img"
+                  aria-label="评分曲线，逐手优劣；具体失着见下方列表" data-i18n-aria="aria.reviewCurve"
+                  title="点击跳到对应手" data-i18n-title="review.curve.title"></canvas>
           <div class="review-stat" id="review-stat"></div>
           <div class="review-actions">
             <button type="button" class="text-link" id="review-pv" title="从当前查看的一手起，引擎推演后续着法（虚影）" data-i18n="review.pv" data-i18n-title="review.pv.title">推演当前局面</button>

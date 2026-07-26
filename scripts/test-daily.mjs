@@ -135,8 +135,10 @@ async function answerRound(expectAllCorrect) {
 
 // ---- Test 1: open daily → titled, 5 questions, snapshot stored ----
 {
-  await page.click("#toggle-panel");
-  await page.waitForTimeout(80);
+  // "]" is idempotent (setPanelOpen(true)); #toggle-panel flips, and since
+  // v1.33 a fresh profile starts with the panel already open.
+  await page.keyboard.press("]");
+  await page.waitForTimeout(120);
   await page.click("#open-daily");
   await page.waitForTimeout(200);
   const title = await modalText("practice-title");
