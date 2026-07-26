@@ -253,6 +253,8 @@
   let originalStartedAt = Date.now();
   let clockTimer = null;
   let aiThinking = false;
+  /** performance.now() when the current computer move started; 0 when idle. */
+  let thinkStartedAt = 0;
   /** Bumps on reset/load so late AI timeouts cannot place on a new game. */
   let gameGen = 0;
   let soundOn = true;
@@ -1045,6 +1047,7 @@
     if (importPaused || swap2) return;
     if (mode !== "ai" || result !== "play" || isHumanTurn() || aiThinking) return;
     aiThinking = true;
+    thinkStartedAt = performance.now();
     hoverCell = null;
     clearHint();
     const gen = gameGen;
@@ -1069,6 +1072,7 @@
       setTimeout(() => {
         if (gen !== gameGen) return;
         aiThinking = false;
+        thinkStartedAt = 0;
         let move = m;
         // Worker cancel (analysis/hint restart) or a lost race can yield null
         // while it is still the computer's turn — never leave the side stranded.
@@ -1087,6 +1091,7 @@
     }).catch(() => {
       if (gen !== gameGen) return;
       aiThinking = false;
+      thinkStartedAt = 0;
       const move = aiMoveSyncSafe({
         board: boardAfter(history.length),
         humanColor: humanColor,
@@ -1286,9 +1291,30 @@
     maybeAiTurn();
   }
 
+  /**
+   * Cancel the computer's pending move. 极限 budgets are 5s (深 8s) per move,
+   * during which the only status was a static "电脑思考中…" and 悔棋 was
+   * disabled — a misclick meant sitting through the whole budget. Bumping
+   * gameGen makes every pending continuation drop its result (the same guard
+   * reset/load already rely on), and the worker is restarted so it stops
+   * burning CPU on a move nobody will use. Safe for stats: the computer only
+   * thinks while result === "play", so nothing has been recorded yet.
+   */
+  function abortThinking() {
+    if (!aiThinking) return false;
+    gameGen += 1;
+    aiThinking = false;
+    thinkStartedAt = 0;
+    restartWorker();
+    return true;
+  }
+
   function undo() {
     if (swap2) return; // no undo mid-opening
-    if (!history.length || aiThinking || hintBusy) return;
+    // Undo doubles as the way out of a long think: cancel first, then retract
+    // the move that triggered it.
+    abortThinking();
+    if (!history.length || hintBusy) return;
     // Always return to the live tip before undoing moves.
     if (!isLive()) {
       goLive();
@@ -1368,12 +1394,26 @@
     if (isPanelOpen()) scrollMoveListToCurrent();
   }
 
+  /** Static text for the first second, then a live count so a 5–8s 极限 think
+   *  reads as progress rather than a hang. */
+  function thinkingText() {
+    const ms = thinkStartedAt ? performance.now() - thinkStartedAt : 0;
+    if (ms < 1000) return t("status.thinking");
+    return t("status.thinkingElapsed", { s: Math.floor(ms / 1000) });
+  }
+
   function updateClock() {
     const el = formatDuration(nowElapsed());
     const c1 = document.getElementById("clock");
     const c2 = document.getElementById("info-time");
     if (c1) c1.textContent = el;
     if (c2) c2.textContent = el;
+    // The same 500ms tick advances the think counter; sync() only runs at the
+    // start and end of a think, so without this the seconds would never move.
+    if (aiThinking) {
+      const st = document.getElementById("status");
+      if (st) st.textContent = thinkingText();
+    }
   }
 
   function syncSettingsUI() {
@@ -1474,7 +1514,8 @@
     updateClock();
 
     undoBtns.forEach((b) => {
-      if (b) b.disabled = history.length === 0 || aiThinking || hintBusy || !live || !!swap2;
+      // NOT disabled while aiThinking — 悔棋 is the cancel affordance (see abortThinking).
+      if (b) b.disabled = history.length === 0 || hintBusy || !live || !!swap2;
     });
     document.getElementById("rep-start").disabled = viewIndex <= 0;
     document.getElementById("rep-prev").disabled = viewIndex <= 0;
@@ -1545,7 +1586,7 @@
           ? t("status.importAi")
           : t("status.importYou");
     }
-    else if (aiThinking) status.textContent = t("status.thinking");
+    else if (aiThinking) status.textContent = thinkingText();
     else if (hintBusy) status.textContent = t("status.hintCalc");
     else if (hintCell) status.textContent = t("status.withHint", { turn: t(turn === "b" ? "status.blackTurn" : "status.whiteTurn") });
     else status.textContent = t(turn === "b" ? "status.blackTurn" : "status.whiteTurn");
@@ -2016,8 +2057,13 @@
   document.documentElement.setAttribute("lang", I18n.lang() === "en" ? "en" : "zh-CN");
   document.documentElement.setAttribute("data-theme", themeId);
   const savedPanel = Host.storageGet(PANEL_KEY);
-  // Restore only if user left panel open; always run setPanelOpen so inert/aria apply.
-  setPanelOpen(savedPanel === "1");
+  // Restore the user's own choice; always run setPanelOpen so inert/aria apply.
+  // First run stores nothing, and a closed sidebar leaves exactly five buttons
+  // on screen (悔棋/提示/新局/?/☰) — 练习/每日/复盘/统计/存档 all sit behind ☰
+  // with nothing pointing at it. So open it once, and only where it can sit
+  // beside the board: under 900px it becomes a sheet over the board, which is
+  // a worse first impression than an entry the user has not found yet.
+  setPanelOpen(savedPanel == null ? window.innerWidth >= 900 : savedPanel === "1");
 
   const resumed = tryLoadSave();
   if (resumed) {

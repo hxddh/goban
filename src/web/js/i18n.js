@@ -34,6 +34,7 @@
       "aria.panel": "侧栏",
       "aria.board": "棋盘",
       "aria.side": "对局面板",
+      "aria.reviewCurve": "评分曲线，逐手优劣；具体失着见下方列表",
       "aria.swap2": "平衡开局选择",
 
       // —— sidebar: summary ——
@@ -376,6 +377,7 @@
       "status.importAi": "导入复盘 · 点「续下」让电脑走",
       "status.importYou": "导入复盘 · 可落子或点「续下」",
       "status.thinking": "电脑思考中…",
+      "status.thinkingElapsed": "电脑思考中… {s} 秒（悔棋可中断）",
       "status.hintCalc": "计算提示…",
       "status.blackTurn": "黑棋落子",
       "status.whiteTurn": "白棋落子",
@@ -455,6 +457,7 @@
       "aria.panel": "Sidebar",
       "aria.board": "Board",
       "aria.side": "Game panel",
+      "aria.reviewCurve": "Evaluation curve over the game; the blunders are listed below",
       "aria.swap2": "Swap2 choice",
 
       "side.black": "Black",
@@ -781,6 +784,7 @@
       "status.importAi": "Imported · press “Continue” to let the computer play",
       "status.importYou": "Imported · play a move or press “Continue”",
       "status.thinking": "Computer thinking…",
+      "status.thinkingElapsed": "Computer thinking… {s}s (Undo cancels)",
       "status.hintCalc": "Computing hint…",
       "status.blackTurn": "Black to play",
       "status.whiteTurn": "White to play",

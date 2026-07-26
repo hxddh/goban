@@ -120,6 +120,15 @@ const snap = (page) =>
     status: document.getElementById("status").textContent,
   }));
 
+// "]" is idempotent (setPanelOpen(true)); #toggle-panel flips. Since v1.33
+// the panel starts OPEN on a fresh profile — and newPage() clears storage, so
+// every page here is a fresh profile — which turned a "click to open" into a
+// "click to close" and made the controls inside inert.
+async function openPanel(page) {
+  await page.keyboard.press("]");
+  await page.waitForTimeout(120);
+}
+
 async function dismissConfirm(page) {
   if (await page.evaluate(() => document.getElementById("confirm-modal").classList.contains("show"))) {
     await page.click("#confirm-ok");
@@ -128,8 +137,7 @@ async function dismissConfirm(page) {
 }
 
 async function enableSwap2Pvp(page) {
-  await page.click("#toggle-panel").catch(() => {});
-  await page.waitForTimeout(80);
+  await openPanel(page);
   await page.click('button[data-mode="pvp"]');
   await page.waitForTimeout(100);
   await dismissConfirm(page);
@@ -280,7 +288,7 @@ async function enableSwap2Pvp(page) {
 {
   const page = await newPage();
   const click = clicker(page);
-  await page.click("#toggle-panel").catch(() => {});
+  await openPanel(page);
   await page.waitForTimeout(80);
   await page.click('button[data-mode="pvp"]');
   await page.waitForTimeout(100);
@@ -356,7 +364,7 @@ async function enableSwap2Pvp(page) {
 {
   const page = await newPage();
   const click = clicker(page);
-  await page.click("#toggle-panel").catch(() => {});
+  await openPanel(page);
   await page.waitForTimeout(80);
   await page.click('button[data-opening="swap2"]');
   await page.waitForTimeout(120);
@@ -552,27 +560,135 @@ async function enableSwap2Pvp(page) {
   await page.close();
 }
 
-// K 折叠线：练习/每日/复盘/统计/存档都在侧栏里,滚动一下才看见等于没有。
-// 900px 高是 1440×900 和 960×900 两种常见桌面窗口的下限。
+// K 折叠线：五个功能入口在任何常见窗口高度都要够得着。v1.32 把侧栏刮到
+// 856px 让它们挤进 900px 的窗口，但 1280×720 同样是普通窗口，那里又掉到线下。
+// v1.33 改成钉住脚栏——断言从"侧栏不滚动"改成"入口在视口内"，因为后者才是
+// 用户真正在乎的事，而且不随内容多寡失效。
+{
+  const FEATS = ["open-practice", "open-daily", "open-stats", "sgf-slots", "sgf-review"];
+  const bad = [];
+  for (const [w, h] of [[1280, 720], [1366, 768], [960, 900], [1440, 900]]) {
+    const page = await newPage();
+    await page.setViewportSize({ width: w, height: h });
+    await page.keyboard.press("]");
+    await page.waitForTimeout(350);
+    const miss = await page.evaluate((ids) => {
+      const H = innerHeight, W = innerWidth;
+      return ids.filter((id) => {
+        const e = document.getElementById(id);
+        if (!e) return true;
+        const b = e.getBoundingClientRect();
+        return !(b.width > 0 && b.height > 0 && b.top >= 0 && b.bottom <= H + 0.5 &&
+                 b.right > 0 && b.left < W);
+      });
+    }, FEATS);
+    if (miss.length) bad.push(w + "x" + h + ":" + miss.join(","));
+    if (page.__errors.length) bad.push(w + "x" + h + ":errs " + page.__errors.join("|"));
+    await page.close();
+  }
+  report("K 五个功能入口在 720/768/900 高的窗口都在视口内",
+    bad.length === 0, JSON.stringify({ bad }));
+}
+
+// L 首屏可见性：v1.32 之前侧栏默认关闭，视口内只剩 5 个按钮，
+// 练习/每日/复盘/统计/存档 全在 ☰ 之后且没有任何引导。首次运行展开一次；
+// 用户自己关掉之后必须记住，否则就成了每次都要关的骚扰。
 {
   const page = await newPage();
-  await page.setViewportSize({ width: 960, height: 900 });
-  await page.keyboard.press("]");
-  await page.waitForTimeout(350);
-  const r = await page.evaluate(() => {
-    const side = document.getElementById("side");
-    const sr = side.getBoundingClientRect();
-    const below = ["open-practice", "open-daily", "sgf-review", "open-stats", "sgf-slots"]
-      .filter((id) => {
-        const e = document.getElementById(id);
-        return !e || e.getBoundingClientRect().bottom > sr.bottom + 0.5;
-      });
-    return { below, overflow: side.scrollHeight - side.clientHeight };
+  const seen = await page.evaluate(() => {
+    const W = innerWidth, H = innerHeight;
+    const inView = (e) => {
+      const b = e.getBoundingClientRect();
+      return b.width > 0 && b.height > 0 && b.right > 0 && b.left < W && b.bottom > 0 && b.top < H;
+    };
+    return {
+      open: document.getElementById("app").classList.contains("panel-open"),
+      feats: ["open-practice", "open-daily", "sgf-review", "open-stats", "sgf-slots"]
+        .filter((id) => { const e = document.getElementById(id); return e && inView(e); }).length,
+    };
   });
-  report("K 960×900 下五个功能入口无需滚动即可见",
-    r.below.length === 0 && r.overflow <= 0 && page.__errors.length === 0,
-    JSON.stringify({ ...r, errs: page.__errors }));
+  await page.keyboard.press("[");
+  await page.waitForTimeout(400);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
+  const remembered = await page.evaluate(() =>
+    !document.getElementById("app").classList.contains("panel-open"));
+  report("L 首次运行侧栏展开（5 个功能入口可见）且记住用户关闭",
+    seen.open && seen.feats === 5 && remembered && page.__errors.length === 0,
+    JSON.stringify({ ...seen, remembered, errs: page.__errors }));
   await page.close();
+}
+
+// M 长思考的出口：极限档每手 5s（深 8s）。此前思考期间悔棋被禁用，误落一子
+// 只能等满预算。悔棋现在兼任取消键——中断、撤回自己那一手，且电脑不再落子。
+// 局面何时进入真正的搜索取决于战术层，所以这里落子直到观察到思考态为止。
+{
+  const page = await newPage();
+  await page.evaluate(() => document.querySelector('button[data-diff="extreme"]').click());
+  await page.waitForTimeout(250);
+  await dismissConfirm(page);
+  await page.waitForTimeout(200);
+  const click = clicker(page);
+  const pts = [[7, 7], [6, 8], [8, 6], [9, 7], [5, 6], [10, 4], [4, 10], [11, 3], [3, 11]];
+  let caught = null;
+  for (const [r, c] of pts) {
+    const before = await page.evaluate(() => document.getElementById("replay-pos").textContent.trim());
+    await click(r, c);
+    await page.waitForTimeout(450);
+    const st = await page.evaluate(() => ({
+      thinking: /思考中|thinking/i.test(document.getElementById("status").textContent),
+      undoLive: !document.getElementById("undo").disabled,
+      moves: document.getElementById("replay-pos").textContent.trim(),
+    }));
+    if (st.thinking) { caught = { before, ...st }; break; }
+    await page.waitForFunction(
+      () => !/思考中|thinking/i.test(document.getElementById("status").textContent),
+      { timeout: 40000 }).catch(() => {});
+  }
+  let after = null;
+  if (caught) {
+    await page.evaluate(() => document.getElementById("undo").click());
+    await page.waitForTimeout(1600);
+    after = await page.evaluate(() => ({
+      thinking: /思考中|thinking/i.test(document.getElementById("status").textContent),
+      moves: document.getElementById("replay-pos").textContent.trim(),
+    }));
+  }
+  const n = (m) => Number(String(m).split("/")[0].trim());
+  report("M 思考中悔棋可点，点了即中断并撤回，电脑不再落子",
+    !!caught && caught.undoLive && after && !after.thinking &&
+      n(after.moves) === n(caught.moves) - 1 && page.__errors.length === 0,
+    JSON.stringify({ caught, after, errs: page.__errors }));
+  await page.close();
+}
+
+// N 减少动效：到 v1.32 为止整个媒体查询只有一条规则（.think-dot），
+// 57 个元素照动 —— 声明了但没实现。
+{
+  const counts = {};
+  for (const mode of ["no-preference", "reduce"]) {
+    const p2 = await ctx.newPage();
+    await p2.emulateMedia({ reducedMotion: mode });
+    await p2.goto(ORIGIN + "/index.html", { waitUntil: "networkidle" });
+    await p2.waitForTimeout(400);
+    counts[mode] = await p2.evaluate(() => {
+      let c = 0;
+      for (const el of document.querySelectorAll("*")) {
+        const s = getComputedStyle(el);
+        const t = s.transitionDuration.split(",").some((d) => parseFloat(d) > 0.001);
+        const a = s.animationName !== "none" &&
+          s.animationDuration.split(",").some((d) => parseFloat(d) > 0.001);
+        if (t || a) c++;
+      }
+      return c;
+    });
+    await p2.close();
+  }
+  // The positive half matters as much: a stylesheet that animates nothing at
+  // all would pass a "reduce === 0" check while having no motion to reduce.
+  report("N prefers-reduced-motion 真的停下来（正常态仍有动效）",
+    counts.reduce === 0 && counts["no-preference"] > 20,
+    JSON.stringify(counts));
 }
 
 console.log("---");
