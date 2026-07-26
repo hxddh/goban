@@ -302,18 +302,35 @@
       display: flex; align-items: center; gap: 4px;
     }
     .vs-role { font-size: 11px; margin-top: 2px; line-height: 1.3; }
+    /* Four items and three dot separators used to sit here as seven equal flex
+       children of one wrapping row. At the sidebar's real width that row does
+       not fit on one line, and flex-wrap breaks wherever it must: measured at
+       243px, in both languages, all three dots wrapped together onto a line of
+       their own — "· · ·" stranded between the stats and the save hint.
+
+       Two changes, and neither is a width tweak. The dots are no longer
+       elements: each is a ::before on the item that FOLLOWS it, so a separator
+       is part of its item's box and cannot be laid out away from it. And the
+       row now has two children rather than seven — live game state, and the
+       save status, which is a different kind of fact and is the one that
+       belongs on its own line when the row does have to break. */
     .side-meta {
       margin-top: 12px;
-      display: flex; align-items: center; flex-wrap: wrap;
-      gap: 0 2px;
+      display: flex; align-items: baseline; flex-wrap: wrap;
+      gap: 2px 10px;
       font-size: 12px; color: var(--muted);
-      line-height: 1.45;
+      line-height: var(--lh-ui);
+    }
+    .meta-stats { display: flex; align-items: baseline; flex-wrap: wrap; }
+    .meta-stats > * + *::before {
+      content: ""; display: inline-block;
+      width: 3px; height: 3px; border-radius: 50%;
+      /* var(--muted), not currentColor: the 00:00 item is .num and carries
+         --text, which would have made its leading dot darker than the others. */
+      background: var(--muted); opacity: 0.4;
+      margin: 0 8px; vertical-align: middle;
     }
     .side-meta .num { color: var(--text); font-weight: 600; }
-    .side-meta .sep {
-      width: 3px; height: 3px; border-radius: 50%;
-      background: var(--muted); opacity: 0.4; margin: 0 8px;
-    }
     .save-hint { opacity: 0.8; }
 
     .side-section {
@@ -750,7 +767,28 @@
       margin: 0 -20px;
       padding: 0 20px;
       display: flex; flex-direction: column;
+      /* The region ends in a hard horizontal slice through whatever row happens
+         to sit at the boundary — in the default window that is the 复制/导出/导入
+         row, cut through the middle of its glyphs. A cut reads as broken; a
+         fade reads as "there is more below".
+
+         The fade is on the side that has content beyond it and only there:
+         fading the bottom while already scrolled to the end would dim the last
+         row for nothing, and that dimming is exactly the kind of decoration
+         that would be papering over the problem instead of naming it. Both
+         widths default to 0, which makes the gradient a solid mask — the
+         no-scroll case pays nothing. app.js sets the two flags. */
+      --fade-top: 0px;
+      --fade-bot: 0px;
+      -webkit-mask-image: linear-gradient(to bottom,
+        transparent 0, #000 var(--fade-top),
+        #000 calc(100% - var(--fade-bot)), transparent 100%);
+      mask-image: linear-gradient(to bottom,
+        transparent 0, #000 var(--fade-top),
+        #000 calc(100% - var(--fade-bot)), transparent 100%);
     }
+    .side-scroll[data-above="1"] { --fade-top: 18px; }
+    .side-scroll[data-below="1"] { --fade-bot: 28px; }
     /* 8px vertical keeps these three at the 24px minimum hit height; the 4px
        the spacing grid rounded them to left them at 23. */
     .side-foot .text-link { color: var(--muted); font-size: 11px; padding: 8px 4px; }
