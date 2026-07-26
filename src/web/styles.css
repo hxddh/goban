@@ -751,7 +751,13 @@
     [data-theme="notebook"] .stone.white::after { content: "○"; }
     [data-theme="day"] .tool-btn.primary,
     [data-theme="notebook"] .tool-btn.primary {
-      background: linear-gradient(180deg, #6a9fd4, #3b6ea5);
+      /* v1.33.2: was #6a9fd4 → #3b6ea5. White 12px/600 is not "large text",
+         so it needs 4.5:1 — and it got 2.79 at the button's top edge, 3.44–4.20
+         across the band the glyphs actually occupy. This lived here since v1.9;
+         every contrast audit before now SKIPPED gradient backgrounds outright,
+         which is exactly why it survived four of them. Same hue, shifted down
+         so the lightest point (the top edge) already clears 4.5. */
+      background: linear-gradient(180deg, #4477a8, #2b5580);
       color: #fff;
     }
     .badge {
