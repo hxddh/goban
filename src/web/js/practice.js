@@ -1123,6 +1123,12 @@
     if (r < 0 || r >= SIZE || c < 0 || c >= SIZE || cur.board[r][c]) return;
     answered = true;
     const good = cur.solutions.some((s) => s.r === r && s.c === c);
+    // 声音。练习(130 题)+ 每日是一整个模式,而它此前对 GobanAudio 的引用数是 0:
+    // 主棋盘落一子排 4 个音频节点,这里排 0 个。和 v1.39 那次「练习自带一块棋盘」
+    // 同一个形状 —— 主对局有的东西,这个模式一件都没有。
+    // 走同一个 GobanAudio,所以「声音」开关仍然是一处真源。
+    const A = global.GobanAudio;
+    if (A) { A.playMove(cur.side); A.playAnswer(good); }
     if (good) score++;
     saveProgress(recordAnswer(loadProgress(), puzzleKey(cur), good, todayStr()));
     syncWrongButton();

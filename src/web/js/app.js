@@ -676,7 +676,23 @@
   // Sound synthesis lives in GobanAudio (js/audio.js); it reads soundOn lazily.
   Audio2.init(() => soundOn);
   function playMoveSound(color) { Audio2.playMove(color); }
-  function playWinSound() { Audio2.playWin(); }
+  /**
+   * 一局结束的声音,按**用户**的处境选,不是按「有人赢了」。
+   *
+   * 之前这里是无条件的 playWin():电脑赢棋时应用照样奏那段上行大调琶音。
+   * 实测两次对局的音频图逐个音符相同 —— 你输的每一局,它都在庆祝。
+   * 判断所需的东西一直都在作用域里(mode / humanColor),只是没人用。
+   *
+   * 对弈(pvp)两边都是人,谁赢都是人赢,所以仍然是 win —— 这不是偷懒,是
+   * 「站在用户角度」这条规则在双人局面下的正确答案。
+   *
+   * @param {'b'|'w'|null} winner null 表示和局
+   */
+  function playEndSound(winner) {
+    if (!winner) { Audio2.playEnd("draw"); return; }
+    if (mode === "ai" && winner !== humanColor) { Audio2.playEnd("loss"); return; }
+    Audio2.playEnd("win");
+  }
 
   /** Point users at real macOS window chrome — not web Fullscreen API. */
   function toggleFullscreen() {
@@ -1268,7 +1284,7 @@
       elapsedBaseMs = nowElapsed();
       startedAt = Date.now();
       recordGameEnd();
-      playWinSound();
+      playEndSound(turn);
       triggerWinFlash();
       ensureAnimLoop();
       sync();
@@ -1281,6 +1297,9 @@
       elapsedBaseMs = nowElapsed();
       startedAt = Date.now();
       recordGameEnd();
+      // 和局此前是三种结局里唯一无声的一种:棋盘填满,最后一颗子的落子声之后
+      // 什么都没有,你得看状态栏才知道这局已经完了。
+      playEndSound(null);
       sync();
       saveGame();
       return;
