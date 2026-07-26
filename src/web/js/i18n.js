@@ -117,7 +117,6 @@
       "sgf.review.title": "全局复盘：评分曲线与失着",
       "sgf.continue": "续下",
       "sgf.continue.title": "从导入局面继续对局",
-      "sgf.dropHint": "拖入 .sgf 或粘贴棋谱 · 导入后不自动续下",
 
       // —— sidebar: footer ——
       "foot.practice": "练习",
@@ -127,7 +126,6 @@
       "foot.stats": "统计",
       "foot.stats.title": "对局统计",
       "foot.clear": "清除存档",
-      "foot.collapse": "收起",
 
       // —— dialogs ——
       "dlg.confirm": "确认",
@@ -153,7 +151,7 @@
       "help.modes": "⌘1 / ⌘2",
       "help.modes.d": "双人 / 人机（确认后新局）",
       "help.sgf": "侧栏·棋谱",
-      "help.sgf.d": "复制 / 导出 / 导入 / 粘贴 SGF；导入后可「续下」",
+      "help.sgf.d": "复制 / 导出 / 导入 / 粘贴 SGF；也可把 .sgf 直接拖进窗口；导入后可「续下」",
       "help.fullscreen": "⌘⌃F · 绿键 · F",
       "help.fullscreen.d": "系统全屏 / 窗口 Zoom / 提示入口",
       "help.question": "?",
@@ -536,7 +534,6 @@
       "sgf.review.title": "Whole-game review: score curve and blunders",
       "sgf.continue": "Continue",
       "sgf.continue.title": "Keep playing from the imported position",
-      "sgf.dropHint": "Drop a .sgf or paste a record · importing never auto-resumes",
 
       "foot.practice": "Practice",
       "foot.practice.title": "Tactics: find the win / find the defence",
@@ -545,7 +542,6 @@
       "foot.stats": "Stats",
       "foot.stats.title": "Game statistics",
       "foot.clear": "Clear save",
-      "foot.collapse": "Hide",
 
       "dlg.confirm": "Confirm",
       "dlg.cancel": "Cancel",
@@ -570,7 +566,7 @@
       "help.modes": "⌘1 / ⌘2",
       "help.modes.d": "2P / vs AI (starts a new game after confirming)",
       "help.sgf": "Sidebar · Record",
-      "help.sgf.d": "Copy / export / import / paste SGF; then “Continue” to resume",
+      "help.sgf.d": "Copy / export / import / paste SGF; or drop a .sgf on the window; then “Continue” to resume",
       "help.fullscreen": "⌘⌃F · green button · F",
       "help.fullscreen.d": "System full screen / window zoom / hint",
       "help.question": "?",

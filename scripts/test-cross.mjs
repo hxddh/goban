@@ -691,6 +691,45 @@ async function enableSwap2Pvp(page) {
     JSON.stringify(counts));
 }
 
+// O 悔棋不能把棋局卡死。v1.33.0 把中断放在了 undo() 的守卫之前：执白开局时
+// 电脑在空盘上思考，此时按 z（按钮是禁用的，但 z / ⌘Z / 原生菜单都直达 undo()）
+// 会掐掉思考然后 early-return —— 没人调 maybeAiTurn()，电脑再也不落子；也没人
+// 调 sync()，状态一直冻在「电脑思考中…」。这一条守的是"中断之后局面仍然自洽"。
+{
+  const page = await newPage();
+  // 装一个探针：一进入「思考中 且 0 手」就立刻派发 z，不靠时序碰运气
+  await page.evaluate(() => {
+    window.__fired = false;
+    const tick = () => {
+      const st = document.getElementById("status").textContent;
+      const mv = document.getElementById("replay-pos").textContent.trim();
+      if (!window.__fired && /思考中|thinking/i.test(st) && /^0 \/ 0$/.test(mv)) {
+        window.__fired = true;
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "z", bubbles: true }));
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await page.evaluate(() => document.querySelector('button[data-human="w"]').click());
+  await page.waitForTimeout(250);
+  await dismissConfirm(page);
+  await page.waitForTimeout(4000);
+  const r = await page.evaluate(() => ({
+    fired: window.__fired,
+    moves: document.getElementById("replay-pos").textContent.trim(),
+    status: document.getElementById("status").textContent.trim(),
+  }));
+  // fired=false 只说明这次没抓到窗口（开局走定式，很快），不算失败；
+  // 抓到了就必须证明电脑仍然落了子。
+  report("O 电脑开局思考时按 z 不会把棋局卡死",
+    (!r.fired || r.moves !== "0 / 0") && !/思考中|thinking/i.test(r.status) &&
+      page.__errors.length === 0,
+    JSON.stringify({ ...r, errs: page.__errors }));
+  await page.close();
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");

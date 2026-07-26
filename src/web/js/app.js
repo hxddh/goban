@@ -1311,10 +1311,17 @@
 
   function undo() {
     if (swap2) return; // no undo mid-opening
-    // Undo doubles as the way out of a long think: cancel first, then retract
-    // the move that triggered it.
-    abortThinking();
+    // The guards come FIRST, and that ordering is the whole point. v1.33.0
+    // aborted before them, so pressing z while the computer thought its
+    // opening move (human plays white ⇒ thinking with an empty history) killed
+    // the think and then returned early: nothing called maybeAiTurn(), so the
+    // computer never moved again, and nothing called sync(), so the pill stayed
+    // frozen on "电脑思考中…" forever. The button is disabled in that state,
+    // but z / Cmd-Z / the native menu item all reach undo() directly.
     if (!history.length || hintBusy) return;
+    // Undo doubles as the way out of a long think: cancel first, then retract
+    // the move that triggered it. Every path below ends in sync() + maybeAiTurn().
+    abortThinking();
     // Always return to the live tip before undoing moves.
     if (!isLive()) {
       goLive();
