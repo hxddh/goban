@@ -1397,6 +1397,27 @@ const Practice = ctx.GobanPractice;
       "前缀闸门放过成对出现的声明");
   }
 
+  // 练习棋盘不许自己算格距 —— 渲染和命中判定都必须走 GobanDraw.pitchFor。
+  // v1.39.0 只把绘制改成共享规则,onBoardClick 还留着 pad = cssW*0.04 那套小数公式
+  // (而且量的是含 1px 边框的边框盒),两者从此对不上:225 个交叉点中心仍判对,但判定
+  // 边界相对渲染位置最多偏 1.48 CSS px。改之前两边是同一个错公式、互相抵消,是这次
+  // 把它们拆开的 —— 而交叉闸门 Y 只盯渲染,看不见判定。源码层断言才拦得住。
+  const pracRaw = fs.readFileSync(path.join(root, "src/web/js/practice.js"), "utf8");
+  // 注释里会写出老公式来解释它为什么被换掉 —— 闸门扫的是代码,不是散文。
+  const pracSrc = pracRaw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const ownPitch = [...pracSrc.matchAll(/[\w.]+\s*\*\s*0\.04\b/g)].map((m) => m[0]);
+  assert(ownPitch.length === 0,
+    "练习棋盘不自己算格距 (" + ownPitch.join(", ") + ")");
+  assert((pracSrc.match(/pitchFor\(/g) || []).length >= 2,
+    "绘制与命中判定都引用 pitchFor（实测 " + (pracSrc.match(/pitchFor\(/g) || []).length + " 处）");
+  assert(/function onBoardClick[\s\S]{0,700}pitchFor\(/.test(pracSrc),
+    "onBoardClick 用的是共享格距");
+  {
+    const scanPitch = (js) => [...js.matchAll(/[\w.]+\s*\*\s*0\.04\b/g)].length;
+    assert(scanPitch("const pad = cssW * 0.04;") === 1, "自算格距闸门认得出老公式");
+    assert(scanPitch("const g = D.pitchFor(px);") === 0, "自算格距闸门放过共享写法");
+  }
+
   // A stone may be rendered in exactly one place. Three copies of the disc
   // (board / hover preview / 推演 variation) each carried their own radius and
   // their own gradient stops, and they drifted the moment one of them changed:

@@ -1109,12 +1109,17 @@
   function onBoardClick(ev) {
     if (!cur || answered) return;
     const cv = document.getElementById("practice-board");
+    // 命中判定必须走渲染用的同一套几何。v1.39.0 只把绘制改成共享的 pitchFor,
+    // 这里还留着老的小数公式,两者从此对不上 —— 而且它量的是 getBoundingClientRect
+    // (含 1px 边框的边框盒),渲染铺的是内容框,还差一个边框的偏移。改之前两边是同样
+    // 的错公式所以互相抵消,是我把它们拆开的。
     const rect = cv.getBoundingClientRect();
-    const cssW = rect.width;
-    const pad = cssW * 0.04;
-    const step = (cssW - pad * 2) / (SIZE - 1);
-    const c = Math.round((ev.clientX - rect.left - pad) / step);
-    const r = Math.round((ev.clientY - rect.top - pad) / step);
+    const bs = (rect.width - cv.clientWidth) / 2;      // 边框宽度,每边
+    const scale = cv.clientWidth / cv.width;           // 位图像素 → CSS 像素
+    const g = global.GobanDraw.pitchFor(cv.width);
+    const pad = g.pad * scale, step = g.step * scale;
+    const c = Math.round((ev.clientX - rect.left - bs - pad) / step);
+    const r = Math.round((ev.clientY - rect.top - bs - pad) / step);
     if (r < 0 || r >= SIZE || c < 0 || c >= SIZE || cur.board[r][c]) return;
     answered = true;
     const good = cur.solutions.some((s) => s.r === r && s.c === c);
