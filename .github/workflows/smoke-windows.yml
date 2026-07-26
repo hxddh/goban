@@ -1,0 +1,116 @@
+name: smoke-windows
+
+# smoke-macos 的 Windows 孪生。存在的理由有两条,第二条是这一版才浮出来的:
+#
+# 一、Windows 平台此前对「打包后的应用起不起得来」是**零覆盖** ——
+#     build-windows.yml 只构建、不运行。而 v1.32 那次初始化崩溃正是这个形状:
+#     界面照画,什么都不响应,单测和交叉回归全绿。
+#
+# 二、窗口关闭策略是**启动期**检查,不是编译期。SDK 在 Windows 上直接拒绝
+#     close_policy = .hide("hiding removes the taskbar entry and windows has
+#     no dock-reopen path" → error.UnsupportedWindowClosePolicy)。也就是说
+#     runner.zig 里那个按平台分设的分支一旦写错,Windows 包会**构建成功但一
+#     启动就退出**,而现有 CI 一条都拦不住。这个工作流就是那道拦。
+#
+# 与 macOS 那条一样:只手动触发,不进 ci.yml,不改产品代码。
+# 同样不在范围内:WebView 的像素(SDK 不提供 WebView 截图)。
+on:
+  workflow_dispatch:
+    inputs:
+      timeout_s:
+        description: "等待应用 ready 的秒数"
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: install Native SDK CLI
+        run: |
+          npm install -g @native-sdk/cli
+          native --version
+          echo "SDK_PATH=$(npm root -g)/@native-sdk/cli" >> "$GITHUB_ENV"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: sync frontend dist
+        run: |
+          rm -rf frontend/dist && mkdir -p frontend/dist/js
+          cp src/web/index.html src/web/styles.css frontend/dist/
+          cp src/web/js/*.js frontend/dist/js/
+          node scripts/gen-worker-src.mjs frontend/dist/js
+
+      - name: 环境探测
+        run: |
+          echo "--- WebView2 运行时（windows-latest 预装） ---"
+          reg query "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients" 2>/dev/null | head -20 || echo "(注册表查询失败,继续)"
+          echo "--- native doctor ---"
+          native doctor || echo "(native doctor 返回非零,继续)"
+
+      - name: build (automation + js-bridge)
+        run: |
+          zig build -Doptimize=Debug -Dplatform=windows \
+            -Dnative-sdk-path="$SDK_PATH" \
+            -Dautomation=true -Djs-bridge=true
+
+      # 这一步同时守两件事:应用起得来(Windows 此前零覆盖),以及
+      # close_policy 的平台分支没写错 —— .hide 在这里是启动期拒绝,
+      # 一旦分支错了,下面这条 assert 会超时而不是悄悄放过。
+      - name: 启动应用并断言 ready
+        run: |
+          rm -rf .zig-cache/native-sdk-automation
+          ./zig-out/bin/goban.exe > app.log 2>&1 &
+          echo "APP_PID=$!" >> "$GITHUB_ENV"
+          native automate assert --timeout-ms "$(( ${{ inputs.timeout_s }} * 1000 ))" 'ready=true'
+
+      - name: 快照
+        if: always()
+        run: |
+          native automate snapshot || true
+          echo "--- snapshot.txt ---"
+          cat .zig-cache/native-sdk-automation/snapshot.txt || echo "(没有快照文件)"
+
+      - name: 桥策略拒绝未登记的命令
+        run: |
+          out=$(native automate bridge '{"id":"smoke","command":"native.ping","payload":{}}')
+          echo "$out"
+          echo "$out" | grep -q '"code":"permission_denied"' \
+            || { echo "::error::未登记的命令没有被策略拒绝：$out"; exit 1; }
+
+      # 路径在 Windows 上要经 JSON 转义（C:\… 会变成 C:\\…），
+      # 应用侧的 jsonUnescape 正是为此存在 —— 这条顺带把它测到。
+      - name: 桥往返（goban.writeTextFile → readTextFile）
+        run: |
+          TMP="$(pwd)/goban-smoke.txt"
+          B64=$(printf 'goban smoke %s' "$GITHUB_SHA" | base64 -w0)
+          native automate bridge "{\"id\":\"w\",\"command\":\"goban.writeTextFile\",\"payload\":{\"path\":\"$TMP\",\"b64\":\"$B64\"}}"
+          test -f "$TMP" || { echo "::error::桥没有把文件写出来"; exit 1; }
+          echo "写出的内容: $(cat "$TMP")"
+          grep -q "$GITHUB_SHA" "$TMP" || { echo "::error::写出的内容不对"; exit 1; }
+          out=$(native automate bridge "{\"id\":\"r\",\"command\":\"goban.readTextFile\",\"payload\":{\"path\":\"$TMP\"}}")
+          echo "$out"
+          echo "$out" | grep -q '"ok":true' || { echo "::error::读回失败"; exit 1; }
+
+      - name: 无静默错误
+        run: |
+          native automate assert 'dispatch_errors=0'
+          native automate assert --absent 'error event='
+
+      - name: 应用日志
+        if: always()
+        run: cat app.log || true
+
+      - name: 收尾
+        if: always()
+        run: kill "$APP_PID" 2>/dev/null || true

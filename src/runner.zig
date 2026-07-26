@@ -170,7 +170,31 @@ fn manifestWindow(comptime window: anytype, comptime index: usize) native_sdk.Wi
         .resizable = windowBool(window, "resizable", true),
         .restore_state = windowBool(window, "restore_state", true),
         .restore_policy = windowRestorePolicy(window),
+        .close_policy = windowClosePolicy(window),
     };
+}
+
+/// 关窗行为按平台给,因为两个平台的原生习惯正好相反,而 app.zon 的
+/// `close_policy` 是窗口声明上的单一字段,没有按平台分设的写法。
+///
+/// macOS:标准应用关掉最后一个窗口仍驻留 Dock,点图标可重新开窗。SDK 的宿主
+/// 已经实现了 `applicationShouldHandleReopen:` —— 没有可见窗口时点 Dock 会
+/// 重新显示被策略隐藏的窗口,所以 `.hide` 有回来的路,不会把人困在「应用在跑
+/// 但没有窗口」。
+///
+/// Windows:关最后一个窗口就是退出。而且 SDK 会在启动期直接拒绝 `.hide` ——
+/// "hiding removes the taskbar entry and windows has no dock-reopen path,
+/// so only a status item (tray) could bring the hidden window back"
+/// (error.UnsupportedWindowClosePolicy)。这个应用没有 tray capability,
+/// 所以 Windows 必须是 `.quit`,否则构建出来的应用起不来。
+///
+/// app.zon 显式写了 close_policy 时以它为准 —— 这里只是补一个更合适的默认。
+fn windowClosePolicy(comptime window: anytype) native_sdk.WindowClosePolicy {
+    if (comptime @hasField(@TypeOf(window), "close_policy")) {
+        return if (comptime std.mem.eql(u8, @tagName(window.close_policy), "hide")) .hide else .quit;
+    }
+    if (comptime std.mem.eql(u8, build_options.platform, "macos")) return .hide;
+    return .quit;
 }
 
 fn windowLabel(comptime window: anytype, comptime index: usize) []const u8 {
