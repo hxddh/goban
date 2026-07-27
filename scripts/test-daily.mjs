@@ -107,14 +107,22 @@ const solutionFor = (i) =>
     return null;
   }, { k: DAILY_KEY, i });
 
+/** Same geometry practice.js's own onBoardClick uses — border offset included.
+ *
+ *  This used to carry `pad = rect.width * 0.04` measured on the **border box**:
+ *  literally the formula v1.39.1 removed from the product for being wrong on
+ *  both counts. Measured drift against where the board is actually drawn:
+ *  1.48 CSS px, 6.7% of a 22px cell — never a misclick, but the harness was
+ *  aiming by a rule that no longer exists. */
 const clickMini = (r, c) =>
   page.evaluate(({ r, c }) => {
     const cv = document.getElementById("practice-board");
-    const S = window.GobanCore.SIZE;
     const rect = cv.getBoundingClientRect();
-    const pad = rect.width * 0.04, step = (rect.width - pad * 2) / (S - 1);
-    const x = rect.left + pad + c * step;
-    const y = rect.top + pad + r * step;
+    const bs = (rect.width - cv.clientWidth) / 2;   // border, per side
+    const scale = cv.clientWidth / cv.width;
+    const g = window.GobanDraw.pitchFor(cv.width);
+    const x = rect.left + bs + (g.pad + c * g.step) * scale;
+    const y = rect.top + bs + (g.pad + r * g.step) * scale;
     cv.dispatchEvent(new MouseEvent("click", { clientX: x, clientY: y, bubbles: true }));
   }, { r, c });
 

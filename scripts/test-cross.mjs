@@ -118,15 +118,23 @@ async function newPage() {
   return page;
 }
 
+/** Clicks the intersection where the product actually draws it.
+ *
+ *  This used to carry its own `pad = w * 0.045, step = (w - 2pad)/(S-1)` —
+ *  the fractional formula v1.35 replaced with the integer pitch in
+ *  `GobanDraw.pitchFor`. It never misclicked (measured: worst 3.08 bitmap px
+ *  at w=1576, 3.0% of a cell, well inside cellAt's 0.52·step tolerance), but a
+ *  harness that models geometry with a rule the product no longer has drifts
+ *  silently the next time that rule moves. Ask the product instead. */
 function clicker(page) {
   return (r, c) =>
     page.evaluate(({ r, c }) => {
       const cv = document.getElementById("board");
-      const S = window.GobanCore.SIZE;
       const rect = cv.getBoundingClientRect();
-      const w = cv.width, pad = w * 0.045, step = (w - pad * 2) / (S - 1);
-      const x = rect.left + ((pad + c * step) / w) * rect.width;
-      const y = rect.top + ((pad + r * step) / w) * rect.height;
+      const g = window.GobanDraw.pitchFor(cv.width);
+      const scale = rect.width / cv.width;   // #board has no border: rect == content box
+      const x = rect.left + (g.pad + c * g.step) * scale;
+      const y = rect.top + (g.pad + r * g.step) * scale;
       cv.dispatchEvent(new MouseEvent("click", { clientX: x, clientY: y, bubbles: true }));
     }, { r, c });
 }
@@ -155,6 +163,62 @@ async function dismissConfirm(page) {
     await page.waitForTimeout(120);
   }
 }
+
+/** A page whose Web Audio is a recorder: every scheduled node lands in
+ *  `window.__audio` as {node, freq}. Sound is otherwise unobservable from a
+ *  browser test — and it was unobserved, which is how 「电脑赢棋时应用奏凯歌」
+ *  survived to v1.41. The fake must be installed before the page's scripts
+ *  run, so this cannot reuse newPage()'s already-navigated page. */
+const AUDIO_RECORDER = `
+window.__audio = [];
+// setValueAtTime must write .value — a real AudioParam's .value reflects the
+// scheduled value. The first version left it a no-op, and every note read 0:
+// the gate went red on a correct product because audio.js schedules pitch with
+// setValueAtTime rather than assigning .value. Ramps stay no-ops on purpose —
+// what we assert is the note a voice *starts* on.
+class GParam { constructor(){ this.value = 0; }
+  setValueAtTime(v){ this.value = v; return this; }
+  exponentialRampToValueAtTime(){ return this; } }
+class GNode {
+  constructor(kind){ this.kind = kind; this.gain = new GParam();
+    this.frequency = new GParam(); this.Q = new GParam(); }
+  connect(){ return this; } disconnect(){}
+  start(){ window.__audio.push({ node: this.kind, freq: this.frequency.value }); }
+  stop(){}
+}
+window.AudioContext = window.webkitAudioContext = class {
+  constructor(){ this.state = 'running'; this.currentTime = 0;
+    this.sampleRate = 48000; this.destination = {}; }
+  resume(){}
+  createBuffer(c, n){ return { getChannelData: () => new Float32Array(n) }; }
+  createBufferSource(){ return new GNode('noise'); }
+  createBiquadFilter(){ return new GNode('filter'); }
+  createGain(){ return new GNode('gain'); }
+  createOscillator(){ return new GNode('osc'); }
+};
+`;
+
+async function newAudioPage() {
+  const page = await ctx.newPage();
+  page.__errors = [];
+  page.on("console", (m) => {
+    if (m.type() === "error" && !/Failed to load resource/.test(m.text())) page.__errors.push(m.text());
+  });
+  page.on("pageerror", (e) => page.__errors.push("PAGEERR " + e.message));
+  await page.addInitScript(AUDIO_RECORDER);
+  await page.goto(ORIGIN + "/index.html", { waitUntil: "networkidle" });
+  await page.evaluate(() => {
+    if (window.GobanHost) window.GobanHost.storageSet = function () {};
+    localStorage.clear();
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(250);
+  return page;
+}
+
+/** Pitched notes only — the stone clack's noise/body carry no melodic info. */
+const notes = (audio) =>
+  audio.filter((a) => a.node === "osc" && a.freq > 0).map((a) => Math.round(a.freq * 100) / 100);
 
 async function enableSwap2Pvp(page) {
   await openPanel(page);
@@ -1313,6 +1377,176 @@ async function enableSwap2Pvp(page) {
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
   report("Z 弹层的「关闭」不抢主按钮，破坏性动作有 danger 且空态禁用",
+    bad.length === 0, JSON.stringify({ bad }));
+}
+
+// ---- Test AA: 一局结束的声音跟着结果走（赢 / 输 / 和 三条各不相同）----
+// 到 v1.41 为止这三种情况共用同一段上行大调琶音 —— 电脑赢棋时应用也在庆祝。
+// 判定读的是实际排进音频图的频率，不是源码里写了什么。
+{
+  const bad = [];
+  const heard = {};
+
+  // 1) 人赢：黑(人) 已有四子，人点第五子
+  {
+    const page = await newAudioPage();
+    await openPanel(page);
+    await page.click('button[data-diff="easy"]').catch(() => {});
+    await page.waitForTimeout(100);
+    await page.evaluate(() => navigator.clipboard.writeText(
+      "(;FF[4]GM[1]SZ[15];B[dh];W[aa];B[eh];W[ac];B[fh];W[ae];B[gh];W[ag])"));
+    await page.click("#sgf-paste"); await page.waitForTimeout(350);
+    await dismissConfirm(page); await page.waitForTimeout(250);
+    await page.evaluate(() => {
+      const b = [...document.querySelectorAll("button")].find((x) => /续下|Resume/.test(x.textContent));
+      if (b) b.click();
+    });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => { window.__audio.length = 0; });
+    await clicker(page)(7, 7);
+    await page.waitForTimeout(700);
+    const r = await page.evaluate(() => ({
+      status: document.getElementById("status").textContent,
+      audio: window.__audio,
+    }));
+    heard.win = { status: r.status, notes: notes(r.audio) };
+    if (page.__errors.length) bad.push("win errs " + page.__errors.join("|"));
+    await page.close();
+  }
+
+  // 2) 电脑赢：白(电脑) 已有四子，点「续下」让它走
+  {
+    const page = await newAudioPage();
+    await openPanel(page);
+    await page.click('button[data-diff="easy"]').catch(() => {});
+    await page.waitForTimeout(100);
+    await page.evaluate(() => navigator.clipboard.writeText(
+      "(;FF[4]GM[1]SZ[15];B[aa];W[dh];B[ac];W[eh];B[ae];W[fh];B[ag];W[gh];B[ai])"));
+    await page.click("#sgf-paste"); await page.waitForTimeout(350);
+    await dismissConfirm(page); await page.waitForTimeout(250);
+    await page.evaluate(() => {
+      window.__audio.length = 0;                       // 先清空再点：easy 档 30ms，
+      const b = [...document.querySelectorAll("button")].find((x) => /续下|Resume/.test(x.textContent));
+      if (b) b.click();                                 // 电脑会在下一个 await 之前就落子
+    });
+    await page.waitForTimeout(2500);
+    const r = await page.evaluate(() => ({
+      status: document.getElementById("status").textContent,
+      audio: window.__audio,
+    }));
+    heard.loss = { status: r.status, notes: notes(r.audio) };
+    if (page.__errors.length) bad.push("loss errs " + page.__errors.join("|"));
+    await page.close();
+  }
+
+  // 3) 和局：对弈模式下按 (r+2c)%4 着色落满全盘。该着色全盘最长同色连线为 2，
+  //    黑 113 / 白 112 恰好能黑先交替落完 —— 和局此前没有任何测试走到过。
+  {
+    const page = await newAudioPage();
+    await openPanel(page);
+    await page.click('button[data-mode="pvp"]');
+    await page.waitForTimeout(100);
+    await dismissConfirm(page);
+    await page.waitForTimeout(150);
+    const r = await page.evaluate(async () => {
+      const cv = document.getElementById("board");
+      const g = window.GobanDraw.pitchFor(cv.width);
+      const rect = cv.getBoundingClientRect();
+      const s = rect.width / cv.width;
+      const hit = (r, c) => cv.dispatchEvent(new MouseEvent("click", {
+        clientX: rect.left + (g.pad + c * g.step) * s,
+        clientY: rect.top + (g.pad + r * g.step) * s, bubbles: true }));
+      const B = [], W = [];
+      for (let rr = 0; rr < 15; rr++) for (let cc = 0; cc < 15; cc++) {
+        ((rr + 2 * cc) % 4 < 2 ? B : W).push([rr, cc]);
+      }
+      for (let i = 0; i < B.length; i++) {
+        hit(B[i][0], B[i][1]);
+        if (i === B.length - 2) window.__audio.length = 0;   // 只留最后一手起的声音
+        if (W[i]) hit(W[i][0], W[i][1]);
+        if (i % 20 === 0) await new Promise((z) => setTimeout(z, 0));
+      }
+      await new Promise((z) => setTimeout(z, 400));
+      return { status: document.getElementById("status").textContent,
+               moves: document.getElementById("replay-pos").textContent,
+               audio: window.__audio };
+    });
+    heard.draw = { status: r.status, moves: r.moves, notes: notes(r.audio) };
+    if (!/平局|Draw/.test(r.status)) bad.push("没走到和局：" + r.status + " " + r.moves);
+    if (page.__errors.length) bad.push("draw errs " + page.__errors.join("|"));
+    await page.close();
+  }
+
+  const has = (arr, f) => arr.some((x) => Math.abs(x - f) < 0.01);
+  // 赢：上行，含最高音 C6
+  if (!has(heard.win.notes || [], 1046.5)) bad.push("人赢没听到上行琶音顶音 1046.5");
+  // 输：下行，且不许出现赢的顶音
+  if (!has(heard.loss.notes || [], 261.63)) bad.push("电脑赢没听到下行落点 261.63");
+  if (has(heard.loss.notes || [], 1046.5)) bad.push("电脑赢时仍在奏胜利琶音（听到 1046.5）");
+  // 和：既不是赢也不是输。比的是**旋律**——落子声的木体音(黑 250 / 白 340)要先
+  // 剔掉，否则三条各自带着不同的落子前缀，字符串一比就都「不同」，反证时和局那
+  // 两条查不出来（第一版就是这样，反证只红了两条该红的里的两条）。
+  const melody = (a) => (a || []).filter((f) => f !== 250 && f !== 340);
+  const j = (a) => JSON.stringify(melody(a));
+  if (j(heard.draw.notes) === j(heard.win.notes)) bad.push("和局与赢棋的旋律一样");
+  if (j(heard.draw.notes) === j(heard.loss.notes)) bad.push("和局与输棋的旋律一样");
+  if (j(heard.win.notes) === j(heard.loss.notes)) bad.push("赢和输的旋律一样");
+
+  report("AA 一局结束的声音跟着结果走（赢/输/和 三条互不相同）",
+    bad.length === 0, JSON.stringify({ bad, heard }));
+}
+
+// ---- Test AB: 练习 / 每日答题不再静音，且答对答错听得出区别 ----
+// v1.41 之前 practice.js 对 GobanAudio 的引用数是 0：主棋盘落一子排 4 个音频
+// 节点，练习棋盘排 0 个，而那次点击确实落地（错题本 +1、画布 160 个像素变化）。
+{
+  const bad = [];
+  const page = await newAudioPage();
+  await openPanel(page);
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll("button")].find((x) => /^练习$|^Practice$/.test(x.textContent.trim()));
+    if (b) b.click();
+  });
+  await page.waitForTimeout(700);
+  const r = await page.evaluate(async () => {
+    const cv = document.getElementById("practice-board");
+    if (!cv) return { err: "没有练习棋盘" };
+    const rect = cv.getBoundingClientRect();
+    const bs = (rect.width - cv.clientWidth) / 2;
+    const scale = cv.clientWidth / cv.width;
+    const g = window.GobanDraw.pitchFor(cv.width);
+    const hit = (r, c) => cv.dispatchEvent(new MouseEvent("click", {
+      clientX: rect.left + bs + (g.pad + c * g.step) * scale,
+      clientY: rect.top + bs + (g.pad + r * g.step) * scale, bubbles: true }));
+    const wrongBtn = () => (document.body.innerText.match(/错题本 ?\d*/) || [])[0] || "";
+    const before = wrongBtn();
+    window.__audio.length = 0;
+    hit(0, 0);                                  // 角上：任何题型都不会是解
+    await new Promise((z) => setTimeout(z, 350));
+    const wrongAudio = window.__audio.slice();
+    const registered = wrongBtn() !== before;   // 证明这一点确实被判成了答错
+    // 答对那一半：practice.js 不把当前题暴露出来，浏览器侧拿不到正确解，所以
+    // 「答对听起来不一样」只能在模块层证明 —— 这一条测的是 playAnswer 两个分支
+    // 排出的音频图不同，不是应用把 good 传对了。后者由上面那半（答错走到了
+    // 下行动机）加源码闸门（practice.js 必须引用 GobanAudio）一起守。
+    window.__audio.length = 0;
+    window.GobanAudio.playAnswer(true);
+    const rightAudio = window.__audio.slice();
+    return { wrongAudio, rightAudio, registered };
+  });
+  if (r.err) bad.push(r.err);
+  else {
+    if (!r.registered) bad.push("那一点没有被判成答错，这条测的不是答题");
+    if (!r.wrongAudio.length) bad.push("练习答题仍然静音（0 个音频节点）");
+    const nW = notes(r.wrongAudio), nR = notes(r.rightAudio);
+    if (!nW.some((f) => Math.abs(f - 329.63) < 0.01)) {
+      bad.push("答错没听到下行动机（329.63）：" + JSON.stringify(nW));
+    }
+    if (JSON.stringify(nW) === JSON.stringify(nR)) bad.push("答对和答错听起来一样");
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AB 练习/每日答题不再静音（答错走到下行动机，答对与答错不同）",
     bad.length === 0, JSON.stringify({ bad }));
 }
 

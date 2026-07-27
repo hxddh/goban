@@ -1458,6 +1458,57 @@ const Practice = ctx.GobanPractice;
     "no hard-coded stone radius outside STONE_R (" + radiusLits.join(", ") + ")");
   assert(/const STONE_R = 0\.\d+;/.test(drawSrc), "STONE_R is declared as the one radius");
 
+  // ---- 声音：一个声部，且没有一个模式被落下 ----
+  //
+  // 同 STONE_R 那条一样的形状。playWin 里那六行 oscillator+gain 构造原本写了两遍;
+  // 胜/负/和/答题各再抄一份就是六份,而它们一旦漂移就是「同一个应用里两种落子声」。
+  // 所以 audio.js 里 createOscillator 只允许出现一次 —— 在 tone() 里。
+  const audRaw = fs.readFileSync(path.join(root, "src/web/js/audio.js"), "utf8");
+  const audSrc = audRaw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const oscN = (audSrc.match(/createOscillator\(\)/g) || []).length;
+  assert(oscN === 1, "audio.js 只有一个声部（createOscillator 实测 " + oscN + " 处）");
+  assert(/function tone\(/.test(audSrc), "那个声部叫 tone()");
+
+  // 练习(130 题)+ 每日是一整个模式,而它到 v1.41 为止对 GobanAudio 的引用数是 0:
+  // 主棋盘落一子排 4 个音频节点,练习棋盘排 0 个 —— 与 v1.39 那次「练习自带一块
+  // 棋盘」同一个形状。扫的是剥掉注释之后的代码:上面那段解释里就写着 GobanAudio,
+  // 拿原文扫会把散文当成实现(v1.39.1 的闸门栽过同一个坑)。
+  const pracNoC = fs.readFileSync(path.join(root, "src/web/js/practice.js"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert(/GobanAudio/.test(pracNoC), "练习模式接着声音（不是只在注释里提到）");
+  assert(/playAnswer\(/.test(pracNoC), "答对/答错有听觉反馈");
+
+  // 结束音必须经过 playEndSound —— 它是唯一知道「谁是用户」的地方。新增一种
+  // 结束方式而忘了配音,就是 v1.41 之前和局的样子:三种结局里唯一无声的一种。
+  const appNoC = fs.readFileSync(path.join(root, "src/web/js/app.js"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const endCalls = [...appNoC.matchAll(/Audio2\.playEnd\(/g)].length;
+  assert(/function playEndSound[\s\S]{0,400}?playEnd\("draw"\)[\s\S]{0,200}?playEnd\("loss"\)/.test(appNoC),
+    "playEndSound 里赢/输/和三条都在");
+  {
+    // recordGameEnd() 标记「一局结束了」。除定义处外，每个调用点附近都必须配音。
+    const sites = [...appNoC.matchAll(/recordGameEnd\(\);/g)].map((m) => m.index);
+    const unvoiced = sites.filter((i) => !/playEndSound\(/.test(appNoC.slice(i, i + 260)));
+    assert(sites.length >= 2 && unvoiced.length === 0,
+      "每个对局结束点都配了音（" + sites.length + " 处，缺 " + unvoiced.length + " 处）");
+    assert(endCalls === 3, "结束音只从 playEndSound 发出（playEnd 调用实测 " + endCalls + " 处）");
+  }
+  {
+    // 反证跑在构造出来的源码上,不会随实现变化失效。
+    const cnt = (js) => (js.match(/createOscillator\(\)/g) || []).length;
+    assert(cnt("const a=c.createOscillator();\nconst b=c.createOscillator();") === 2,
+      "一个声部闸门数得出第二份拷贝");
+    const voiced = (js) => {
+      const s = [...js.matchAll(/recordGameEnd\(\);/g)].map((m) => m.index);
+      return s.filter((i) => !/playEndSound\(/.test(js.slice(i, i + 260))).length;
+    };
+    assert(voiced("recordGameEnd();\n      sync();") === 1, "结束配音闸门认得出漏配的结局");
+    assert(voiced("recordGameEnd();\n      playEndSound(turn);") === 0, "结束配音闸门放过配了音的结局");
+    const noC = (js) => js.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    assert(!/GobanAudio/.test(noC("  // 走同一个 GobanAudio,所以开关是一处真源。\n  const x = 1;")),
+      "接声音闸门不把注释里的 GobanAudio 当成实现");
+  }
+
   // Negative controls, run against fabricated source so they cannot go stale:
   // the matcher must flag the unguarded form and must not flag the guarded one.
   assert(stoneGradients("a.createRadialGradient(1);\nb.createRadialGradient(2);") === 2,
