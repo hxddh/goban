@@ -833,8 +833,19 @@
   }
 
   // --- named save slots: store/render in GobanSlots, game-flow glue here ---
-  function saveCurrentAsSlot() {
+  async function saveCurrentAsSlot() {
     if (!history.length) { toast(t("slot.nothing")); return; }
+    // 存档满了再存,会把最早的那个挤掉。此前这一步是静默的:列表仍是 30 条,
+    // 最老的那个不见了,而 toast 照说「已保存」。这些存档是用户亲手命名的,
+    // 清除存档和恢复备份都要确认,挤掉一个存档是同一类动作。
+    const doomed = Slots.wouldEvict();
+    if (doomed) {
+      const ok = await confirmNative(
+        t("slot.fullConfirm", { max: Slots.MAX, name: doomed.name }),
+        t("slot.fullTitle"),
+        { ok: t("slot.fullOk"), cancel: t("dlg.cancel") });
+      if (!ok) { toast(t("slot.fullCancelled")); return; }
+    }
     const ok = Slots.add(serialize());
     Slots.render();
     toast(t(ok ? "slot.saved" : "slot.saveFail"));

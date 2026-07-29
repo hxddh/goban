@@ -110,5 +110,19 @@
     }
   }
 
-  global.GobanSlots = { load, add, get, remove, rename, render };
+  /**
+   * The slot a further `add` would silently destroy, or null while there is
+   * room. `add` prepends and `persist` slices to SLOTS_MAX, so saving a 31st
+   * game deletes the oldest one — measured: the list stayed at 30, the oldest
+   * went from 「第1个」 to 「第2个」, `add` returned true, and the app toasted
+   * 「已保存」. These are saves the user named by hand; the app asks before
+   * clearing 存档 and before restoring a backup, and this is the same kind of
+   * act. Callers use this to ask first.
+   */
+  function wouldEvict() {
+    const arr = load();
+    return arr.length >= SLOTS_MAX ? arr[arr.length - 1] : null;
+  }
+
+  global.GobanSlots = { load, add, get, remove, rename, render, wouldEvict, MAX: SLOTS_MAX };
 })(typeof window !== "undefined" ? window : globalThis);
