@@ -1550,6 +1550,78 @@ async function enableSwap2Pvp(page) {
     bad.length === 0, JSON.stringify({ bad }));
 }
 
+// ---- Test AC: 运动语言只有一套（按运行时计算值，不是读样式表）----
+// 收敛前实测 130 个过渡属性实例跑在 6 种时长上，缓动两条：应用自己的
+// cubic-bezier(0.22,1,0.36,1) 用了 63 次，浏览器默认的 ease 用了 67 次 —— 一多半
+// 动效根本没在用这个应用的曲线，且 18 个元素在同一条规则里混着用（顶栏按钮的
+// background/transform 走自定义曲线而 opacity 走默认；#board-wrap 的 width/height
+// 走 .28s 自定义而 background/box-shadow 走 .25s 默认）。两条曲线逐点最大差 37.9
+// 个百分点。源码闸门只看得见写法，看不见 var() 代换之后的计算值 —— 这一条兜那个。
+{
+  const bad = [];
+  const page = await newPage();
+  const r = await page.evaluate(() => {
+    // 顶层逗号切分：cubic-bezier(0.22, 1, 0.36, 1) 里的逗号不算。
+    // 第一版拿 String.split(",") 切，把一条曲线切成四段，报出「5 种缓动」。
+    const split = (s) => {
+      const out = []; let d = 0, cur = "";
+      for (const ch of String(s)) {
+        if (ch === "(") d++; else if (ch === ")") d--;
+        if (ch === "," && d === 0) { out.push(cur.trim()); cur = ""; } else cur += ch;
+      }
+      if (cur.trim()) out.push(cur.trim());
+      return out;
+    };
+    const durs = {}, eases = {}, byEl = new Map();
+    let total = 0;
+    for (const el of document.querySelectorAll("body *")) {
+      const cs = getComputedStyle(el);
+      const props = split(cs.transitionProperty || "");
+      const ds = split(cs.transitionDuration || "");
+      const fns = split(cs.transitionTimingFunction || "");
+      for (let i = 0; i < props.length; i++) {
+        const d = ds[i % ds.length], f = fns[i % fns.length];
+        if (!d || d === "0s") continue;
+        total++; durs[d] = (durs[d] || 0) + 1; eases[f] = (eases[f] || 0) + 1;
+        const key = el.id ? "#" + el.id : "." + String(el.className).split(" ")[0];
+        if (!byEl.has(key)) byEl.set(key, new Set());
+        byEl.get(key).add(f);
+      }
+    }
+    const mixed = [...byEl.entries()].filter(([, v]) => v.size > 1).map(([k]) => k);
+    // 两个思考指示器同时在屏上（显示条件都是 aiThinking && result === "play"），
+    // 周期不同就永远错拍：1.2s 与 1.1s 的最小公倍数是 13.2 秒。
+    const pill = document.getElementById("status"), dot = document.getElementById("think-dot");
+    pill.classList.add("thinking"); dot.hidden = false;
+    const pulse = {
+      pill: { d: getComputedStyle(pill).animationDuration, f: getComputedStyle(pill).animationTimingFunction },
+      dot: { d: getComputedStyle(dot).animationDuration, f: getComputedStyle(dot).animationTimingFunction },
+    };
+    pill.classList.remove("thinking"); dot.hidden = true;
+    return { total, durs, eases, mixed, pulse };
+  });
+  const easeKeys = Object.keys(r.eases);
+  const durKeys = Object.keys(r.durs);
+  if (r.total < 50) bad.push("只采到 " + r.total + " 个过渡实例，探针没测到东西");
+  if (easeKeys.length !== 1) bad.push("过渡缓动不止一条：" + JSON.stringify(r.eases));
+  else if (!/cubic-bezier\(0\.22, 1, 0\.36, 1\)/.test(easeKeys[0])) {
+    bad.push("过渡缓动不是 --ease：" + easeKeys[0]);
+  }
+  if (durKeys.length > 3) bad.push("过渡时长超过三档：" + JSON.stringify(r.durs));
+  if (r.mixed.length) bad.push("同一元素混用多条曲线：" + r.mixed.slice(0, 4).join(", "));
+  if (r.pulse.pill.d !== r.pulse.dot.d) {
+    bad.push("两个思考脉动周期不同：" + r.pulse.pill.d + " vs " + r.pulse.dot.d);
+  }
+  if (r.pulse.pill.f !== r.pulse.dot.f) {
+    bad.push("两个思考脉动曲线不同：" + r.pulse.pill.f + " vs " + r.pulse.dot.f);
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AC 运动语言只有一套（过渡一条曲线 · 三档时长 · 脉动同周期）",
+    bad.length === 0,
+    JSON.stringify({ bad, 实例: r.total, 时长: r.durs, 缓动: r.eases, 脉动: r.pulse }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");
