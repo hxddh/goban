@@ -648,6 +648,59 @@ const Practice = ctx.GobanPractice;
   assert(a.games === 1, "one stats entry remains");
   assert(a.ai.normal.l === 1 && a.ai.normal.w === 0, "remaining entry is the loss");
   assert(Stats.unrecordByEndedAt(endedAt) === false, "already removed");
+
+  // ---- 累计量不许因为明细被截断而缩水 ----
+  //
+  // 到 v1.43 为止面板上每个数字都是从那份**上限 200 条**的对局列表现算的,于是从第
+  // 201 局起它悄悄变成「最近 200 局」,却仍然读作「一共」。有一个数字比停滞更糟:
+  // 实测 12 连胜之后再输 200 局,「最佳连胜」读出 12 → 12 → **0** —— 那 12 局被挤出
+  // 了存储。会遗忘的记录比没有记录更坏。
+  //
+  // 这条闸门跑在**超过上限**的规模上;判据是「列表已经装不下了,而累计量还对」。
+  const S2 = ctx.GobanStats;
+  ctx.GobanHost.storageRemove("goban.v12.stats");
+  ctx.GobanHost.storageRemove("goban.v12.totals");
+  const mk = (result, at) => ({
+    mode: "ai", difficulty: "hard", humanColor: "b", result: result,
+    moves: 50, durationMs: 60000, endedAt: at,
+  });
+  for (let i = 0; i < 12; i++) S2.record(mk("b", 2_000_000 + i));   // 12 连胜
+  const peak = S2.aggregate();
+  for (let i = 0; i < 200; i++) S2.record(mk("w", 3_000_000 + i));  // 再输 200 局
+  const after = S2.aggregate();
+  const listLen = JSON.parse(ctx.GobanHost.storageGet("goban.v12.stats")).length;
+  assert(peak.bestStreak === 12, "12 连胜记到了 (" + peak.bestStreak + ")");
+  assert(listLen === 200, "对局明细仍按上限截断 (" + listLen + " 条)");
+  assert(after.bestStreak === 12,
+    "最佳连胜不因明细被截断而倒退 (" + after.bestStreak + ")");
+  assert(after.games === 212, "总局数继续累加 (" + after.games + ")");
+  assert(after.totalMoves === 212 * 50, "总手数继续累加 (" + after.totalMoves + ")");
+  assert(after.ai.hard.w === 12 && after.ai.hard.l === 200,
+    "分难度胜负也是一辈子的账 (" + after.ai.hard.w + "/" + after.ai.hard.l + ")");
+  {
+    // 反证:拿 v1.43 那套「从列表现算」的算法跑同一份存储,应当报出 0。
+    const arr = JSON.parse(ctx.GobanHost.storageGet("goban.v12.stats"));
+    let run = 0, best = 0;
+    for (const e of arr) {
+      if (e.mode !== "ai") continue;
+      if (e.result === e.humanColor) { run++; if (run > best) best = run; } else run = 0;
+    }
+    assert(best === 0, "反证:从截断后的列表现算,最佳连胜确实是 0 (" + best + ")");
+    assert(arr.length === 200 && arr.length !== after.games,
+      "反证:列表长度 " + arr.length + " 不等于真实局数 " + after.games);
+  }
+  // 撤回一局要把累计量减回去 —— 否则赢了再悔棋,总数就永远多一局。
+  ctx.GobanHost.storageRemove("goban.v12.stats");
+  ctx.GobanHost.storageRemove("goban.v12.totals");
+  for (let i = 0; i < 3; i++) S2.record(mk("b", 4_000_000 + i));
+  assert(S2.unrecordByEndedAt(4_000_002) === true, "撤回最新那局");
+  const back = S2.aggregate();
+  assert(back.games === 2 && back.totalMoves === 100 && back.curStreak === 2 &&
+         back.ai.hard.w === 2, "撤回把局数/手数/当前连胜/胜场都减了回去");
+  assert(back.bestStreak === 3,
+    "最佳连胜是高水位,撤回不下调 (" + back.bestStreak + ")");
+  ctx.GobanHost.storageRemove("goban.v12.stats");
+  ctx.GobanHost.storageRemove("goban.v12.totals");
 }
 
 // --- 题库: every built-in must be solvable, and deep enough for 每日挑战 ---
@@ -960,6 +1013,58 @@ const Practice = ctx.GobanPractice;
   }
   const missing = [...stored].filter((k) => Backup.KEYS.indexOf(k) < 0);
   assert(missing.length === 0, "backup covers every goban.v12.* key in the app (" + missing.join(",") + ")");
+  assert(stored.has("goban.v12.totals"), "v1.44 的累计量确实是一个存储键（不然上面那条闸门什么都没守）");
+  {
+    const scan = (keys, list) => keys.filter((k) => list.indexOf(k) < 0);
+    assert(scan(["goban.v12.totals"], ["goban.v12.stats"]).length === 1,
+      "漏键闸门认得出没进备份清单的键");
+    assert(scan(["goban.v12.totals"], Backup.KEYS).length === 0,
+      "漏键闸门放过已进清单的键");
+  }
+}
+
+// --- 存档满了不许静默挤掉 (v1.44) ---
+//
+// add() 是 unshift、persist() 是 slice(0, 30)，所以存第 31 个会删掉第 1 个。实测:
+// 列表仍 30 条、最老的从「第1个」变成「第2个」、add() 返回 true、应用 toast「已保存」。
+// 这些存档是用户亲手命名的,而这个应用清除存档要确认、恢复备份要确认。
+// wouldEvict() 让调用方能先问；这里守的是「它确实报得出那一个」与「app.js 真的问了」。
+{
+  // slots.js 捕获的是它**加载那一刻**的 GobanHost 对象,而上面那个「配额失败」的用例
+  // 给它装的是常量桩 storageGet: () => "[]"。后来 load("host.js") 换了一个新对象,
+  // 真实存储装在新对象上,旧的那个仍挂着桩 —— 第一版闸门就跑在这个接了死桩的模块上,
+  // 结果 wouldEvict() 永远读到空列表、永远返回 null,断言红得莫名其妙。
+  // 这里重新装一次,让模块接上真实存储。
+  load("src/web/js/host.js");
+  const slotStore = {};
+  ctx.GobanHost.storageGet = (k) => (k in slotStore ? slotStore[k] : null);
+  ctx.GobanHost.storageSet = (k, v) => { slotStore[k] = String(v); return true; };
+  ctx.GobanHost.storageRemove = (k) => { delete slotStore[k]; };
+  load("src/web/js/slots.js");
+  const Slots = ctx.GobanSlots;
+  const snap = (n) => ({ v: 12, history: [{ r: 7, c: 7 }], turn: "w", result: "play",
+    mode: "ai", difficulty: "hard", humanColor: "b", savedAt: 1_700_000_000_000 + n, __tag: n });
+  assert(Slots.wouldEvict() === null, "空存档不报挤掉");
+  for (let i = 1; i < Slots.MAX; i++) Slots.add(snap(i));
+  assert(Slots.wouldEvict() === null, "差一个满时仍不报挤掉 (" + (Slots.MAX - 1) + " 个)");
+  Slots.add(snap(Slots.MAX));
+  const doomed = Slots.wouldEvict();
+  assert(doomed && doomed.snap.__tag === 1,
+    "满了之后报得出将被挤掉的正是最早那个 (" + (doomed && doomed.snap.__tag) + ")");
+  ctx.GobanHost.storageRemove("goban.v12.slots");
+
+  // app.js 必须先问再存 —— 只有 wouldEvict 存在而没人调，等于什么都没修。
+  const appNoC2 = fs.readFileSync(path.join(root, "src/web/js/app.js"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert(/function saveCurrentAsSlot[\s\S]{0,600}?wouldEvict\(\)[\s\S]{0,400}?confirmNative\(/.test(appNoC2),
+    "存档满时先经过确认框");
+  {
+    const has = (js) => /function saveCurrentAsSlot[\s\S]{0,600}?wouldEvict\(\)[\s\S]{0,400}?confirmNative\(/.test(js);
+    assert(has("function saveCurrentAsSlot(){ const d=Slots.wouldEvict(); if(d) await confirmNative(x); }"),
+      "确认闸门认得出问过的写法");
+    assert(!has("function saveCurrentAsSlot(){ const ok = Slots.add(serialize()); }"),
+      "确认闸门认得出 v1.43 那种直接存的写法");
+  }
 }
 
 // --- review: the advantage curve has to carry information (v1.31) ---

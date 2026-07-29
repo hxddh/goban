@@ -16,6 +16,7 @@
     "goban.v12.save",
     "goban.v12.slots",
     "goban.v12.stats",
+    "goban.v12.totals",
     "goban.v12.daily",
     "goban.v12.practice",
     "goban.v12.lang",
