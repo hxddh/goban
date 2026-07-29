@@ -1463,6 +1463,71 @@ const Practice = ctx.GobanPractice;
   // 同 STONE_R 那条一样的形状。playWin 里那六行 oscillator+gain 构造原本写了两遍;
   // 胜/负/和/答题各再抄一份就是六份,而它们一旦漂移就是「同一个应用里两种落子声」。
   // 所以 audio.js 里 createOscillator 只允许出现一次 —— 在 tone() 里。
+  // ---- 棋谱的 RE 不许再声称「对手认输」 ----
+  //
+  // SGF 的 RE 第二段是**赢法**:`+R` = Resign、`+T` = 超时、`+F` = 判负,而 `B+`
+  // 就是「黑胜,方式未指定」。这里一直写死 B+R / W+R —— 而这个应用没有认输功能
+  // (全 src/ 搜 resign/认输,0 处命中),赢棋只有连五一种。导出的每一份棋谱都在对
+  // 别的软件说假话。自己导入自己看不出来:解析器根本不读 RE,结果是从盘面重算的,
+  // 所以这个字段唯一的读者在应用之外 —— 也从来没有测试碰过它。
+  const sgfSrc = fs.readFileSync(path.join(root, "src/web/js/sgf.js"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const resignish = [...sgfSrc.matchAll(/"[BW]\+[RTF]"/g)].map((m) => m[0]);
+  assert(resignish.length === 0,
+    "棋谱不声称认输/超时/判负 (" + resignish.join(", ") + ")");
+  assert(/"B\+"/.test(sgfSrc) && /"W\+"/.test(sgfSrc), "赢法未指定,写作 B+ / W+");
+  {
+    const scan = (js) => [...js.matchAll(/"[BW]\+[RTF]"/g)].length;
+    assert(scan('result === "b" ? "B+R" : "W+R"') === 2, "认输闸门认得出 +R");
+    assert(scan('result === "b" ? "B+" : "W+"') === 0, "认输闸门放过未指定赢法");
+  }
+  // 绊线:哪天真加了认输,这条会红,提醒把 RE 改回 +R —— 那时 B+R 才是诚实的。
+  // 扫的是剥掉注释的代码:sgf.js 那段解释里就写着 "Resign",拿原文扫会把散文当实现
+  // (v1.39.1 与 v1.42 的闸门各栽过一次,这是第三次,写的时候就该想到)。
+  const srcAll = ["app.js", "sgf.js", "sgfio.js", "core.js", "ui.js"]
+    .map((f) => fs.readFileSync(path.join(root, "src/web/js", f), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")).join("\n");
+  assert(!/\bresign/i.test(srcAll),
+    "应用确实没有认输功能（有了就得回头把 RE 改回 +R）");
+
+  // ---- 运动:一次性过渡只允许一条曲线,时长只允许定好的档 ----
+  //
+  // 收敛前实测 130 个过渡属性实例跑在 6 种时长上,缓动两条:应用自己的 --ease 用了
+  // 63 次、浏览器默认的 ease 用了 67 次 —— 一多半动效没在用这个应用的曲线,且 18 个
+  // 元素在一条规则里混着用。两条曲线逐点最大差 37.9 个百分点。
+  // 交叉闸门从渲染侧兜;这里守源码:transition 里不许出现裸时长或裸曲线。
+  const cssRaw = fs.readFileSync(path.join(root, "src/web/styles.css"), "utf8");
+  const cssNoC = cssRaw.replace(/\/\*[\s\S]*?\*\//g, "");
+  const transDecls = [...cssNoC.matchAll(/transition\s*:\s*([^;}]+)/g)].map((m) => m[1]);
+  const rawDur = transDecls.filter((d) => /(^|[\s,])\.?\d+(\.\d+)?m?s\b/.test(d));
+  assert(rawDur.length === 0,
+    "过渡时长一律走 --dur-* (" + rawDur.slice(0, 2).join(" | ") + ")");
+  const rawEase = transDecls.filter((d) =>
+    /(^|[\s,])(ease|ease-in|ease-out|ease-in-out|linear|cubic-bezier)\b/.test(d));
+  assert(rawEase.length === 0,
+    "过渡曲线一律走 var(--ease) (" + rawEase.slice(0, 2).join(" | ") + ")");
+  // 每个属性都要显式带曲线 —— 漏写就落回浏览器默认的 ease，正是收敛前那 67 次。
+  const missingEase = transDecls.filter((d) =>
+    d.split(",").some((part) => part.trim() && !/var\(--ease\)/.test(part)));
+  assert(missingEase.length === 0,
+    "过渡的每个属性都显式带曲线 (" + missingEase.slice(0, 2).join(" | ") + ")");
+  {
+    const scan = (css) => {
+      const ds = [...css.matchAll(/transition\s*:\s*([^;}]+)/g)].map((m) => m[1]);
+      return {
+        dur: ds.filter((d) => /(^|[\s,])\.?\d+(\.\d+)?m?s\b/.test(d)).length,
+        bare: ds.filter((d) => /(^|[\s,])(ease|linear|cubic-bezier)\b/.test(d)).length,
+        miss: ds.filter((d) => d.split(",").some((p) => p.trim() && !/var\(--ease\)/.test(p))).length,
+      };
+    };
+    const before = scan("a { transition: background .15s var(--ease), opacity .15s; }");
+    assert(before.dur === 1 && before.miss === 1, "运动闸门认得出裸时长与漏写的曲线");
+    const beforeBare = scan("a { transition: background .25s ease; }");
+    assert(beforeBare.bare === 1, "运动闸门认得出裸曲线");
+    const after = scan("a { transition: background var(--dur-ui) var(--ease); }");
+    assert(after.dur === 0 && after.bare === 0 && after.miss === 0, "运动闸门放过收敛后的写法");
+  }
+
   const audRaw = fs.readFileSync(path.join(root, "src/web/js/audio.js"), "utf8");
   const audSrc = audRaw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   const oscN = (audSrc.match(/createOscillator\(\)/g) || []).length;

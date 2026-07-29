@@ -46,8 +46,16 @@
     const pad = (n) => String(n).padStart(2, "0");
     const dtStr =
       dt.getFullYear() + "-" + pad(dt.getMonth() + 1) + "-" + pad(dt.getDate());
+    // RE 的第二段是**赢法**,不是装饰:SGF 里 `+R` = Resign(对手认输)、`+T` = 超时、
+    // `+F` = 判负,而 `B+` 就是「黑胜,方式未指定」。这里一直写死 `B+R` / `W+R` ——
+    // 而这个应用**没有认输功能**(全 src/ 搜 resign / 认输,0 处命中),赢棋只有连五
+    // 一种方式。也就是说导出的每一份棋谱都在对别的软件说假话:一局连五赢下来的棋,
+    // 在任何 SGF 阅读器里都显示成「对手认输」。
+    //
+    // 自己导入自己看不出来 —— 解析器根本不读 RE,结果是从盘面重算的。这个字段唯一的
+    // 读者在应用之外,所以也从来没有测试碰过它。
     const re =
-      result === "b" ? "B+R" : result === "w" ? "W+R" : result === "draw" ? "0" : "Void";
+      result === "b" ? "B+" : result === "w" ? "W+" : result === "draw" ? "0" : "Void";
     let s =
       "(;FF[4]GM[4]SZ[" +
       SIZE +
