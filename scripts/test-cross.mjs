@@ -1622,6 +1622,194 @@ async function enableSwap2Pvp(page) {
     JSON.stringify({ bad, 实例: r.total, 时长: r.durs, 缓动: r.eases, 脉动: r.pulse }));
 }
 
+// ---- Test AD: 设置行的控件边缘，中英各只有一条 ----
+// 改之前控件右对齐、自然宽度：右边缘齐在一列，**左边缘中英各六个位置**（v1.44 实测，
+// 相对行左缘：中文 77/93/126/141/148/157，英文 46/57/96/122/144/148）。人眼扫的是左缘。
+// v1.34 量过并留在路线图；这一版的解是把行拆成「标签列 + 控件列」，控件列宽是个
+// token（`--ctl-w`），分段控件占满它 —— 宽度与文案长度无关，所以换语言、加选项都不会
+// 让它重新参差。开关是固定尺寸，停在控件列的右端。
+// 这条闸门真正守的是**跨语言同宽**：同宽才证明宽度由 token 定。反证拿掉那个 token
+// （`1fr var(--ctl-w)` → `1fr auto`），立刻报出中文 5 个 / 英文 6 个左边缘。
+// 试过「标签在上、控件在下」：对齐同样干净，但侧栏内容 740 → 869px，900 高的窗口
+// 设置区会从「不用滚」变成「要滚」——那是退化，没做。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await openPanel(page);
+  for (const lang of ["zh", "en"]) {
+    if (lang === "en") {
+      await page.evaluate(() => {
+        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
+        if (b) b.click();
+      });
+      await page.waitForTimeout(450);
+    }
+    const r = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll(".setting-row")]
+        .filter((x) => x.getBoundingClientRect().width > 0);
+      const pills = [], switches = [], wrapped = [];
+      for (const row of rows) {
+        const k = row.querySelector(".setting-k");
+        if (k) {
+          const lh = parseFloat(getComputedStyle(k).lineHeight) || 18;
+          if (k.getBoundingClientRect().height > lh * 1.6) wrapped.push(k.textContent.trim());
+        }
+        const p = row.querySelector(".pill");
+        if (p) { const b = p.getBoundingClientRect(); pills.push([Math.round(b.left), Math.round(b.right)]); }
+        const s = row.querySelector(".switch");
+        if (s) { const b = s.getBoundingClientRect(); switches.push([Math.round(b.left), Math.round(b.right)]); }
+      }
+      const rowW = rows.length ? Math.round(rows[0].getBoundingClientRect().width) : 0;
+      return { pills, switches, wrapped, rowW, n: rows.length };
+    });
+    const lefts = [...new Set(r.pills.map((p) => p[0]))];
+    const rights = [...new Set(r.pills.map((p) => p[1]))];
+    const swLefts = [...new Set(r.switches.map((s) => s[0]))];
+    seen[lang] = { 行数: r.n, 行宽: r.rowW, 分段控件左: lefts, 分段控件右: rights, 开关左: swLefts, 折行的标签: r.wrapped };
+    if (!r.pills.length) bad.push(lang + ": 一个分段控件都没量到");
+    if (lefts.length !== 1) bad.push(lang + ": 分段控件左边缘有 " + lefts.length + " 个位置 " + JSON.stringify(lefts));
+    if (rights.length !== 1) bad.push(lang + ": 分段控件右边缘有 " + rights.length + " 个位置 " + JSON.stringify(rights));
+    if (swLefts.length > 1) bad.push(lang + ": 开关左边缘有 " + swLefts.length + " 个位置");
+    if (r.wrapped.length) bad.push(lang + ": 标签折了行 " + JSON.stringify(r.wrapped));
+    const w = lefts.length === 1 && rights.length === 1 ? rights[0] - lefts[0] : 0;
+    seen[lang].分段控件宽 = w;
+    if (w > r.rowW) bad.push(lang + ": 分段控件宽 " + w + " 超出行宽 " + r.rowW);
+  }
+  // 宽度跨语言相同,才说明它由 token 定、不由文案长度定 —— 这是这条闸门真正要守的
+  // 不变式。改之前控件是右对齐的自然宽度,中英各有 7 个左边缘,且随文案变。
+  if (seen.zh && seen.en && seen.zh.分段控件宽 !== seen.en.分段控件宽) {
+    bad.push("控件宽度随语言变了：中文 " + seen.zh.分段控件宽 + " / 英文 " + seen.en.分段控件宽);
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AD 设置行的控件边缘中英各只有一条（且不由文案长度决定）",
+    bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
+// ---- Test AE: 焦点由应用自己画，不落回引擎默认 ----
+// 改之前整张样式表唯一一条 focus 规则是 .slot-name:focus —— 按钮、分段控件、开关、
+// 文字链聚焦时长什么样，完全由引擎默认值决定。v1.32 花一整版把 Tab 可达做起来
+// （侧栏 0 → 26 项、主界面 38 个按钮），却没定义过「走到哪里」看不看得出来。
+// 这个应用跑 WKWebView / WebView2 而回归跑 Chromium，靠默认值撑住要紧的东西正是
+// v1.38 修掉的那类依赖 —— 所以这里断言的是「应用自己声明了」，与默认值长什么样无关。
+{
+  const bad = [];
+  const page = await newPage();
+  await openPanel(page);
+  const r = await page.evaluate(() => {
+    const ids = ["btn-new", "btn-hint", "toggle-panel", "help-btn"];
+    const out = [];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (!el || el.disabled) { out.push({ id, skip: "禁用或不存在" }); continue; }
+      const before = getComputedStyle(el).outline;
+      el.focus();
+      const cs = getComputedStyle(el);
+      out.push({ id, focused: document.activeElement === el, before,
+                 outline: cs.outline, offset: cs.outlineOffset });
+      el.blur();
+    }
+    // 分段控件与色板各取一个
+    for (const [sel, name] of [[".setting-row .pill button", "分段控件"],
+                               [".theme-row [data-theme]", "色板"]]) {
+      const el = document.querySelector(sel);
+      if (!el) { out.push({ id: name, skip: "没找到" }); continue; }
+      el.focus();
+      const cs = getComputedStyle(el);
+      out.push({ id: name, focused: document.activeElement === el,
+                 outline: cs.outline, offset: cs.outlineOffset });
+      el.blur();
+    }
+    const rules = [];
+    for (const sh of document.styleSheets) {
+      try { for (const rr of sh.cssRules) if (/:focus-visible/.test(rr.selectorText || "")) rules.push(rr.selectorText); }
+      catch (_) {}
+    }
+    return { out, rules };
+  });
+  if (!r.rules.length) bad.push("样式表里没有任何 :focus-visible 规则");
+  for (const x of r.out) {
+    if (x.skip) continue;
+    if (!x.focused) { bad.push(x.id + " 没聚焦上"); continue; }
+    // outline-style: none 或宽度 0 都算「没画」
+    if (/(^|\s)none(\s|$)/.test(x.outline) || /(^|\s)0px(\s|$)/.test(x.outline)) {
+      bad.push(x.id + " 聚焦后没有描边：" + x.outline);
+    }
+    if (x.offset === "0px") bad.push(x.id + " 的 outline-offset 是 0，环会贴死在控件上");
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AE 焦点由应用自己画（不落回引擎默认）",
+    bad.length === 0, JSON.stringify({ bad, 规则: r.rules, 实测: r.out }));
+}
+
+// ---- Test AF: 主题色板认得出来，且没把名字一起藏掉 ----
+// 主题那一格从「木/夜/日/本」四个字改成了四块色板 —— 这是为了让控件列宽与语言无关
+// （四个字的自然宽 206px > 控件列 161px）。代价是标签不再显示，所以两件事得钉住：
+//   一、四块色板**互不相同**，否则「换了个主题」这件事在界面上没有任何痕迹；
+//   二、名字只是**视觉上**藏起来（font-size: 0），文本节点和 title 都还在 —— 实测
+//      无障碍名中文「木/夜/日/本」、英文「Wood/Night/Day/Paper」，鼠标悬停有 title。
+//      把文字换成空元素或 ::before 注入，名字就没了，而屏幕上看不出区别。
+// 每块色板画的是**它自己那套主题**的 --board-frame（[data-theme] 按钮内部重新声明
+// 了被预览主题的调色板 —— v1.32/v1.34 踩过的那个坑，这里是故意用它）。
+{
+  const bad = [];
+  const page = await newPage();
+  await openPanel(page);
+  const seen = {};
+  for (const lang of ["zh", "en"]) {
+    if (lang === "en") {
+      await page.evaluate(() => {
+        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
+        if (b) b.click();
+      });
+      await page.waitForTimeout(450);
+    }
+    const r = await page.evaluate(() => {
+      const bs = [...document.querySelectorAll(".theme-row [data-theme]")];
+      return bs.map((x) => {
+        const a = getComputedStyle(x, "::after");
+        // backgroundImage 在纯色时返回字符串 "none" —— 它是真值,写成
+        // `a.backgroundImage || a.backgroundColor` 就永远落不到纯色那一支,
+        // 于是一块画着纯色的色板会被判成「没有底色」。四套主题的 --board-frame
+        // 眼下都是渐变,但闸门不该把这个巧合写死。
+        const img = a.backgroundImage;
+        return {
+          t: x.dataset.theme,
+          name: (x.textContent || "").trim(),
+          title: x.getAttribute("title") || "",
+          swatch: img && img !== "none" ? img : (a.backgroundColor || ""),
+          h: Math.round(parseFloat(a.height) || 0),
+          active: x.classList.contains("active"),
+        };
+      });
+    });
+    seen[lang] = r;
+    if (r.length !== 4) { bad.push(lang + ": 色板数量是 " + r.length + "，不是 4"); continue; }
+    for (const x of r) {
+      if (!x.name) bad.push(lang + ": " + x.t + " 的文本被删了 —— 无障碍名会变空");
+      if (!x.title) bad.push(lang + ": " + x.t + " 没有 title，悬停认不出是哪套主题");
+      if (!x.h) bad.push(lang + ": " + x.t + " 的色板高度是 0，等于没画");
+      // 透明也算没画:纯色支拿到的是 rgba(0, 0, 0, 0) 而不是 "none"
+      if (!x.swatch || x.swatch === "none" || /,\s*0\)$/.test(x.swatch)) {
+        bad.push(lang + ": " + x.t + " 没有底色（" + x.swatch + "）");
+      }
+    }
+    const uniq = new Set(r.map((x) => x.swatch));
+    if (uniq.size !== r.length) {
+      bad.push(lang + ": 四块色板只有 " + uniq.size + " 种颜色 —— 认不出选的是哪一套");
+    }
+    if (r.filter((x) => x.active).length !== 1) {
+      bad.push(lang + ": 选中态有 " + r.filter((x) => x.active).length + " 个");
+    }
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AF 主题色板互不相同，且名字只是视觉上藏起来",
+    bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");

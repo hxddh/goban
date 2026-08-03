@@ -241,9 +241,12 @@
     const hasAny = a.games > 0 || !!daily;
     if (empty) empty.hidden = hasAny;
     body.hidden = !hasAny;
-    // 没有任何记录时「清空」无事可做,却照样弹确认框问你要不要清空一个空的东西。
+    // 「清空」清的是**对局统计**,所以它的可用状态要跟对局数走 —— 不是跟 hasAny。
+    // v1.39 修掉了「零对局时照样可点」,判据却写成 hasAny(= 有对局 或 有每日打卡),
+    // 于是「做过每日挑战、一局没下完」这个很常见的状态下按钮又活了过来:实测点下去、
+    // 确认,正文一个字都不变 —— clear() 根本不碰每日打卡。
     const clearBtn = document.getElementById("stats-clear");
-    if (clearBtn) clearBtn.disabled = !hasAny;
+    if (clearBtn) clearBtn.disabled = a.games === 0;
     if (!hasAny) { body.innerHTML = ""; return; }
     if (a.games === 0) { body.innerHTML = daily; return; }
     const names = {

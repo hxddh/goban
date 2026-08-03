@@ -1290,10 +1290,14 @@
     playMoveSound(turn);
     const line = findWin(r, c, turn);
     if (line) {
-      result = turn;
-      winLine = line;
+      // 顺序要紧:nowElapsed() 在 result !== "play" 时直接返回 elapsedBaseMs,
+      // 所以必须**先**把这一段走过的时间累进去,再把 result 设成终局。
+      // 反过来写(v1.9 起就是反的)等于把本局用时整个丢掉:实测一盘走了 00:09 的棋,
+      // 终局时钟跳回 00:00、统计记 durationMs = 0,于是「总时长」这一项从来都是 0。
       elapsedBaseMs = nowElapsed();
       startedAt = Date.now();
+      result = turn;
+      winLine = line;
       recordGameEnd();
       playEndSound(turn);
       triggerWinFlash();
@@ -1303,10 +1307,10 @@
       return;
     }
     if (boardFull()) {
+      elapsedBaseMs = nowElapsed();   // 同上:先累加,再置终局
+      startedAt = Date.now();
       result = "draw";
       winLine = null;
-      elapsedBaseMs = nowElapsed();
-      startedAt = Date.now();
       recordGameEnd();
       // 和局此前是三种结局里唯一无声的一种:棋盘填满,最后一颗子的落子声之后
       // 什么都没有,你得看状态栏才知道这局已经完了。
