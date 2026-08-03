@@ -86,6 +86,10 @@
       --dur-panel: .28s;  /* 「块」的进出与改形:侧栏、弹层、toast、棋盘 */
       --dur-pulse: 1.2s;  /* 循环脉动。两个思考指示器此前是 1.2s 和 1.1s,
                              最小公倍数 13.2 秒才对齐一次,其余时间一直错拍 */
+      /* 设置行的控件列宽:取英文里最宽的那个分段控件(难度四格,每格 5px 内边距)。
+         设置行实际宽 243px,标签列因此得 243-12-161 = 70px —— 中文最宽标签 52、
+         英文 64,都放得下。宽度是 token,所以左右两条边缘与语言无关。 */
+      --ctl-w: 161px;
       --font-num: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
     }
     [data-theme="night"] {
@@ -400,10 +404,30 @@
     .side-h-meta { font-size: 12px; color: var(--muted); }
 
     .setting-list { display: flex; flex-direction: column; gap: 8px; }
+    /* 标签一列、控件一列。控件列宽是个 token(`--ctl-w`),不由文案长度决定 ——
+       这和 v1.32 收字号圆角、v1.36 收行距、v1.43 收动效是同一条规矩。
+       改之前控件是右对齐的自然宽度:右边缘齐在一列,**左边缘中英各六个位置**
+       (拿 v1.44 实测,相对行左缘:中文 77/93/126/141/148/157,英文 46/57/96/122/
+       144/148;宽度同样六种,中文 86–166、英文 95–197)。人眼扫的是左缘,参差正好
+       落在最显眼的那一侧。v1.34 量过这条并留在路线图,当时说英文要 300px。
+       行宽只有 243px,而 v1.44 英文最宽的两个控件是 Level 197、Theme 186 —— 塞不
+       进一个统一的列。余量就在控件自己身上:格子内边距 12px → 5px(文字一个都没少),
+       主题那四个字改成色板。改完英文自然宽最大的仍是 Level,恰好 161px,--ctl-w
+       就取这个数;中文最宽 103px,余量充裕。
+       撑开这一列的是 `1fr var(--ctl-w)` 这一条,`.pill` 的 `width:100%` 只是让它
+       填满已经定好的列;两者缺一,宽度就退回随文案变。 */
     .setting-row {
-      display: flex; align-items: center; justify-content: space-between;
+      display: grid;
+      grid-template-columns: 1fr var(--ctl-w);
+      align-items: center;
       gap: 12px; min-height: 36px;
     }
+    /* 开关是固定尺寸的小控件,停在列的右端(开关在任何界面里都在右边缘,推到左端会
+       更糟),于是左边缘一共两条:分段控件一条、开关一条。
+       试过「标签在上、控件在下」:对齐同样干净,但侧栏内容从 740 涨到 869px,
+       900 高的窗口设置区会从「不用滚」变成「要滚」—— 那是退化,不做。 */
+    .setting-row > .switch,
+    .setting-row > :last-child:not(.pill) { justify-self: end; }
     /* author display:flex would otherwise override the [hidden] UA rule,
        leaving 思考/难度/执子 rows visible when they should be hidden */
     .setting-row[hidden] { display: none; }
@@ -414,7 +438,12 @@
 
     /* iOS-like segmented control */
     .pill {
-      display: inline-flex;
+      /* 占满控件列并把格子等分:格子宽度不再随文案长度变,四格控件和两格控件的外框
+         因此一样宽,左右边缘各只有一个位置。 */
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: 1fr;
+      width: 100%;
       padding: 2px;
       border-radius: 10px;
       background: var(--btn-ghost);
@@ -427,8 +456,8 @@
       -webkit-appearance: none; appearance: none; border: 0; background: transparent;
       color: var(--muted);
       font: inherit; font-size: 12px; font-weight: 500;
-      padding: 8px 12px; border-radius: 6px;
-      cursor: pointer; min-width: 40px;
+      padding: 8px 5px; border-radius: 6px;
+      cursor: pointer; min-width: 0;
       transition: background var(--dur-ui) var(--ease), color var(--dur-ui) var(--ease), box-shadow var(--dur-ui) var(--ease);
     }
     .pill button:hover { color: var(--text); }
@@ -463,6 +492,9 @@
       --sw-fg: var(--muted);
       --sw-fg-strong: var(--text);
       --sw-active-bg: color-mix(in srgb, var(--panel) 88%, var(--text));
+      /* 焦点环也是「会从变量取色」的一处,所以同样需要一个 --sw-* 孪生:
+         不然键盘走到「日」这个色板上时,环会画成**日间主题**的 accent。 */
+      --sw-accent: var(--accent);
     }
     [data-theme="day"] .theme-row,
     [data-theme="notebook"] .theme-row { --sw-active-bg: #fff; }
@@ -472,9 +504,24 @@
     @supports not (background: color-mix(in srgb, red 50%, blue)) {
       .theme-row { --sw-active-bg: var(--btn-hover); }
     }
-    /* Single glyphs (木/夜/日/本), so they get a narrower floor than the 40px
-       word-sized buttons in the other capsules — still past the 24px hit min. */
-    .theme-row button { min-width: 32px; color: var(--sw-fg); }
+    /* 主题选择器是**色板**,不是四个词。
+       按钮上的 data-theme 会在按钮内重新声明该主题的调色板(v1.32/v1.34 一直把这当
+       成要防的陷阱),这里正好用它:var(--board-frame) 画出来的就是那套主题的盘面 ——
+       你看到的是主题本身,而不是它的名字。
+       这同时把这一行的宽度与语言解耦:英文 Wood/Night/Day/Paper 自然宽 206px,而设置
+       行只有 243px、减去最宽标签 64 和 gap 12 只剩 167px,横排怎么排都塞不下;换成
+       色板之后这一行的最小宽只有 46px,不再是最宽的那个控件。
+       名字没有丢:文本仍在按钮里(读屏能读到),title 也还在,只是不再占宽度。 */
+    .theme-row button {
+      min-width: 0; color: var(--sw-fg);
+      font-size: 0; line-height: 0; padding: 5px;
+    }
+    .theme-row button::after {
+      content: "";
+      display: block; height: 18px; border-radius: 4px;
+      background: var(--board-frame);
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .28);
+    }
     .theme-row button:hover { color: var(--sw-fg-strong); }
     .theme-row button.active {
       background: var(--sw-active-bg);
@@ -633,6 +680,26 @@
       width: 100%;
     }
     .slot-name:hover { border-color: var(--card-border); }
+    /* 焦点。改之前整张表里唯一一条 focus 规则是下面那个改名输入框 —— 也就是说
+       按钮、分段控件、开关、文字链聚焦时长什么样,**完全由引擎的默认值决定**。
+       v1.32 花了一整版把 Tab 可达做起来(侧栏 0 → 26 项、主界面 38 个按钮),
+       却从没定义过「走到哪里」看不看得出来。而这个应用跑 WKWebView / WebView2、
+       回归跑 Chromium —— 靠引擎默认值撑住要紧的东西,正是 v1.38 修掉的那类依赖。
+       所以这里用应用自己的 token 显式画,与默认值是什么无关。
+
+       用 :focus-visible 而不是 :focus:鼠标点击不该留下环,键盘走到才该。
+       两层描边(底色一圈 + accent 一圈)是为了在四个主题的深浅底上都立得住。 */
+    :where(button, [href], input, select, textarea, [tabindex]):focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      /* accent 在浅色主题上压在浅底时略淡,补一圈与底色反差的内描边兜底 */
+      box-shadow: 0 0 0 1px var(--panel);
+    }
+    /* 色板按钮会在自身重新声明该主题的变量,var(--accent) 会解析成**被预览主题**的
+       accent —— v1.32 和 v1.34 都在这里栽过。焦点环要用当前界面的 accent。 */
+    .theme-row [data-theme]:focus-visible {
+      outline-color: var(--sw-accent);
+    }
     .slot-name:focus {
       outline: none;
       border-color: var(--accent);

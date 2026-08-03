@@ -701,6 +701,53 @@ const Practice = ctx.GobanPractice;
     "最佳连胜是高水位,撤回不下调 (" + back.bestStreak + ")");
   ctx.GobanHost.storageRemove("goban.v12.stats");
   ctx.GobanHost.storageRemove("goban.v12.totals");
+
+  // ---- 「清空」的可用状态要跟对局数走 ----
+  // v1.39 修掉了「零对局时照样可点」,判据却写成 hasAny(= 有对局 **或** 有每日打卡)。
+  // 于是「做过每日挑战、一局没下完」这个很常见的状态下按钮又活了:实测点下去、确认,
+  // 正文一个字不变 —— clear() 根本不碰每日打卡。
+  const statsSrc = fs.readFileSync(path.join(root, "src/web/js/stats.js"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  assert(/clearBtn\.disabled\s*=\s*a\.games\s*===\s*0/.test(statsSrc),
+    "「清空」按不按得动只看对局数");
+  assert(!/clearBtn\.disabled\s*=\s*!hasAny/.test(statsSrc),
+    "不再拿 hasAny 当「清空」的判据（它把每日打卡也算了进去）");
+  {
+    const scan = (js) => /clearBtn\.disabled\s*=\s*!hasAny/.test(js);
+    assert(scan("if (clearBtn) clearBtn.disabled = !hasAny;"), "清空闸门认得出 v1.43 那种判据");
+    assert(!scan("if (clearBtn) clearBtn.disabled = a.games === 0;"), "清空闸门放过新判据");
+  }
+}
+
+// --- 终局要把本局用时结算进去 (v1.45) ---
+//
+// nowElapsed() 在 result !== "play" 时直接返回 elapsedBaseMs,所以两行的先后要紧:
+// 必须先累加、再置终局。反着写(v1.9 起就是反的)等于把本局用时整个丢掉 —— 实测一盘
+// 走了 00:09 的棋,终局时钟跳回 00:00、统计记 durationMs = 0,于是「总时长」从来都是 0。
+// 我在 v1.44 把这几个数改成累计量时没发现,因为探针里的 durationMs 是我自己造的。
+{
+  const appSrc = fs.readFileSync(path.join(root, "src/web/js/app.js"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  // 每个「置终局」的地方,elapsedBaseMs 的结算都必须排在它前面
+  const ends = [...appSrc.matchAll(/result = (?:turn|"draw");/g)].map((m) => m.index);
+  assert(ends.length === 2, "两处终局赋值都在 (" + ends.length + ")");
+  const bad = ends.filter((i) => {
+    const before = appSrc.slice(Math.max(0, i - 200), i);
+    return !/elapsedBaseMs = nowElapsed\(\);[\s\S]{0,80}$/.test(before);
+  });
+  assert(bad.length === 0,
+    "本局用时在置终局之前就结算了（" + bad.length + " 处没有）");
+  {
+    const scan = (js) => {
+      const e = [...js.matchAll(/result = (?:turn|"draw");/g)].map((m) => m.index);
+      return e.filter((i) => !/elapsedBaseMs = nowElapsed\(\);[\s\S]{0,80}$/
+        .test(js.slice(Math.max(0, i - 200), i))).length;
+    };
+    assert(scan('result = turn;\n  elapsedBaseMs = nowElapsed();') === 1,
+      "用时闸门认得出 v1.44 那个顺序（先置终局，用时就丢了）");
+    assert(scan('elapsedBaseMs = nowElapsed();\n  startedAt = Date.now();\n  result = turn;') === 0,
+      "用时闸门放过正确顺序");
+  }
 }
 
 // --- 题库: every built-in must be solvable, and deep enough for 每日挑战 ---

@@ -513,7 +513,7 @@
       "aria.theme": "Theme",
       "set.coords": "Coords",
       "set.coords.title": "Coordinate labels (A–O / 15–1)",
-      "set.analysis": "Review marks",
+      "set.analysis": "Analysis",
       "set.analysis.title": "Grade each move and point at the engine's better one",
       "set.sound": "Sound",
       "set.sound.title": "Stone placement sound",
