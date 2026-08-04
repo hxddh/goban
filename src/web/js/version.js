@@ -9,5 +9,5 @@
  * @module version
  */
 (function (global) {
-  global.GOBAN_VERSION = "1.47.0";
+  global.GOBAN_VERSION = "1.48.0";
 })(typeof window !== "undefined" ? window : globalThis);

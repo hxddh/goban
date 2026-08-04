@@ -2336,6 +2336,138 @@ async function enableSwap2Pvp(page) {
   report("AJ 四套主题的文字都达 AA", bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
+// ---- Test AK: 顶栏与侧栏之间不许有硬缝，且顶栏五个按钮仍点得到 ----
+// 顶栏底色是**淡出到透明**的渐变。在棋盘那一侧它化得开（相邻像素亮度跳变 0–1.2），
+// 而 v1.47 之前侧栏从 top:--chrome-h 起、换成另一个面，于是在 y=44 处被齐刷刷切断：
+// 实测 notebook 35.3 / day 32.9 / wood 13 / night 8.6。补一条 border-top 只会更糟
+// （43 / 34.7 / 34.1 / 32.9 —— 色阶之上再加一条线）。侧栏改为铺满整列之后降到 ~1。
+//
+// 第二半同样要紧：让缝消失的办法是把顶栏压在侧栏上（z-index 31 > 30），而 v1.26 正是
+// 反过来做才把 悔棋/提示/新局/?/☰ 埋掉的 —— 五个按钮透出来却吞掉每一次点击。所以这条
+// 闸门必须同时守住「缝要平」和「按钮要可点」：只守前者，把 z 序写反照样绿。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await openPanel(page);
+  await page.waitForTimeout(300);
+  for (const th of ["wood", "night", "day", "notebook"]) {
+    await page.evaluate((t) => { const x = document.querySelector('.theme-row [data-theme="' + t + '"]'); if (x) x.click(); }, th);
+    await page.waitForTimeout(420);
+    const shot = (await page.screenshot()).toString("base64");
+    const r = await page.evaluate(async ({ shot }) => {
+      const img = new Image(); img.src = "data:image/png;base64," + shot; await img.decode();
+      const cv = document.createElement("canvas"); cv.width = img.width; cv.height = img.height;
+      const ctx = cv.getContext("2d"); ctx.drawImage(img, 0, 0);
+      const dpr = img.width / innerWidth;
+      const lum = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      const side = document.querySelector(".side").getBoundingClientRect();
+      const chromeH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--chrome-h")) || 44;
+      // 竖线取在侧栏内、贴着左缘 8px：那一列没有文字，量到的是纯粹的底
+      const at = (x) => (y) => {
+        const d = ctx.getImageData(Math.round(x * dpr), Math.round(y * dpr), 1, 1).data;
+        return lum(d[0], d[1], d[2]);
+      };
+      const inSide = at(side.left + 8);
+      const onBoard = at(60);
+      const span = (f) => {
+        let mx = 0, where = null;
+        for (let y = chromeH - 9; y <= chromeH + 10; y++) {
+          const d = Math.abs(f(y) - f(y - 1));
+          if (d > mx) { mx = d; where = y; }
+        }
+        return { 跳变: Math.round(mx * 10) / 10, 在y: where };
+      };
+      return { 侧栏: span(inSide), 棋盘: span(onBoard), 侧栏顶: Math.round(side.top) };
+    }, { shot });
+    seen[th] = r;
+    // 判据是**相对**的：跟同一条顶栏在棋盘那侧的表现比，不写死一个绝对阈值 ——
+    // 主题换了、渐变调了，绝对值会动，而「两侧应当一样平」不会。
+    const 上限 = Math.max(4, r.棋盘.跳变 * 3);
+    if (r.侧栏.跳变 > 上限) {
+      bad.push(th + ": 侧栏侧跳变 " + r.侧栏.跳变 + "(在 y=" + r.侧栏.在y + ")，棋盘侧只有 " + r.棋盘.跳变 + " —— 顶栏在侧栏这边被切断了");
+    }
+  }
+  // 五个顶栏按钮:必须是命中最上层的那个元素
+  const hits = await page.evaluate(() => {
+    const out = {};
+    for (const el of document.querySelectorAll(".chrome button")) {
+      const b = el.getBoundingClientRect();
+      if (b.width <= 0) continue;
+      const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      const id = el.id || el.textContent.trim().slice(0, 6);
+      out[id] = (top === el || el.contains(top)) ? "可点" : ("被 " + (top ? (top.id || top.className || top.tagName) : "?") + " 盖住");
+    }
+    return out;
+  });
+  seen.顶栏按钮 = hits;
+  const n = Object.keys(hits).length;
+  if (n < 4) bad.push("顶栏只量到 " + n + " 个按钮，覆盖太少");
+  for (const k of Object.keys(hits)) if (hits[k] !== "可点") bad.push("顶栏「" + k + "」" + hits[k]);
+  // 弹层仍须盖住顶栏
+  await page.evaluate(() => { const x = document.getElementById("help-btn"); if (x) x.click(); });
+  await page.waitForTimeout(450);
+  const covered = await page.evaluate(() => {
+    const e = document.getElementById("btn-new"); if (!e) return null;
+    const b = e.getBoundingClientRect();
+    const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    return !(top === e || e.contains(top));
+  });
+  seen.开弹层后新局被遮住 = covered;
+  if (covered !== true) bad.push("开着弹层时顶栏「新局」仍可点 —— 顶栏爬到弹层上面了");
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AK 顶栏与侧栏之间没有硬缝，且顶栏按钮仍在最上层", bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
+// ---- Test AL: 网格容器的列数要跟子元素数相容 ----
+// `.link-row` 写着 repeat(3, 1fr) 却装了四个按钮 —— 「粘贴」因此独自掉在第二行。
+// 三列是 v1.29 为**六个**链接定的（六个正好两行三列），v1.33 把其中两个挪进
+// .side-foot 之后没人改这个 3，一直这样过了 14 个版本。
+// 判据只看「列数 vs 子元素数」——不看渲染出来几行：标签与控件在同一视觉行上
+// `top` 本来就不同，按 top 计行会把每一条 .setting-row 都误报（初版就是这么错的）。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await openPanel(page);
+  for (const lang of ["zh", "en"]) {
+    if (lang === "en") {
+      await page.evaluate(() => {
+        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
+        if (b) b.click();
+      });
+      await page.waitForTimeout(450);
+    }
+    const r = await page.evaluate(() => {
+      const out = [];
+      for (const el of document.querySelectorAll("*")) {
+        const cs = getComputedStyle(el);
+        if (cs.display !== "grid") continue;
+        if (el.getBoundingClientRect().width <= 0) continue;
+        const kids = [...el.children].filter((k) => k.getBoundingClientRect().width > 0);
+        if (kids.length < 2) continue;
+        // 只管「一排同类按钮」这种:子元素全是 button 才算
+        if (!kids.every((k) => k.tagName === "BUTTON")) continue;
+        const cols = cs.gridTemplateColumns.split(" ").filter(Boolean).length;
+        out.push({ 元素: el.id ? "#" + el.id : "." + String(el.className).split(" ")[0], 列数: cols, 按钮数: kids.length });
+      }
+      return out;
+    });
+    seen[lang] = r;
+    if (r.length < 4) bad.push(lang + ": 只量到 " + r.length + " 个按钮网格，覆盖太少");
+    for (const g of r) {
+      // 放得下一行，或者正好铺满整数行 —— 否则末行必有孤儿
+      if (g.按钮数 > g.列数 && g.按钮数 % g.列数 !== 0) {
+        bad.push(lang + ": " + g.元素 + " 是 " + g.列数 + " 列却装了 " + g.按钮数 + " 个按钮，末行会剩 " + (g.按钮数 % g.列数) + " 个");
+      }
+    }
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AL 按钮网格的列数与按钮数相容（末行不留孤儿）", bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");
