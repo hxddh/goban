@@ -280,7 +280,9 @@ fn nativeSdkPath(b: *std.Build, native_sdk_path: []const u8, sub_path: []const u
 /// so adding it unconditionally would just move the breakage to older SDKs.
 fn nativeSdkHas(b: *std.Build, native_sdk_path: []const u8, sub_path: []const u8) bool {
     const joined = b.pathJoin(&.{ native_sdk_path, sub_path });
-    std.fs.cwd().access(joined, .{}) catch return false;
+    // Zig 0.16 spelling: `std.fs.cwd()` is gone, and Io.Dir.access takes the
+    // build graph's io. (Wrote the 0.15 form first; it does not compile.)
+    std.Io.Dir.cwd().access(b.graph.io, joined, .{}) catch return false;
     return true;
 }
 
