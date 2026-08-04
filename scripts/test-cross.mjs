@@ -1981,6 +1981,361 @@ async function enableSwap2Pvp(page) {
   report("AH 存档行的两个按钮跟随语言", bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
+// ---- Test AI: 帮助弹层里写的快捷键，一条条按下去都得真的管用 ----
+// 那张表是写给用户的 13 条承诺，而在此之前**没有任何测试按过其中任何一个键**。
+// 一个失效的快捷键不会报错，它只是什么都不发生 —— 帮助页于是开始说谎，而这正是
+// v1.43 里 SGF `RE` 字段的形状：没人读的东西，错了也没人发现。
+// 这里按的是真键盘事件（page.keyboard），不是直接调处理函数 —— 调函数只能证明函数
+// 还在，证明不了它还挂在键上。
+{
+  const bad = [];
+  const seen = {};
+  const press = async (page, key, ms) => { await page.keyboard.press(key); await page.waitForTimeout(ms || 300); };
+  const moveCount = (page) => page.evaluate(() => document.querySelectorAll("#move-list button").length);
+  const curMove = (page) => page.evaluate(() => {
+    const el = document.querySelector("#move-list button.cur");
+    return el ? el.textContent.trim() : null;
+  });
+  const okConfirm = async (page) => {
+    await page.evaluate(() => {
+      const ok = document.getElementById("confirm-ok");
+      const m = document.getElementById("confirm-modal");
+      if (ok && m && m.classList.contains("show")) ok.click();
+    });
+    await page.waitForTimeout(250);
+  };
+  const toPvp = async (page) => {
+    await openPanel(page);
+    await page.evaluate(() => { const x = document.querySelector('button[data-mode="pvp"]'); if (x) x.click(); });
+    await page.waitForTimeout(200);
+    await okConfirm(page);
+  };
+
+  // ① 点击交叉点落子 + 悬停有预览
+  {
+    const page = await newPage();
+    const click = clicker(page);
+    await toPvp(page);
+    await click(7, 7); await page.waitForTimeout(250);
+    seen["①落子"] = await moveCount(page);
+    if (seen["①落子"] !== 1) bad.push("点击交叉点没落子（手数 " + seen["①落子"] + "）");
+    const hov = await page.evaluate(() => {
+      const cv = document.getElementById("board");
+      const rect = cv.getBoundingClientRect();
+      const g = window.GobanDraw.pitchFor(cv.width);
+      const s = rect.width / cv.width;
+      const grab = () => { const c2 = document.createElement("canvas");
+        c2.width = cv.width; c2.height = cv.height;
+        c2.getContext("2d").drawImage(cv, 0, 0); return c2.toDataURL().length; };
+      const before = grab();
+      cv.dispatchEvent(new MouseEvent("mousemove", {
+        clientX: rect.left + (g.pad + 5 * g.step) * s,
+        clientY: rect.top + (g.pad + 5 * g.step) * s, bubbles: true }));
+      return new Promise((res) => setTimeout(() => res({ before, after: grab() }), 180));
+    });
+    seen["①悬停预览"] = hov;
+    if (hov.before === hov.after) bad.push("悬停没有预览（画布指纹没变）");
+    await page.close();
+  }
+  // ② H 提示：给提示但不代你落子
+  {
+    const page = await newPage();
+    const click = clicker(page);
+    await toPvp(page);
+    await click(7, 7); await page.waitForTimeout(250);
+    const before = await moveCount(page);
+    await press(page, "h", 700);
+    const after = await moveCount(page);
+    seen["②H"] = { 前: before, 后: after };
+    if (after !== before) bad.push("H 之后手数从 " + before + " 变成 " + after + "（提示不该代下）");
+    await page.close();
+  }
+  // ③④ ← → / Home / End
+  {
+    const page = await newPage();
+    const click = clicker(page);
+    await toPvp(page);
+    for (const [r, c] of [[7, 7], [8, 8], [7, 8], [8, 7], [6, 6]]) { await click(r, c); await page.waitForTimeout(120); }
+    const start = await curMove(page);
+    await press(page, "ArrowLeft"); const l1 = await curMove(page);
+    await press(page, "ArrowLeft"); const l2 = await curMove(page);
+    await press(page, "ArrowRight"); const r1 = await curMove(page);
+    await press(page, "Home"); const home = await curMove(page);
+    await press(page, "End"); const end = await curMove(page);
+    const last = await page.evaluate(() => {
+      const all = [...document.querySelectorAll("#move-list button")];
+      return all.length ? all[all.length - 1].textContent.trim() : null;
+    });
+    seen["③④"] = { 起: start, 左1: l1, 左2: l2, 右1: r1, Home: home, End: end, 末手: last };
+    if (!(l1 && l1 !== start)) bad.push("← 没有回退（" + start + " → " + l1 + "）");
+    if (!(l2 && l2 !== l1)) bad.push("← 第二次没有再退（" + l1 + " → " + l2 + "）");
+    if (r1 !== l1) bad.push("→ 没有前进回 " + l1 + "（得到 " + r1 + "）");
+    // 判据不能只写「Home 与 End 不同」：摘掉 Home 那一条之后按键变成空操作，光标
+    // 停在原处，跟 End 仍然不同 —— 反证因此没打响。得各自钉死落点。
+    if (home !== null) bad.push("Home 没有回到开局（当前手是 " + home + "，应为无当前手）");
+    if (end !== last) bad.push("End 没有到最后一手（到了 " + end + "，末手是 " + last + "）");
+    await page.close();
+  }
+  // ⑤ Z / ⌘Z 悔棋
+  {
+    const page = await newPage();
+    const click = clicker(page);
+    await toPvp(page);
+    for (const [r, c] of [[7, 7], [8, 8], [7, 8]]) { await click(r, c); await page.waitForTimeout(120); }
+    const n0 = await moveCount(page);
+    await press(page, "z", 350); const n1 = await moveCount(page);
+    await press(page, "Control+z", 350); const n2 = await moveCount(page);
+    seen["⑤悔棋"] = [n0, n1, n2];
+    if (n1 !== n0 - 1) bad.push("Z 没悔棋（" + n0 + " → " + n1 + "）");
+    if (n2 !== n1 - 1) bad.push("⌘Z/Ctrl+Z 没悔棋（" + n1 + " → " + n2 + "）");
+    await page.close();
+  }
+  // ⑥ N 新局
+  {
+    const page = await newPage();
+    const click = clicker(page);
+    await toPvp(page);
+    for (const [r, c] of [[7, 7], [8, 8]]) { await click(r, c); await page.waitForTimeout(120); }
+    const n0 = await moveCount(page);
+    await press(page, "n", 350);
+    await okConfirm(page);
+    const n1 = await moveCount(page);
+    seen["⑥新局"] = [n0, n1];
+    if (!(n0 > 0 && n1 === 0)) bad.push("N 没开新局（" + n0 + " → " + n1 + "）");
+    await page.close();
+  }
+  // ⑦ [ ] 侧栏
+  {
+    const page = await newPage();
+    const isOpen = () => page.evaluate(() => {
+      const a = document.getElementById("app"); return a ? a.classList.contains("panel-open") : null;
+    });
+    await press(page, "]", 350); const o1 = await isOpen();
+    await press(page, "[", 350); const o2 = await isOpen();
+    seen["⑦侧栏"] = { "]": o1, "[": o2 };
+    if (o1 !== true) bad.push("] 没有展开侧栏");
+    if (o2 !== false) bad.push("[ 没有收起侧栏");
+    await page.close();
+  }
+  // ⑧ ⌘1 / ⌘2 模式
+  {
+    const page = await newPage();
+    const mode = () => page.evaluate(() => {
+      const b = document.querySelector("button[data-mode].active"); return b ? b.dataset.mode : null;
+    });
+    await press(page, "Control+1", 300); await okConfirm(page); const m1 = await mode();
+    await press(page, "Control+2", 300); await okConfirm(page); const m2 = await mode();
+    seen["⑧模式"] = { "⌘1": m1, "⌘2": m2 };
+    if (m1 !== "pvp") bad.push("⌘1 没切到双人（得到 " + m1 + "）");
+    if (m2 !== "ai") bad.push("⌘2 没切到人机（得到 " + m2 + "）");
+    await page.close();
+  }
+  // ⑪⑬ ? 打开说明 · Esc 关弹层 / 收侧栏
+  {
+    const page = await newPage();
+    await press(page, "?", 400);
+    const shown = await page.evaluate(() => {
+      const m = document.getElementById("help-modal"); return m ? m.classList.contains("show") : null;
+    });
+    await press(page, "Escape", 400);
+    const closed = await page.evaluate(() => {
+      const m = document.getElementById("help-modal"); return m ? !m.classList.contains("show") : null;
+    });
+    await press(page, "]", 300);
+    await press(page, "Escape", 400);
+    const panel = await page.evaluate(() => {
+      const a = document.getElementById("app"); return a ? a.classList.contains("panel-open") : null;
+    });
+    seen["⑪⑬"] = { "?打开": shown, "Esc关掉": closed, "Esc后侧栏": panel };
+    if (shown !== true) bad.push("? 没有打开说明");
+    if (closed !== true) bad.push("Esc 没有关掉说明");
+    if (panel !== false) bad.push("Esc 没有收起侧栏");
+    await page.close();
+  }
+  report("AI 帮助里写的快捷键逐个按下去都管用", bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
+// ---- Test AJ: 四套主题下的文字都得达 AA ----
+// v1.32 花一整版把浅色主题的文字对比度做到 4.5:1，此后加了主题色板、焦点环、
+// keys-table…… 而**没有任何闸门守着**它。这条补上，四套主题各算一遍。
+//
+// 写这条探针时我连踩四个坑，判据里都留了痕：
+//   一、底色可能是 `color(srgb r g b / a)` 这种新拼法，只认 rgb()/rgba() 会把它当
+//       透明，于是一路穿到页面底色 —— 执子徽标因此被误报成 1.02。
+//   二、底色可能根本是渐变（background-image），算不出单一颜色 —— 「新局」按钮是
+//       linear-gradient，同样被误报成白字压近白底。这类元素**取像素**判，不硬算。
+//   三、取像素时不能拿盒子里最暗/最亮的那一个：圆角之外是页面底色，会把 8.58 的
+//       按钮报成 1.18。取盒内像素的**中位色**。
+//   四、跳过的元素必须报出数量。只报「0 处不合格」而不报「算过几个」，闸门可以在
+//       什么都没测的情况下永远绿。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await page.evaluate(() => {
+    const S = window.GobanStats;
+    let t = 1700000000000;
+    for (const d of ["easy", "normal", "hard", "extreme"]) {
+      for (let i = 0; i < 5; i++) {
+        S.record({ mode: "ai", difficulty: d, humanColor: "b",
+          result: i % 3 === 0 ? "b" : (i % 3 === 1 ? "w" : "draw"),
+          moves: 40, durationMs: 99000, endedAt: t++ });
+      }
+    }
+    for (let i = 0; i < 3; i++) S.record({ mode: "pvp", result: "b", moves: 30, durationMs: 60000, endedAt: t++ });
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(300);
+  await openPanel(page);
+
+  const computed = () => page.evaluate(() => {
+    const lum = (r, g, b) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+    // 坑一:两种拼法都要认
+    const parse = (s) => {
+      if (!s) return null;
+      const c = s.match(/color\(srgb\s+([^)]+)\)/);
+      if (c) { const t = c[1].replace("/", " ").split(/\s+/).filter(Boolean).map(Number);
+        return { r: t[0] * 255, g: t[1] * 255, b: t[2] * 255, a: t.length > 3 ? t[3] : 1 }; }
+      const m = s.match(/rgba?\(([^)]+)\)/);
+      if (!m) return null;
+      const a = m[1].split(",").map((x) => parseFloat(x));
+      return { r: a[0], g: a[1], b: a[2], a: a.length > 3 ? a[3] : 1 };
+    };
+    const over = (fg, bg) => ({ r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a),
+      b: fg.b * fg.a + bg.b * (1 - fg.a), a: 1 });
+    const pageBg = parse(getComputedStyle(document.body).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
+    // 坑二:祖先链上有渐变就算不出单一底色,交给取像素那一路
+    const bgOf = (el) => {
+      let cur = el, acc = null;
+      while (cur && cur !== document.documentElement) {
+        const cs = getComputedStyle(cur);
+        if (cs.backgroundImage && cs.backgroundImage !== "none") return { gradient: true };
+        const c = parse(cs.backgroundColor);
+        if (c && c.a > 0) acc = acc ? over(acc, c) : c;
+        if (acc && acc.a >= 0.999) return acc;
+        cur = cur.parentElement;
+      }
+      return acc ? over(acc, pageBg) : pageBg;
+    };
+    const out = []; let checked = 0, onGradient = 0;
+    for (const el of document.querySelectorAll("*")) {
+      if (![...el.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim())) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === "hidden" || cs.display === "none" || parseFloat(cs.opacity) === 0) continue;
+      let anc = el.parentElement, skip = false;
+      while (anc) { const a = getComputedStyle(anc);
+        if (a.display === "none" || a.visibility === "hidden" || parseFloat(a.opacity) === 0) { skip = true; break; }
+        anc = anc.parentElement; }
+      if (skip) continue;
+      const fg = parse(cs.color); if (!fg) continue;
+      const bg = bgOf(el);
+      if (bg.gradient) { onGradient++; continue; }
+      checked++;
+      const eff = fg.a < 1 ? over(fg, bg) : fg;
+      const L1 = lum(eff.r, eff.g, eff.b), L2 = lum(bg.r, bg.g, bg.b);
+      const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+      const px = parseFloat(cs.fontSize), wt = parseInt(cs.fontWeight, 10) || 400;
+      const need = (px >= 24 || (px >= 18.66 && wt >= 700)) ? 3.0 : 4.5;
+      if (ratio < need) {
+        out.push({ 文本: el.textContent.trim().slice(0, 16),
+          元素: el.id ? "#" + el.id : (el.className ? "." + String(el.className).split(" ")[0] : el.tagName),
+          比值: Math.round(ratio * 100) / 100, 需要: need });
+      }
+    }
+    return { out, checked, onGradient };
+  });
+
+  // 渐变上的那些:拍一张「文字透明」的图，取盒内中位色当底
+  const pixel = async () => {
+    const targets = await page.evaluate(() => {
+      const onGrad = (el) => { let c = el; while (c && c !== document.documentElement) {
+        const cs = getComputedStyle(c); if (cs.backgroundImage && cs.backgroundImage !== "none") return true;
+        c = c.parentElement; } return false; };
+      const out = [];
+      [...document.querySelectorAll("*")].forEach((el, i) => {
+        if (![...el.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim())) return;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) return;
+        const cs = getComputedStyle(el);
+        if (cs.visibility === "hidden" || cs.display === "none" || parseFloat(cs.opacity) === 0) return;
+        if (!onGrad(el)) return;
+        el.setAttribute("data-cprobe", String(i));
+        out.push({ key: String(i), 文本: el.textContent.trim().slice(0, 16),
+          元素: el.id ? "#" + el.id : (el.className ? "." + String(el.className).split(" ")[0] : el.tagName),
+          前景: cs.color, 字号: parseFloat(cs.fontSize), 粗细: parseInt(cs.fontWeight, 10) || 400 });
+      });
+      return out;
+    });
+    await page.evaluate(() => {
+      const st = document.createElement("style"); st.id = "cprobe-style";
+      st.textContent = "[data-cprobe]{color:transparent !important;text-shadow:none !important;}";
+      document.head.appendChild(st);
+    });
+    await page.waitForTimeout(220);
+    const shot = (await page.screenshot()).toString("base64");
+    const res = await page.evaluate(async ({ shot, targets }) => {
+      const img = new Image(); img.src = "data:image/png;base64," + shot; await img.decode();
+      const cv = document.createElement("canvas"); cv.width = img.width; cv.height = img.height;
+      const ctx = cv.getContext("2d"); ctx.drawImage(img, 0, 0);
+      const lum = (r, g, b) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+      const dpr = img.width / innerWidth;
+      const out = [];
+      for (const t of targets) {
+        const el = document.querySelector('[data-cprobe="' + t.key + '"]'); if (!el) continue;
+        const r = el.getBoundingClientRect();
+        const d = ctx.getImageData(Math.max(0, Math.round(r.left * dpr)), Math.max(0, Math.round(r.top * dpr)),
+          Math.max(1, Math.round(r.width * dpr)), Math.max(1, Math.round(r.height * dpr))).data;
+        const px = []; for (let i = 0; i < d.length; i += 4) px.push([d[i], d[i + 1], d[i + 2]]);
+        // 坑三:取中位,不取最暗/最亮 —— 圆角之外是页面底色
+        px.sort((a, b) => lum(a[0], a[1], a[2]) - lum(b[0], b[1], b[2]));
+        const mid = px[Math.floor(px.length / 2)];
+        const fg = (t.前景.match(/[\d.]+/g) || [0, 0, 0]).map(Number);
+        const L1 = lum(fg[0], fg[1], fg[2]), L2 = lum(mid[0], mid[1], mid[2]);
+        const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+        const need = (t.字号 >= 24 || (t.字号 >= 18.66 && t.粗细 >= 700)) ? 3.0 : 4.5;
+        out.push({ 文本: t.文本, 元素: t.元素, 比值: Math.round(ratio * 100) / 100, 需要: need,
+          底色: "rgb(" + mid[0] + ", " + mid[1] + ", " + mid[2] + ")" });
+      }
+      return out;
+    }, { shot, targets });
+    await page.evaluate(() => {
+      const st = document.getElementById("cprobe-style"); if (st) st.remove();
+      document.querySelectorAll("[data-cprobe]").forEach((e) => e.removeAttribute("data-cprobe"));
+    });
+    return res;
+  };
+
+  for (const th of ["wood", "night", "day", "notebook"]) {
+    await page.evaluate((t) => { const x = document.querySelector('.theme-row [data-theme="' + t + '"]'); if (x) x.click(); }, th);
+    await page.waitForTimeout(400);
+    const c1 = await computed();
+    const px = await pixel();
+    // 弹层里还有近百个文字元素(统计表、每日行、总计行)——不开弹层只能算到 55 个,
+    // 下面那条覆盖判据就是这么把第一版拦下来的。
+    await page.evaluate(() => { const x = document.getElementById("open-stats"); if (x) x.click(); });
+    await page.waitForTimeout(500);
+    const c2 = await computed();
+    await page.evaluate(() => { const x = document.getElementById("stats-close"); if (x) x.click(); });
+    await page.waitForTimeout(300);
+    const c = { checked: c1.checked + c2.checked, out: [...c1.out, ...c2.out] };
+    const pxBad = px.filter((x) => x.比值 < x.需要);
+    seen[th] = { 算过: c.checked, 其中弹层: c2.checked, 取像素: px.length,
+                 算出来不合格: c.out, 像素判不合格: pxBad };
+    // 坑四:覆盖数太少 = 闸门什么都没测
+    if (c.checked < 80) bad.push(th + ": 只算了 " + c.checked + " 个文字元素，覆盖太少，这条闸门等于没测");
+    if (px.length < 3) bad.push(th + ": 渐变上只量到 " + px.length + " 个，取像素那一路没生效");
+    for (const x of c.out) bad.push(th + ": 「" + x.文本 + "」(" + x.元素 + ") 对比度 " + x.比值 + " < " + x.需要);
+    for (const x of pxBad) bad.push(th + ": 渐变上「" + x.文本 + "」(" + x.元素 + ") 对比度 " + x.比值 + " < " + x.需要);
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AJ 四套主题的文字都达 AA", bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");
