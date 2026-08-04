@@ -100,9 +100,22 @@
       meta.textContent = metaText(slot.snap);
       const ops = document.createElement("div");
       ops.className = "slot-ops";
-      ops.innerHTML =
-        '<button type="button" class="text-link slot-load" data-id="' + slot.id + '">读取</button>' +
-        '<button type="button" class="text-link danger slot-del" data-id="' + slot.id + '">删除</button>';
+      // 这两个按钮原本是 innerHTML 拼出来的字面量「读取」「删除」，没走 t() ——
+      // 于是英文界面下的存档列表里坐着两个中文按钮（实测：界面 lang=en、存档名
+      // 正确地是 "Game 08-04 00:34"，按钮却是「读取」「删除」）。防这件事的闸门
+      // 没响，因为它的正则只认双引号，而这两行是单引号。
+      // 顺手改成 createElement + textContent：id 不再拼进 HTML 串。
+      for (const spec of [
+        { cls: "text-link slot-load", key: "slots.load" },
+        { cls: "text-link danger slot-del", key: "slots.del" },
+      ]) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = spec.cls;
+        btn.dataset.id = slot.id;
+        btn.textContent = t(spec.key);
+        ops.appendChild(btn);
+      }
       row.appendChild(nameEl);
       row.appendChild(meta);
       row.appendChild(ops);
