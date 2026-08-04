@@ -1,11 +1,45 @@
-# Goban 路线图 — v1.45.0(本版) · 后续评估
+# Goban 路线图 — v1.45.1(本版) · 后续评估
 
 > 评估基准:v1.32.0(键盘可达 / 浅色主题达 AA / 尺度收敛 / 侧栏免滚动)。
 > 已具备:C1/C2 双引擎、复盘 3.0、swap2 平衡开局、战术练习(三题型 + 错题本)、
 > 每日挑战、对局统计、四套棋盘主题、SGF 全链路、多存档槽、中英双语、
 > macOS/Windows 双平台发布。
 
-## v1.45.0 · 本版内容
+## v1.45.1 · 本版内容
+
+**前端一行未动**(只有版本号)。补上 v1.45.0 没发出来的 Windows 安装包。
+
+- **Windows 构建在链接期就红了**:`lld-link: undefined symbol: createWindowsGpuRenderer()`。
+  逐版本核过 npm 上的 SDK:0.6.3 / 0.7.0 / 0.7.1 既没有 `gpu_surface_renderer.cpp`
+  也没有这处引用,**0.7.2** 和 0.8.0 两样都有 —— SDK 0.7.2 把一个 Direct2D 合成器拆成了
+  独立源文件并让 `webview2_host.cpp` 调它,而本仓库 `build.zig`(是 SDK `build/app.zig`
+  的一份分叉,早就漂了)Windows 那一支**始终只编 `webview2_host.cpp` 一个源文件**。
+  **不是 v1.45.0 的代码引起的**:v1.44.0 是 7 月 29 日建的,那时装到的还是 ≤0.7.1,
+  同一份 v1.44 今天重建也会红。这是环境漂移,只是被那次发布先撞上。
+- **改法**:SDK 不锁版本是有意的,所以 `build.zig` 得扛得住它遇到的那一版 ——
+  `addWindowsGpuRenderer()` **先查文件在不在**再编(无条件加会把断裂搬到 ≤0.7.1 上去),
+  三个分支(webview2 带层 / webview2 桩 / cef)都接上,与 SDK 自己的 `build/app.zig` 一致;
+  另补 `d2d1` / `dwrite` 两个系统库,SDK 的规范链接列表里有、我们这份漏了。
+
+### 我自己踩的一个坑
+
+第一版写成 `std.fs.cwd().access(path, .{})` —— 那是 Zig 0.15 的拼法,0.16 直接编译错误
+(`root source file struct 'fs' has no member named 'cwd'`)。0.16 是
+`std.Io.Dir.cwd().access(io, path, .{})`,`io` 取自 `b.graph.io`,本仓库 `build.zig` 里
+`std.process.run` 早就在这么传了。
+
+### 两条真机结论
+
+同一工作流同一分支跑了三次,前两次红 —— 这三次本身就是反证链:`6fcb418` 红(SDK 那个
+链接错误)、`85715fe` 红(我的 0.15 拼法)、`4152531` **绿**(`zig build` 3m10s,
+`Goban-Windows-x64` 1,711,205 B)。
+
+**「链接过了」不等于「跑得起来」**:二进制里多了一个 Direct2D 合成器,所以又跑了一遍
+`smoke-windows`(15 步全绿):窗口 960×749、`surface.resize scale=1`、
+`runtime.frame frame=1 dirty_regions=2`(真的出了帧)、三次 `bridge.dispatch` 往返、
+桥白名单拒绝未登记命令、无静默错误。
+
+## v1.45.0 · 上一版内容
 
 三件事,前两件是「界面在报一个它自己算错的数」,第三件是打开侧栏第一眼的那块参差。
 
@@ -69,7 +103,7 @@
 另外 AF 的第一个反证也没打响:只删 HTML 里的按钮文本不够,`data-i18n` 会在运行时填回来,
 得连 `data-i18n` 一起删。
 
-## v1.44.0 · 上一版内容
+## v1.44.0
 
 两处同一形状:存储有上限(这没错),但到了上限之后界面继续显示得像没事一样。
 
