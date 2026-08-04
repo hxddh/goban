@@ -529,6 +529,79 @@ const Practice = ctx.GobanPractice;
   assert(few.length === 3, "daily pick caps at pool size");
 }
 
+// --- 题库:130 道内建题,每一道都得真的有解 ---
+//
+// 这个模式整整 130 道题,而在此之前**没有任何测试碰过题面本身** —— 只有上面那组用
+// 合成池(9 个 {id} 假题)测选取逻辑的用例。一道无解的题在界面上不会报错,它只是
+// 永远判你答错:v1.43 的 SGF `RE` 字段是同一形状 —— 没人读的东西,错了也没人发现。
+//
+// 判据取自产品自己的两个纯函数(boardOf / solutionsFor),不另写一份解题器 ——
+// 另写一份就是同义反复的近亲:两边都错的时候它照样绿。
+{
+  const { BUILTINS, boardOf, solutionsFor } = Practice.puzzles;
+  const SIZE = 15;
+  const bad = [];
+  const kinds = {};
+  for (let i = 0; i < BUILTINS.length; i++) {
+    const q = BUILTINS[i];
+    kinds[q.type] = (kinds[q.type] || 0) + 1;
+    let board, sols;
+    try {
+      board = boardOf(q);
+      sols = solutionsFor(board, q.side, q.type);
+    } catch (e) {
+      bad.push("#" + i + " 抛异常 " + e.message);
+      continue;
+    }
+    if (!sols || !sols.length) { bad.push("#" + i + " (" + q.type + ") 无解"); continue; }
+    for (const s of sols) {
+      const r = s.r, c = s.c;
+      if (!(r >= 0 && r < SIZE && c >= 0 && c < SIZE)) { bad.push("#" + i + " 解越界 " + r + "," + c); continue; }
+      if (board[r][c]) bad.push("#" + i + " 解落在已有子上 " + r + "," + c);
+    }
+  }
+  assert(bad.length === 0, "every builtin puzzle has a real solution (" + bad.slice(0, 3).join(" | ") + ")");
+  assert(BUILTINS.length === 130, "puzzle bank is 130 (got " + BUILTINS.length + ")");
+  assert(kinds.win1 === 50 && kinds.defend === 45 && kinds.vcf === 35,
+    "puzzle mix stays 50/45/35 (got " + JSON.stringify(kinds) + ")");
+
+  // 反证:把一道 win1 的成五点堵掉,它就该报无解。
+  // 直接改 BUILTINS 会污染后面的用例,所以复制一份改。
+  {
+    const q = BUILTINS.find((x) => x.type === "win1");
+    const board = boardOf(q);
+    const sols = solutionsFor(board, q.side, q.type);
+    const blocked = {
+      type: q.type, side: q.side,
+      b: q.b.slice(), w: q.w.slice(),
+    };
+    // 把所有解点都填上对方的子 —— 于是这道题不再有成五点
+    const other = q.side === "b" ? "w" : "b";
+    for (const s of sols) blocked[other].push([s.r, s.c]);
+    const after = solutionsFor(boardOf(blocked), blocked.side, blocked.type);
+    assert(sols.length > 0 && (!after || after.length === 0),
+      "negative control: blocking every solution makes the puzzle unsolvable");
+  }
+}
+
+// --- 每日挑战跑在**真题库**上,而不只是合成池 ---
+// 上面那组用 9 个 {id} 假题验了选取算法;这里验它接到 130 道真题上之后,
+// 同一天可重现、不同天真的换题。
+{
+  const pool = Practice.puzzles.BUILTINS;
+  const idx = (sel) => sel.map((q) => pool.indexOf(q)).join(",");
+  const days = ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04",
+                "2026-08-05", "2026-08-06", "2026-09-15", "2027-01-01"];
+  const picks = days.map((d) => idx(Practice.daily.pickForDate(pool, d, 5)));
+  assert(picks.every((p) => p.split(",").length === 5), "daily over the real bank picks 5");
+  assert(idx(Practice.daily.pickForDate(pool, "2026-08-04", 5)) === picks[3],
+    "daily over the real bank is repeatable for the same date");
+  assert(new Set(picks).size === days.length,
+    "daily over the real bank differs every day (" + new Set(picks).size + "/" + days.length + ")");
+  assert(picks.every((p) => new Set(p.split(",")).size === 5),
+    "daily over the real bank never repeats a puzzle within one day");
+}
+
 // check-in streak state machine
 {
   let st = Practice.daily.advanceDaily(null, "2026-07-23", 4, 5);
