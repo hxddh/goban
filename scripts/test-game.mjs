@@ -1320,17 +1320,69 @@ const Practice = ctx.GobanPractice;
     line.replace(/\r$/, "").replace(/\/\/.*$/, "").replace(/^\s*\*.*$/, "");
   assert(!CJK.test(codeOf('  // do not cache as "\u6700\u4f73\u4e00\u624b".\r')),
     "comment stripping survives a CRLF checkout");
+  // All three quote styles. Until v1.46 this matched double quotes only, and
+  // that is exactly how two Chinese buttons shipped in the English UI: the
+  // 存档 rows built 「读取」/「删除」 with innerHTML and *single* quotes, so the
+  // gate never saw them \u2014 same content, two spellings, opposite verdicts.
+  const litRe = /"[^"\n]*[\u4e00-\u9fa5][^"\n]*"|'[^'\n]*[\u4e00-\u9fa5][^'\n]*'|`[^`\n]*[\u4e00-\u9fa5][^`\n]*`/g;
+  const scanLine = (code) => code.match(litRe) || [];
+  // The gate's own negative controls: the single-quoted form is the one that
+  // shipped, so it is the one that must not be allowed to go quiet again.
+  assert(scanLine("x = '\u2265\u8bfb\u53d6'".replace("\u2265", '">')).length === 1,
+    "gate sees single-quoted Chinese");
+  assert(scanLine('x = ">\u8bfb\u53d6</button>"').length === 1, "gate sees double-quoted Chinese");
+  assert(scanLine("x = `\u8bfb\u53d6`").length === 1, "gate sees backticked Chinese");
+  assert(scanLine("x = plain + 1").length === 0, "gate stays quiet on Chinese-free code");
+  /**
+   * Strip comments file-wide, keeping line numbers.
+   *
+   * `codeOf` above is line-based: it drops `//\u2026` and lines whose first
+   * non-space char is `*`. That leaves one-line block comments \u2014 and the
+   * moment the literal scan below learned about single quotes it reported
+   * practice.js's `/** 'free' (\u7ec3\u4e60) or 'daily' \u2026 *\/` as a shipped string.
+   * Prose read as implementation: the fourth time in this repo, so the fix
+   * belongs in the stripper.
+   *
+   * String-aware so a `//` inside a string survives. Regex literals are left
+   * alone (not parsed) \u2014 the self-checks below pin the cases that matter.
+   */
+  function stripComments(text) {
+    let out = "", i = 0, quote = null, line = false, block = false;
+    while (i < text.length) {
+      const c = text[i], d = text[i + 1];
+      if (line) { if (c === "\n") { line = false; out += c; } i++; continue; }
+      if (block) { if (c === "*" && d === "/") { block = false; i += 2; } else { if (c === "\n") out += c; i++; } continue; }
+      if (quote) {
+        if (c === "\\") { out += text.slice(i, i + 2); i += 2; continue; }
+        if (c === quote) quote = null;
+        out += c; i++; continue;
+      }
+      if (c === "/" && d === "/") { line = true; i += 2; continue; }
+      if (c === "/" && d === "*") { block = true; i += 2; continue; }
+      if (c === '"' || c === "'" || c === "`") { quote = c; out += c; i++; continue; }
+      out += c; i++;
+    }
+    return out;
+  }
+  // Self-checks: it must erase comments, keep strings, and not lose line count.
+  assert(stripComments("/** 'a' (\u7ec3\u4e60) */\nlet x = 1;").split("\n").length === 2,
+    "stripComments keeps line numbering");
+  assert(!CJK.test(stripComments("/** 'free' (\u7ec3\u4e60) or 'daily' (\u6bcf\u65e5\u6311\u6218) */")),
+    "stripComments erases a one-line block comment");
+  assert(CJK.test(stripComments("t('\u8bfb\u53d6');")), "stripComments keeps real string literals");
+  assert(stripComments('a = "http://x";').includes("http://x"),
+    "stripComments does not treat // inside a string as a comment");
+
   const offenders = [];
   const jsDir = path.join(root, "src/web/js");
   for (const file of fs.readdirSync(jsDir)) {
     if (!file.endsWith(".js") || file === "i18n.js" || file === "worker-src.js") continue;
-    const text = fs.readFileSync(path.join(jsDir, file), "utf8");
+    const text = stripComments(fs.readFileSync(path.join(jsDir, file), "utf8"));
     text.split("\n").forEach((line, i) => {
       const code = codeOf(line);
       if (!CJK.test(code)) return;
       // string literals only — a Chinese identifier is impossible here
-      const lits = code.match(/"[^"\n]*[\u4e00-\u9fa5][^"\n]*"/g) || [];
-      for (const lit of lits) offenders.push(file + ":" + (i + 1) + " " + lit);
+      for (const lit of scanLine(code)) offenders.push(file + ":" + (i + 1) + " " + lit);
     });
   }
   assert(offenders.length === 0,

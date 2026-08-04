@@ -1810,6 +1810,177 @@ async function enableSwap2Pvp(page) {
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
+// ---- Test AG: 统计表的数字表头压在它标注的那列数字上 ----
+// 改之前每个数字表头都坐在它所标注的数字**左边 18–32px**（中文 +23/+23/+23/+29.9，
+// 英文 +20.6/+18.1/+19.1/+31.7）。样式表里其实早就写着修正
+// —— `.stats-table td.num, .stats-table th.num { text-align: right }` ——
+// 但表头是 i18n 里一整条 HTML 串，没人给它 class="num"，所以 `th.num` 运行时命中 0 个。
+//
+// 而右对齐之后仍差一个齐整的 8px，根因更深：`.modal td { padding: 8px 0 }` 与
+// `.stats-table th, .stats-table td { padding: 4px 8px }` **特异度相同**（0,1,1），
+// 前者写在后面就赢了。那条规则是给帮助弹层的「按键 → 说明」表写的，统计表只是碰巧
+// 也住在弹层里，于是连 `.modal td:first-child { width: 42% }`（按键列的宽）、强调色、
+// 等宽 12px 一起继承了过来。已按来源收窄成 `.keys-table`。
+//
+// 这条闸门断言的是最终那件事：**表头文字的右缘与该列数字的右缘重合**，中英都要。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await page.evaluate(() => {
+    const S = window.GobanStats;
+    let t = 1700000000000;
+    for (const d of ["easy", "normal", "hard", "extreme"]) {
+      for (let i = 0; i < 5; i++) {
+        S.record({ mode: "ai", difficulty: d, humanColor: "b",
+          result: i % 3 === 0 ? "b" : (i % 3 === 1 ? "w" : "draw"),
+          moves: 40, durationMs: 123456, endedAt: t++ });
+      }
+    }
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(300);
+  for (const lang of ["zh", "en"]) {
+    if (lang === "en") {
+      await openPanel(page);
+      await page.evaluate(() => {
+        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
+        if (b) b.click();
+      });
+      await page.waitForTimeout(450);
+    }
+    await page.evaluate(() => { const x = document.getElementById("open-stats"); if (x) x.click(); });
+    await page.waitForTimeout(500);
+    const r = await page.evaluate(() => {
+      const tb = document.querySelector(".stats-table");
+      if (!tb) return { err: "没有 .stats-table" };
+      const rows = [...tb.querySelectorAll("tr")];
+      const head = rows[0] ? [...rows[0].querySelectorAll("th")] : [];
+      const dataRow = rows.find((x) => x.querySelector("td"));
+      const cells = dataRow ? [...dataRow.querySelectorAll("td")] : [];
+      // 量「墨迹」而不是单元格盒子:盒子相同而内边距不同,正是上一版看不见的那 8px
+      const ink = (el) => { const rg = document.createRange(); rg.selectNodeContents(el); return rg.getBoundingClientRect(); };
+      const cols = head.map((h, i) => {
+        const c = cells[i];
+        if (!c) return { i, 表头: h.textContent.trim(), 缺: true };
+        return {
+          i, 表头: h.textContent.trim(), 值: c.textContent.trim(),
+          数字列: h.classList.contains("num"),
+          右缘差: Math.round((ink(c).right - ink(h).right) * 10) / 10,
+          左缘差: Math.round((ink(c).left - ink(h).left) * 10) / 10,
+        };
+      });
+      return {
+        cols,
+        表头行高: Math.round(rows[0].getBoundingClientRect().height * 10) / 10,
+        数据行高: Math.round(dataRow.getBoundingClientRect().height * 10) / 10,
+        th内边距: head[0] ? getComputedStyle(head[0]).padding : null,
+        td内边距: cells[0] ? getComputedStyle(cells[0]).padding : null,
+      };
+    });
+    seen[lang] = r;
+    if (r.err) { bad.push(lang + ": " + r.err); continue; }
+    const nums = r.cols.filter((c) => c.数字列);
+    if (nums.length < 3) bad.push(lang + ": 只找到 " + nums.length + " 个数字列表头（class=num 掉了？）");
+    for (const c of nums) {
+      if (c.缺) { bad.push(lang + ": 第 " + c.i + " 列没有对应的数据格"); continue; }
+      if (Math.abs(c.右缘差) > 1) {
+        bad.push(lang + ": 表头「" + c.表头 + "」的右缘与它标注的「" + c.值 + "」差 " + c.右缘差 + "px");
+      }
+    }
+    // 内边距一致 —— 上一版 th 是 4px 8px、td 被 .modal td 改成 8px 0
+    if (r.th内边距 !== r.td内边距) {
+      bad.push(lang + ": th/td 内边距不一致 " + r.th内边距 + " vs " + r.td内边距);
+    }
+    if (Math.abs(r.表头行高 - r.数据行高) > 2) {
+      bad.push(lang + ": 表头行 " + r.表头行高 + " 与数据行 " + r.数据行高 + " 高度差太大");
+    }
+    await page.evaluate(() => {
+      const c = [...document.querySelectorAll(".modal-bg button")].find((x) => /close|关闭/i.test(x.textContent) || x.id === "stats-close");
+      if (c) c.click();
+    });
+    await page.waitForTimeout(300);
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AG 统计表的数字表头压在它标注的那列数字上", bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
+// ---- Test AH: 存档行的两个按钮跟随语言 ----
+// 「读取」「删除」原本是 innerHTML 里的中文字面量，英文界面下原样是中文（实测
+// lang=en、存档名正确地是 "Game 08-04 00:34"，按钮却写着「读取」「删除」）。
+// 单测那道「不许有中文字面量」的闸门只认双引号，这两行是单引号，于是没响。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await page.evaluate(() => {
+    const cv = document.getElementById("board");
+    const rect = cv.getBoundingClientRect();
+    const g = window.GobanDraw.pitchFor(cv.width);
+    const s = rect.width / cv.width;
+    cv.dispatchEvent(new MouseEvent("click", {
+      clientX: rect.left + (g.pad + 7 * g.step) * s,
+      clientY: rect.top + (g.pad + 7 * g.step) * s, bubbles: true }));
+  });
+  await page.waitForTimeout(250);
+  for (const lang of ["zh", "en"]) {
+    if (lang === "en") {
+      await openPanel(page);
+      await page.evaluate(() => {
+        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
+        if (b) b.click();
+      });
+      await page.waitForTimeout(450);
+    }
+    await page.evaluate(() => { const x = document.getElementById("sgf-slots"); if (x) x.click(); });
+    await page.waitForTimeout(350);
+    if (lang === "zh") {
+      await page.evaluate(() => { const x = document.getElementById("slot-save-current"); if (x) x.click(); });
+      await page.waitForTimeout(450);
+      await dismissConfirm(page);
+      await page.waitForTimeout(250);
+    }
+    const r = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll(".slot-row")];
+      const cjk = [];
+      const modal = document.getElementById("slots-modal");
+      if (modal) {
+        const walk = document.createTreeWalker(modal, NodeFilter.SHOW_TEXT);
+        let n;
+        while ((n = walk.nextNode())) {
+          const txt = (n.nodeValue || "").trim();
+          if (!txt || !/[\u4e00-\u9fa5]/.test(txt)) continue;
+          const el = n.parentElement;
+          if (el && el.getBoundingClientRect().width > 0) cjk.push(txt.slice(0, 16));
+        }
+      }
+      return {
+        行数: rows.length,
+        按钮: rows.map((x) => [...x.querySelectorAll(".slot-ops button")].map((y) => y.textContent.trim())),
+        弹层里可见的中文: [...new Set(cjk)],
+      };
+    });
+    seen[lang] = r;
+    if (!r.行数) { bad.push(lang + ": 一条存档都没量到"); continue; }
+    const flat = r.按钮.flat();
+    if (flat.length !== 2 * r.行数) bad.push(lang + ": 每行应有 2 个按钮，实得 " + JSON.stringify(r.按钮));
+    for (const label of flat) {
+      const zhLabel = /[\u4e00-\u9fa5]/.test(label);
+      if (lang === "en" && zhLabel) bad.push("英文界面下按钮仍是中文：" + label);
+      if (lang === "zh" && !zhLabel) bad.push("中文界面下按钮不是中文：" + label);
+    }
+    if (lang === "en" && r.弹层里可见的中文.length) {
+      bad.push("英文存档弹层里还有可见中文：" + JSON.stringify(r.弹层里可见的中文));
+    }
+    await page.evaluate(() => { const x = document.getElementById("slots-close"); if (x) x.click(); });
+    await page.waitForTimeout(250);
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AH 存档行的两个按钮跟随语言", bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");

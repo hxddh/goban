@@ -1036,9 +1036,16 @@
       to { opacity: 1; transform: none; }
     }
     .modal h3 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
-    .modal table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .modal td { padding: 8px 0; border-bottom: 1px solid var(--card-border); line-height: var(--lh-text); }
-    .modal td:first-child {
+    /* 「按键 → 说明」那张表,只此一张。
+       原本写作 `.modal table` / `.modal td` —— 一张具体的表,却按「弹层里的表」来
+       选。而统计表也住在弹层里,于是整套被它接管了:`.modal td:first-child` 把难度
+       列钉成 42%(142/338px,那是给按键列定的宽)、染成 --accent-text、换成等宽
+       12px;`.modal td { padding: 8px 0 }` 又盖掉了 .stats-table 自己的 4px 8px ——
+       两条特异度相同(0,1,1),写在后面的赢,于是表头行 26px、数据行 37.8px,数字
+       表头比它标注的数字左 8px。按来源收窄,而不是给统计表加权重。 */
+    .keys-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .keys-table td { padding: 8px 0; border-bottom: 1px solid var(--card-border); line-height: var(--lh-text); }
+    .keys-table td:first-child {
       /* Stays a flat 42%. Measured: the keys use only 7–96px of the 142px, and
          five description cells wrap — but every alternative tried was worse.
          width:1% shrank the column to 45px and made 9 of 13 KEYS wrap
