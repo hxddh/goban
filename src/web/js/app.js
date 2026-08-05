@@ -328,7 +328,21 @@
     analysisVerdict = null;
     // Never kick off analysis while the live AI is thinking — aiMoveAsync
     // rebuilds a busy worker and would resolve the game move as null.
-    if (!analysisOn || isLive() || viewIndex < 1 || aiThinking) return;
+    if (!analysisOn || viewIndex < 1 || aiThinking) return;
+    // 只在**棋还在下**的时候封住头部那一手 —— 那时候评它等于给提示。
+    //
+    // 此前的判据是光秃秃的 isLive()，它不区分「棋还在下」和「棋已经下完」，于是
+    // 终局之后、以及导入的纯复盘里，最后一手也被一并封了口 —— 而那一手往往正是
+    // 最该有评语的：要么是制胜一手，要么是葬送全局的那一步。
+    //
+    // 更糟的是两处视图会自相矛盾：review.js 的循环是 `for (i = 1; i <= N; i++)`，
+    // **包含**最后一手，所以整局复盘照列不误。实测走过一遍：面板列出「第 9 手
+    // 黑错失胜着」，面板自己写着「点下方失着可跳转」，点下去跳到 9/9 —— 然后这一栏
+    // 一片空白。同一个功能，两套说法。
+    //
+    // importPaused 是导入 SGF 后的纯复盘态（落第一子即清除）：那不是在对局，而且
+    // 整局复盘早就把同样的评语公示了，谈不上剧透。
+    if (isLive() && result === "play" && !importPaused) return;
     const i = viewIndex;
     if (analysisCache.has(i)) {
       const c = analysisCache.get(i);
@@ -1561,7 +1575,9 @@
     document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
     const verdictEl = document.getElementById("coach-verdict");
     if (verdictEl) {
-      const show = analysisOn && !live && analysisVerdict;
+      // 与 scheduleAnalysis 的判据必须同一套 —— 否则会算了却不显示，或显示一条
+      // 陈旧的。封口只封「棋还在下、且停在头部」。
+      const show = analysisOn && analysisVerdict && !(live && result === "play" && !importPaused);
       verdictEl.hidden = !show;
       if (show) {
         const who = t((viewIndex - 1) % 2 === 0 ? "side.black" : "side.white");
