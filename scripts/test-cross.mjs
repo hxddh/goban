@@ -2468,6 +2468,125 @@ async function enableSwap2Pvp(page) {
   report("AL 按钮网格的列数与按钮数相容（末行不留孤儿）", bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
+// ---- Test AM: 复盘逐手评语必须覆盖到最后一手，且不能和整局复盘打架 ----
+// 此前 scheduleAnalysis() 与渲染都卡在光秃秃的 isLive()（viewIndex === history.length）。
+// 对局进行中封住头部是对的 —— 评它等于给提示。但那条判据不区分「棋还在下」和「棋已经
+// 下完」，于是终局之后、以及导入的纯复盘里，最后一手也被一并封了口。
+//
+// 而 review.js 的循环是 `for (i = 1; i <= N; i++)`，**包含**最后一手。走过一遍：整局
+// 复盘列出「第 9 手 黑错失胜着」，面板自己写着「点下方失着可跳转」，点下去跳到 9/9 ——
+// 逐手评语一片空白。同一个功能，两套说法，而那一手往往正是最该有评语的。
+//
+// 这条闸门守三件事，缺一不可：
+//   ① 对局**进行中**停在头部，仍然不许有评语（这是原判据在保护的东西）；
+//   ② 终局之后，最后一手要有评语；
+//   ③ 整局复盘列为失着的**每一手**，逐手评语都得说得出话 —— 两处不许打架。
+{
+  const bad = [];
+  const seen = {};
+  const P = (r, c) => String.fromCharCode(97 + c) + String.fromCharCode(97 + r);
+  const sgfOf = (moves) => "(;GM[1]FF[4]SZ[15]" +
+    moves.map(([r, c], i) => ";" + (i % 2 === 0 ? "B" : "W") + "[" + P(r, c) + "]").join("") + ")";
+  const turnOnAnalysis = async (page) => {
+    await openPanel(page);
+    await page.evaluate(() => {
+      const x = document.getElementById("opt-analysis");
+      if (x && x.getAttribute("aria-pressed") !== "true") x.click();
+    });
+    await page.waitForTimeout(250);
+  };
+  const gotoMove = async (page, n) => {
+    await page.evaluate((k) => {
+      const bs = [...document.querySelectorAll("#move-list button")];
+      if (bs[k - 1]) bs[k - 1].click();
+    }, n);
+    await page.waitForTimeout(700);
+  };
+  const verdictNow = (page) => page.evaluate(() => {
+    const e = document.getElementById("coach-verdict");
+    return e && !e.hidden ? e.textContent.trim() : null;
+  });
+
+  // ① 对局进行中、停在头部 —— 必须没有评语
+  {
+    const page = await newPage();
+    const click = clicker(page);
+    await turnOnAnalysis(page);
+    await page.evaluate(() => { const x = document.querySelector('button[data-mode="pvp"]'); if (x) x.click(); });
+    await page.waitForTimeout(200);
+    await dismissConfirm(page);
+    for (const [r, c] of [[7, 3], [0, 0], [7, 4], [0, 2], [7, 5]]) { await click(r, c); await page.waitForTimeout(150); }
+    await page.waitForTimeout(500);
+    const n = await page.evaluate(() => document.querySelectorAll("#move-list button").length);
+    await gotoMove(page, n - 1);
+    await gotoMove(page, n);
+    const v = await verdictNow(page);
+    seen["①对局进行中头部"] = v;
+    if (v !== null) bad.push("对局还在进行中，头部那一手却给了评语「" + v + "」—— 这是提示泄露");
+    await page.close();
+  }
+  // ② 终局之后的最后一手（制胜一手）
+  {
+    const page = await newPage();
+    const click = clicker(page);
+    await turnOnAnalysis(page);
+    await page.evaluate(() => { const x = document.querySelector('button[data-mode="pvp"]'); if (x) x.click(); });
+    await page.waitForTimeout(200);
+    await dismissConfirm(page);
+    for (const [r, c] of [[7, 3], [0, 0], [7, 4], [0, 2], [7, 5], [0, 4], [7, 6], [0, 6], [7, 7]]) {
+      await click(r, c); await page.waitForTimeout(150);
+    }
+    await page.waitForTimeout(700);
+    const over = await page.evaluate(() => document.getElementById("status").textContent.trim());
+    const n = await page.evaluate(() => document.querySelectorAll("#move-list button").length);
+    await gotoMove(page, n - 1);
+    await gotoMove(page, n);
+    const v = await verdictNow(page);
+    seen["②终局后最后一手"] = { 状态: over, 手数: n, 评语: v };
+    if (n !== 9) bad.push("这局应当 9 手，实得 " + n);
+    if (!v) bad.push("终局之后最后一手没有评语");
+    else if (!/制胜|winning/i.test(v)) bad.push("终局那一手是连五取胜，评语却是「" + v + "」");
+    await page.close();
+  }
+  // ③ 整局复盘列为失着的每一手，逐手评语都得说得出话
+  {
+    const page = await newPage();
+    await turnOnAnalysis(page);
+    // 第 9 手黑走 (14,14)，放着 (7,7) 的连五不下 —— 真值：错失胜着
+    const moves = [[7, 3], [7, 2], [7, 4], [0, 0], [7, 5], [0, 2], [7, 6], [0, 4], [14, 14]];
+    await page.evaluate(async (s) => { await navigator.clipboard.writeText(s); }, sgfOf(moves));
+    await page.evaluate(() => { const x = document.getElementById("sgf-paste"); if (x) x.click(); });
+    await page.waitForTimeout(700);
+    await dismissConfirm(page);
+    await page.waitForTimeout(600);
+    await page.evaluate(() => { const x = document.getElementById("sgf-review"); if (x && !x.disabled) x.click(); });
+    await page.waitForTimeout(900);
+    const rows = await page.evaluate(() => [...document.querySelectorAll(".review-blunder-row")]
+      .map((x) => x.textContent.replace(/\s+/g, " ").trim()));
+    await page.evaluate(() => { const c = [...document.querySelectorAll("#review-modal button")].find((x) => /close|关闭/i.test(x.textContent)); if (c) c.click(); });
+    await page.waitForTimeout(350);
+    const nums = rows.map((t) => { const m = t.match(/(\d+)/); return m ? Number(m[1]) : null; }).filter(Boolean);
+    const said = {};
+    for (const n of nums) {
+      await gotoMove(page, n === 1 ? 2 : n - 1);   // 先离开，逼它重算
+      await gotoMove(page, n);
+      said[n] = await verdictNow(page);
+    }
+    seen["③整局复盘列出的失着"] = { 行: rows, 逐手评语: said };
+    if (!nums.length) bad.push("整局复盘一条失着都没列出来，这条闸门等于没测");
+    if (!nums.includes(9)) bad.push("整局复盘没把第 9 手列为失着（构造的真值就是错失胜着）");
+    for (const n of nums) {
+      if (!said[n]) bad.push("整局复盘把第 " + n + " 手列为失着，逐手评语却一言不发 —— 两处打架");
+    }
+    if (said[9] && !/错失|missed the win/i.test(said[9])) {
+      bad.push("第 9 手真值是错失胜着，评语却是「" + said[9] + "」");
+    }
+    if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+    await page.close();
+  }
+  report("AM 复盘逐手评语覆盖到最后一手，且与整局复盘不打架", bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");
