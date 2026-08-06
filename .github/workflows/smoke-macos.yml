@@ -29,18 +29,17 @@ jobs:
   smoke:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc
       - name: install Native SDK CLI
         run: |
           npm install -g @native-sdk/cli
           native --version
           echo "SDK_PATH=$(npm root -g)/@native-sdk/cli" >> "$GITHUB_ENV"
+      # version 省略 —— setup-zig 读 build.zig.zon 的 minimum_zig_version
       - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
       - name: sync frontend dist
         run: |
           rm -rf frontend/dist && mkdir -p frontend/dist/js

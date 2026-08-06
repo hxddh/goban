@@ -8,6 +8,28 @@
 </head>
 <body>
 
+  <!-- 图标定义,一处。v1.50 之前这七个按钮借的是标点:« ‹ ● › » ☰ ?
+       —— 逐像素量过,同写 font-size:16px 而画出来的墨迹高 7 / 7 / 12.33 / 7 /
+       7.17 / 11.67 / 12,中间那颗圆点比两侧箭头大 76%,光学中心散在 1.84px 里。
+       形状由机器上碰巧装了哪套字体决定(macOS SF / Windows Segoe / 回归跑的
+       Chromium 又是第三套),所以那种参差连闸门都测不到 —— 三个平台画的根本
+       不是同一组形状。
+       现在几何是我们自己的:统一 24×24 viewBox、stroke 2、圆头圆角、
+       currentColor 跟着按钮的文字色走(四套主题不必各写一份)。
+       <use> 引用而不是七份内联副本 —— 一个图标一处定义,改一次全改。 -->
+  <svg class="icon-defs" aria-hidden="true" focusable="false"><defs>
+    <symbol id="i-first" viewBox="0 0 24 24"><path d="M18 6 11 12l7 6M7 6v12"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15 6 9 12l6 6"/></symbol>
+    <!-- 「回到最新」不是一颗项目符号:靶心才读得出「当前这一手在这里」 -->
+    <symbol id="i-live" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-last" viewBox="0 0 24 24"><path d="m6 6 7 6-7 6M17 6v12"/></symbol>
+    <!-- ☰ 是「菜单」,这个按钮开的是右侧栏 —— 画成带右栏的窗口,说的是实话 -->
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="3.5" width="18" height="17" rx="2.5"/><path d="M14.5 3.5v17"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.4 9.3a2.7 2.7 0 1 1 3.4 2.9c-.7.2-1 .8-1 1.5v.4"/><circle cx="11.8" cy="17.1" r="1.05" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M18.5 14.4a1.4 1.4 0 0 0 .28 1.54l.05.05a1.65 1.65 0 1 1-2.34 2.34l-.05-.05a1.4 1.4 0 0 0-1.54-.28 1.4 1.4 0 0 0-.85 1.28v.14a1.65 1.65 0 0 1-3.3 0v-.07a1.4 1.4 0 0 0-.92-1.28 1.4 1.4 0 0 0-1.54.28l-.05.05a1.65 1.65 0 1 1-2.34-2.34l.05-.05a1.4 1.4 0 0 0 .28-1.54 1.4 1.4 0 0 0-1.28-.85H4.8a1.65 1.65 0 0 1 0-3.3h.07a1.4 1.4 0 0 0 1.28-.92 1.4 1.4 0 0 0-.28-1.54l-.05-.05a1.65 1.65 0 1 1 2.34-2.34l.05.05a1.4 1.4 0 0 0 1.54.28h.07a1.4 1.4 0 0 0 .85-1.28V4.8a1.65 1.65 0 0 1 3.3 0v.07a1.4 1.4 0 0 0 .85 1.28h.07a1.4 1.4 0 0 0 1.54-.28l.05-.05a1.65 1.65 0 1 1 2.34 2.34l-.05.05a1.4 1.4 0 0 0-.28 1.54v.07a1.4 1.4 0 0 0 1.28.85h.14a1.65 1.65 0 0 1 0 3.3h-.07a1.4 1.4 0 0 0-1.28.85z"/></symbol>
+  </defs></svg>
+
   <div id="app">
     <header class="chrome">
       <span class="brand" data-i18n="app.name">五子棋</span>
@@ -19,8 +41,9 @@
         <button type="button" class="tool-btn" id="undo" disabled title="悔棋 (Z)" data-i18n="btn.undo" data-i18n-title="btn.undo.title">悔棋</button>
         <button type="button" class="tool-btn" id="btn-hint" title="提示一手 (H)" data-i18n="btn.hint" data-i18n-title="btn.hint.title">提示</button>
         <button type="button" class="tool-btn primary" id="btn-new" title="新局 (N)" data-i18n="btn.new" data-i18n-title="btn.new.title">新局</button>
-        <button type="button" class="icon-btn" id="help-btn" title="快捷键 (?)" data-i18n-title="btn.help.title">?</button>
-        <button type="button" class="icon-btn" id="toggle-panel" title="侧栏 ([ ])" aria-label="侧栏" data-i18n-title="btn.panel.title" data-i18n-aria="aria.panel">☰</button>
+        <button type="button" class="icon-btn" id="help-btn" title="快捷键 (?)" aria-label="快捷键" data-i18n-title="btn.help.title" data-i18n-aria="aria.help"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-help"/></svg></button>
+        <button type="button" class="icon-btn" id="settings-btn" title="设置" aria-label="设置" data-i18n-title="btn.settings.title" data-i18n-aria="aria.settings"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-settings"/></svg></button>
+        <button type="button" class="icon-btn" id="toggle-panel" title="侧栏 ([ ])" aria-label="侧栏" data-i18n-title="btn.panel.title" data-i18n-aria="aria.panel"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-panel"/></svg></button>
       </div>
     </header>
 
@@ -122,45 +145,6 @@
           </div>
         </section>
 
-        <section class="side-section">
-          <h2 class="side-h" data-i18n="sec.look">外观</h2>
-          <div class="setting-list">
-            <div class="setting-row">
-              <span class="setting-k" data-i18n="set.theme">主题</span>
-              <div class="pill theme-row" id="theme-seg" role="group" aria-label="主题" data-i18n-aria="aria.theme">
-                <button type="button" data-theme="wood" class="active" title="木盘" data-i18n="theme.wood" data-i18n-title="theme.wood.title">木</button>
-                <button type="button" data-theme="night" title="夜盘" data-i18n="theme.night" data-i18n-title="theme.night.title">夜</button>
-                <button type="button" data-theme="day" title="日间" data-i18n="theme.day" data-i18n-title="theme.day.title">日</button>
-                <button type="button" data-theme="notebook" title="练习本" data-i18n="theme.notebook" data-i18n-title="theme.notebook.title">本</button>
-              </div>
-            </div>
-            <div class="setting-row">
-              <span class="setting-k" data-i18n="set.coords">坐标</span>
-              <button type="button" class="switch" id="opt-coords" aria-pressed="false" title="坐标标注（A–O / 15–1）" data-i18n-title="set.coords.title">
-                <span class="switch-knob"></span>
-              </button>
-            </div>
-            <div class="setting-row">
-              <span class="setting-k" data-i18n="set.analysis">复盘分析</span>
-              <button type="button" class="switch" id="opt-analysis" aria-pressed="false" title="复盘时标注手数优劣与更优点" data-i18n-title="set.analysis.title">
-                <span class="switch-knob"></span>
-              </button>
-            </div>
-            <div class="setting-row">
-              <span class="setting-k" data-i18n="set.lang">语言</span>
-              <div class="pill" id="lang-seg" role="group" aria-label="界面语言" data-i18n-aria="aria.lang">
-                <button type="button" data-lang="zh" class="active" data-i18n-raw>中文</button>
-                <button type="button" data-lang="en" data-i18n-raw>EN</button>
-              </div>
-            </div>
-            <div class="setting-row">
-              <span class="setting-k" data-i18n="set.sound">音效</span>
-              <button type="button" class="switch" id="opt-sound" aria-pressed="true" title="落子音效" data-i18n-title="set.sound.title">
-                <span class="switch-knob"></span>
-              </button>
-            </div>
-          </div>
-        </section>
 
         <section class="side-section grow-sec">
           <div class="side-h-row">
@@ -168,12 +152,16 @@
             <span class="side-h-meta num" id="replay-pos">0 / 0</span>
           </div>
           <div class="move-list" id="move-list" aria-label="手数列表" data-i18n-aria="aria.moveList"></div>
+          <!-- 一手未落时手数列表是空的。v1.51 之前这块地方被外观设置占着,
+               搬走之后不给它一句话就是一片死白 —— 而这句话正好把「点它可跳转」
+               这件事说出来(此前只有整局复盘面板里写着)。 -->
+          <p class="move-empty" id="move-empty" data-i18n="record.empty">落子后这里逐手列出，点任意一手可跳转</p>
           <div class="replay-bar" id="replay-seg">
-            <button type="button" id="rep-start" title="开局 (Home)" data-i18n-title="rep.start.title">«</button>
-            <button type="button" id="rep-prev" title="上一手 (←)" data-i18n-title="rep.prev.title">‹</button>
-            <button type="button" id="rep-live" disabled title="回到最新" data-i18n-title="rep.live.title">●</button>
-            <button type="button" id="rep-next" title="下一手 (→)" data-i18n-title="rep.next.title">›</button>
-            <button type="button" id="rep-end" title="终局 (End)" data-i18n-title="rep.end.title">»</button>
+            <button type="button" id="rep-start" title="开局 (Home)" data-i18n-title="rep.start.title" aria-label="开局" data-i18n-aria="aria.repStart"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-first"/></svg></button>
+            <button type="button" id="rep-prev" title="上一手 (←)" data-i18n-title="rep.prev.title" aria-label="上一手" data-i18n-aria="aria.repPrev"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-prev"/></svg></button>
+            <button type="button" id="rep-live" disabled title="回到最新" data-i18n-title="rep.live.title" aria-label="回到最新" data-i18n-aria="aria.repLive"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-live"/></svg></button>
+            <button type="button" id="rep-next" title="下一手 (→)" data-i18n-title="rep.next.title" aria-label="下一手" data-i18n-aria="aria.repNext"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-next"/></svg></button>
+            <button type="button" id="rep-end" title="终局 (End)" data-i18n-title="rep.end.title" aria-label="终局" data-i18n-aria="aria.repEnd"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-last"/></svg></button>
           </div>
           <div class="coach-verdict" id="coach-verdict" hidden aria-live="polite"></div>
           <div class="link-row">
@@ -208,6 +196,56 @@
         <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end">
           <button type="button" class="tool-btn" id="confirm-cancel" data-i18n="dlg.cancel">取消</button>
           <button type="button" class="tool-btn primary" id="confirm-ok" data-i18n="dlg.ok">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- v1.51 —— 外观那五项(主题/坐标/复盘分析/语言/音效)从常驻侧栏搬进这里。
+         量过:侧栏可见内容 837.9px,设置占 475.6 = 56.8%,其中外观一段 259.8 = 31.0%;
+         而每局都用的存档/复盘/练习/每日/统计只有 69.2 = 8.3%,挤在最下面一行文字链里。
+         装一次就不动的开关不该常驻占着三成宽栏。对局那四项(模式/难度/执子/开局)留在
+         侧栏 —— 它们是开新局时要挑的,不是偏好。 -->
+    <div class="modal-bg" id="settings-modal" role="dialog" aria-modal="true" aria-label="设置" data-i18n-aria="settings.title">
+      <div class="modal">
+        <h3 data-i18n="settings.title">设置</h3>
+        <div class="setting-list">
+            <div class="setting-row">
+              <span class="setting-k" data-i18n="set.theme">主题</span>
+              <div class="pill theme-row" id="theme-seg" role="group" aria-label="主题" data-i18n-aria="aria.theme">
+                <button type="button" data-theme="wood" class="active" title="木盘" data-i18n="theme.wood" data-i18n-title="theme.wood.title">木</button>
+                <button type="button" data-theme="night" title="夜盘" data-i18n="theme.night" data-i18n-title="theme.night.title">夜</button>
+                <button type="button" data-theme="day" title="日间" data-i18n="theme.day" data-i18n-title="theme.day.title">日</button>
+                <button type="button" data-theme="notebook" title="练习本" data-i18n="theme.notebook" data-i18n-title="theme.notebook.title">本</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <span class="setting-k" data-i18n="set.coords">坐标</span>
+              <button type="button" class="switch" id="opt-coords" aria-pressed="false" title="坐标标注（A–O / 15–1）" data-i18n-title="set.coords.title">
+                <span class="switch-knob"></span>
+              </button>
+            </div>
+            <div class="setting-row">
+              <span class="setting-k" data-i18n="set.analysis">复盘分析</span>
+              <button type="button" class="switch" id="opt-analysis" aria-pressed="false" title="复盘时标注手数优劣与更优点" data-i18n-title="set.analysis.title">
+                <span class="switch-knob"></span>
+              </button>
+            </div>
+            <div class="setting-row">
+              <span class="setting-k" data-i18n="set.lang">语言</span>
+              <div class="pill" id="lang-seg" role="group" aria-label="界面语言" data-i18n-aria="aria.lang">
+                <button type="button" data-lang="zh" class="active" data-i18n-raw>中文</button>
+                <button type="button" data-lang="en" data-i18n-raw>EN</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <span class="setting-k" data-i18n="set.sound">音效</span>
+              <button type="button" class="switch" id="opt-sound" aria-pressed="true" title="落子音效" data-i18n-title="set.sound.title">
+                <span class="switch-knob"></span>
+              </button>
+            </div>
+        </div>
+        <div class="close-row">
+          <button type="button" class="tool-btn primary" id="settings-close" data-i18n="dlg.gotIt">知道了</button>
         </div>
       </div>
     </div>

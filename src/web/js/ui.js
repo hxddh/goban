@@ -88,6 +88,9 @@
           (i + 1) + ". " + lab + "</button>";
       }
       el.innerHTML = html;
+      const empty = document.getElementById("move-empty");
+      // 列表空时 .move-list 自己 display:none(:empty),这句提示顶上它的位置
+      if (empty) empty.hidden = history.length > 0;
     }
     const btns = el.children;
     for (let i = 0; i < btns.length; i++) {

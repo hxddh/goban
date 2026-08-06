@@ -31,7 +31,19 @@
       "btn.new.title": "新局 (N)",
       "btn.help.title": "快捷键 (?)",
       "btn.panel.title": "侧栏 (Tab)",
+      "btn.settings.title": "设置",
+      "settings.title": "设置",
+      /* v1.51：图标按钮改成 SVG 之后按钮里没有文本了，无障碍名只能来自 aria-label。
+         此前七个图标按钮里有六个报出来的名字就是那个标点本身
+         （«、‹、●、›、»、?），只有侧栏那个带了 aria-label。 */
       "aria.panel": "侧栏",
+      "aria.settings": "设置",
+      "aria.help": "快捷键",
+      "aria.repStart": "开局",
+      "aria.repPrev": "上一手",
+      "aria.repLive": "回到最新",
+      "aria.repNext": "下一手",
+      "aria.repEnd": "终局",
       "aria.board": "棋盘",
       "aria.side": "对局面板",
       "aria.reviewCurve": "评分曲线，逐手优劣；具体失着见下方列表",
@@ -78,7 +90,6 @@
       "aria.opening": "开局规则",
 
       // —— sidebar: appearance ——
-      "sec.look": "外观",
       "set.theme": "主题",
       "theme.wood": "木",
       "theme.wood.title": "木盘",
@@ -101,6 +112,7 @@
       // —— sidebar: record ——
       "sec.record": "棋谱",
       "aria.moveList": "手数列表",
+      "record.empty": "落子后这里逐手列出，点任意一手可跳转",
       "rep.start.title": "开局 (Home)",
       "rep.prev.title": "上一手 (←)",
       "rep.live.title": "回到最新",
@@ -458,7 +470,16 @@
       "btn.new.title": "New game (N)",
       "btn.help.title": "Shortcuts (?)",
       "btn.panel.title": "Sidebar (Tab)",
+      "btn.settings.title": "Settings",
+      "settings.title": "Settings",
       "aria.panel": "Sidebar",
+      "aria.settings": "Settings",
+      "aria.help": "Shortcuts",
+      "aria.repStart": "Game start",
+      "aria.repPrev": "Previous move",
+      "aria.repLive": "Back to latest",
+      "aria.repNext": "Next move",
+      "aria.repEnd": "Game end",
       "aria.board": "Board",
       "aria.side": "Game panel",
       "aria.reviewCurve": "Evaluation curve over the game; the blunders are listed below",
@@ -502,7 +523,6 @@
       "aria.color": "Play as",
       "aria.opening": "Opening rule",
 
-      "sec.look": "LOOK",
       "set.theme": "Theme",
       "theme.wood": "Wood",
       "theme.wood.title": "Wooden board",
@@ -524,6 +544,7 @@
 
       "sec.record": "RECORD",
       "aria.moveList": "Move list",
+      "record.empty": "Moves appear here — click any to jump.",
       "rep.start.title": "Start (Home)",
       "rep.prev.title": "Previous (←)",
       "rep.live.title": "Back to live",
