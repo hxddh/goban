@@ -90,6 +90,28 @@
          设置行实际宽 243px,标签列因此得 243-12-161 = 70px —— 中文最宽标签 52、
          英文 64,都放得下。宽度是 token,所以左右两条边缘与语言无关。 */
       --ctl-w: 161px;
+      /* v1.50 —— --ctl-w 定死了设置行的右边缘,行高却从来没人定过。实测九行里控件
+         有三种高度:分段控件 38.2、主题色板 34、开关 28;行距跟着分成两套
+         46.2/46.1/46.2 … 44/44/44 … 46.2。根因只有一处:.pill 比行的自然高度 36
+         高出 2.2px,其余本来就在 36 以内。统一到 32 之后九行控件同高、行距一律 44,
+         整列还矮了 11px —— 只会变矮,所以「设置区从不用滚变成要滚」不可能发生。
+         32 不是新数:顶栏的 .tool-btn / .icon-btn 一直就是 32。 */
+      --ctl-h: 32px;
+      /* v1.50 —— 字号此前是 44 条字面量、零个 token(颜色早就全走 var(--text)/
+         var(--muted),圆角有 --radius-*,只有字号是散的)。用量:13px×17、12px×16、
+         11px×7、16px×3 —— 13 和 12 差 1px,那不是层级,是 33 次各自为政。
+         收成四档,按角色分,不是按大小分:
+           --fs-micro  只给「字距拉开的小标签与胶囊」:章节标题、vs 标记、badge、
+                       meta-chip。它们靠 letter-spacing 和大写立住,不靠字号。
+           --fs-ui     界面默认:控件、标签、说明。原来那些「只是小」而没有角色的
+                       11px(.hint / .vs-role / .side-foot 那五个按钮)并到这里 ——
+                       侧栏原本上下相邻两行同为 .text-link 却一个 12 一个 11。
+           --fs-body   正文与强调:统计行、练习题面、弹层正文。
+           --fs-icon   图标字形与弹层标题。 */
+      --fs-micro: 11px;
+      --fs-ui: 12px;
+      --fs-body: 13px;
+      --fs-icon: 16px;
       --font-num: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
     }
     [data-theme="night"] {
@@ -185,12 +207,12 @@
     }
     .chrome > * { pointer-events: auto; }
     .brand {
-      font-weight: 600; font-size: 13px; letter-spacing: 0.06em;
+      font-weight: 600; font-size: var(--fs-body); letter-spacing: 0.06em;
       opacity: 0.92;
       flex-shrink: 0;
     }
     .status-pill {
-      font-size: 12px; font-weight: 500; color: var(--text);
+      font-size: var(--fs-ui); font-weight: 500; color: var(--text);
       padding: 4px 12px; border-radius: 999px;
       background: var(--btn-ghost);
       border: 1px solid var(--card-border);
@@ -227,7 +249,7 @@
       color: var(--muted);
     }
     .meta-chip {
-      font-size: 11px; color: var(--muted);
+      font-size: var(--fs-micro); color: var(--muted);
       padding: 4px 8px; border-radius: 999px;
       background: transparent;
     }
@@ -243,14 +265,14 @@
     }
     .icon-btn:active, .tool-btn:active { transform: scale(0.96); }
     .icon-btn {
-      width: 32px; height: 32px; display: grid; place-items: center;
+      width: var(--ctl-h); height: var(--ctl-h); display: grid; place-items: center;
       /* The UA default for <button> is 1px 6px. It is inert here (fixed size +
          place-items), but it still shows up in computed styles as two values
          off the 4px grid that nobody chose. */
       padding: 0;
-      font-size: 16px; line-height: 1;
+      font-size: var(--fs-icon); line-height: 1;
     }
-    .tool-btn { height: 32px; padding: 0 12px; font-size: 12px; font-weight: 500; }
+    .tool-btn { height: var(--ctl-h); padding: 0 12px; font-size: var(--fs-ui); font-weight: 500; }
     .icon-btn:hover, .tool-btn:hover { background: var(--btn-hover); }
     .tool-btn.primary {
       background: linear-gradient(180deg, #f0d2a8, #d4a574);
@@ -351,13 +373,13 @@
     .vs-right { flex-direction: row; text-align: right; }
     .vs-right .vs-name { justify-content: flex-end; }
     .vs-mid {
-      font-size: 11px; letter-spacing: 0.14em; flex-shrink: 0; opacity: 0.55;
+      font-size: var(--fs-micro); letter-spacing: 0.14em; flex-shrink: 0; opacity: 0.55;
     }
     .vs-name {
-      font-size: 13px; font-weight: 600;
+      font-size: var(--fs-body); font-weight: 600;
       display: flex; align-items: center; gap: 4px;
     }
-    .vs-role { font-size: 11px; margin-top: 2px; line-height: 1.3; }
+    .vs-role { font-size: var(--fs-ui); margin-top: 2px; line-height: 1.3; }
     /* Four items and three dot separators used to sit here as seven equal flex
        children of one wrapping row. At the sidebar's real width that row does
        not fit on one line, and flex-wrap breaks wherever it must: measured at
@@ -374,7 +396,7 @@
       margin-top: 12px;
       display: flex; align-items: baseline; flex-wrap: wrap;
       gap: 2px 10px;
-      font-size: 12px; color: var(--muted);
+      font-size: var(--fs-ui); color: var(--muted);
       line-height: var(--lh-ui);
     }
     .meta-stats { display: flex; align-items: baseline; flex-wrap: wrap; }
@@ -399,7 +421,7 @@
     }
     .side-h {
       margin: 0 0 8px;
-      font-size: 11px; font-weight: 600;
+      font-size: var(--fs-micro); font-weight: 600;
       letter-spacing: 0.12em; text-transform: uppercase;
       color: var(--muted);
       opacity: 0.9;
@@ -410,7 +432,7 @@
       gap: 12px;
     }
     .side-h-row .side-h { margin: 0; }
-    .side-h-meta { font-size: 12px; color: var(--muted); }
+    .side-h-meta { font-size: var(--fs-ui); color: var(--muted); }
 
     .setting-list { display: flex; flex-direction: column; gap: 8px; }
     /* 标签一列、控件一列。控件列宽是个 token(`--ctl-w`),不由文案长度决定 ——
@@ -441,7 +463,7 @@
        leaving 思考/难度/执子 rows visible when they should be hidden */
     .setting-row[hidden] { display: none; }
     .setting-k {
-      font-size: 13px; font-weight: 500; color: var(--text);
+      font-size: var(--fs-body); font-weight: 500; color: var(--text);
       flex-shrink: 0;
     }
 
@@ -453,8 +475,11 @@
       grid-auto-flow: column;
       grid-auto-columns: 1fr;
       width: 100%;
+      /* 高度是 token,不是内边距的副产物:分段控件此前比设置行的自然高度高出
+         2.2px,一列九行里只有它这一种是 38.2 —— 见 --ctl-h。 */
+      height: var(--ctl-h);
       padding: 2px;
-      border-radius: 10px;
+      border-radius: var(--radius-md);
       background: var(--btn-ghost);
       border: 1px solid var(--card-border);
       gap: 0;
@@ -464,8 +489,13 @@
       line-height: var(--lh-tight);
       -webkit-appearance: none; appearance: none; border: 0; background: transparent;
       color: var(--muted);
-      font: inherit; font-size: 12px; font-weight: 500;
-      padding: 8px 5px; border-radius: 6px;
+      font: inherit; font-size: var(--fs-ui); font-weight: 500;
+      /* 纵向内边距归零:格子由 .pill 的 --ctl-h 撑满(grid 行拉伸),不再由
+         padding 决定高度;<button> 自己把内容垂直居中。横向 5px 不动 ——
+         --ctl-w 就是按它算出来的。
+         这里不许改成 grid + place-items:center:主题那一行的色板是空的
+         ::after,justify-items:center 会把它压成 0 宽,四块颜色当场消失。 */
+      padding: 0 5px; border-radius: var(--radius-sm);
       cursor: pointer; min-width: 0;
       transition: background var(--dur-ui) var(--ease), color var(--dur-ui) var(--ease), box-shadow var(--dur-ui) var(--ease);
     }
@@ -523,11 +553,13 @@
        名字没有丢:文本仍在按钮里(读屏能读到),title 也还在,只是不再占宽度。 */
     .theme-row button {
       min-width: 0; color: var(--sw-fg);
-      font-size: 0; line-height: 0; padding: 5px;
+      /* 4px 而非 5px:格子内高 26(32 - 2×2 内边距 - 2×1 边框),色板 18 + 2×4 = 26,
+         正好铺满。5px 会溢出 2px。 */
+      font-size: 0; line-height: 0; padding: 4px;
     }
     .theme-row button::after {
       content: "";
-      display: block; height: 18px; border-radius: 4px;
+      display: block; height: 18px; border-radius: calc(var(--radius-sm) - 2px);
       background: var(--board-frame);
       box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .28);
     }
@@ -543,7 +575,7 @@
     /* sound switch */
     .switch {
       position: relative;
-      width: 44px; height: 28px;
+      width: 44px; height: var(--ctl-h);
       -webkit-appearance: none; appearance: none; border: 0; padding: 0;
       border-radius: 999px;
       background: var(--btn);
@@ -553,7 +585,8 @@
       flex-shrink: 0;
     }
     .switch-knob {
-      position: absolute; top: 3px; left: 3px;
+      /* 旋钮居中由 --ctl-h 算出,不是写死的 3px —— 开关跟着控件高度走。 */
+      position: absolute; top: calc((var(--ctl-h) - 2px - 20px) / 2); left: 3px;
       width: 20px; height: 20px; border-radius: 50%;
       background: var(--text); opacity: 0.35;
       transition: transform var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease), background var(--dur-ui) var(--ease);
@@ -584,10 +617,10 @@
       background: transparent;
       color: var(--muted);
       color: color-mix(in srgb, var(--text) 60%, transparent);
-      font-size: 12px;
+      font-size: var(--fs-ui);
       font-variant-numeric: tabular-nums;
       padding: 2px 4px;
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       cursor: pointer;
       text-align: left;
       white-space: nowrap;
@@ -603,7 +636,7 @@
     .replay-bar {
       display: flex; gap: 4px;
       padding: 4px;
-      border-radius: 10px;
+      border-radius: var(--radius-md);
       background: var(--btn-ghost);
       border: 1px solid var(--card-border);
     }
@@ -611,8 +644,8 @@
       flex: 1;
       -webkit-appearance: none; appearance: none; border: 0; background: transparent;
       color: var(--text);
-      font: inherit; font-size: 16px; line-height: 1;
-      padding: 8px 0; border-radius: 10px;
+      font: inherit; font-size: var(--fs-icon); line-height: 1;
+      padding: 8px 0; border-radius: var(--radius-md);
       cursor: pointer;
       transition: background var(--dur-tap) var(--ease);
     }
@@ -625,8 +658,8 @@
     .coach-verdict {
       margin-top: 8px;
       padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 13px; font-weight: 600;
+      border-radius: var(--radius-sm);
+      font-size: var(--fs-body); font-weight: 600;
       line-height: 1.35;
       border: 1px solid var(--card-border);
       background: var(--btn-ghost);
@@ -675,7 +708,7 @@
       align-items: center;
       padding: 8px 12px;
       border: 1px solid var(--card-border);
-      border-radius: 10px;
+      border-radius: var(--radius-md);
       background: var(--btn-ghost);
     }
     .slot-name {
@@ -684,8 +717,8 @@
       border: 1px solid transparent;
       background: transparent;
       color: var(--fg);
-      font: inherit; font-size: 13px; font-weight: 600;
-      padding: 2px 4px; border-radius: 6px;
+      font: inherit; font-size: var(--fs-body); font-weight: 600;
+      padding: 2px 4px; border-radius: var(--radius-sm);
       width: 100%;
     }
     .slot-name:hover { border-color: var(--card-border); }
@@ -716,7 +749,7 @@
     }
     .slot-meta {
       grid-area: meta;
-      font-size: 12px; color: var(--muted);
+      font-size: var(--fs-ui); color: var(--muted);
       padding-left: 4px;
     }
     .slot-ops {
@@ -725,17 +758,17 @@
     }
 
     .review-hint {
-      margin: 0 0 8px; font-size: 12px; color: var(--muted); line-height: 1.4;
+      margin: 0 0 8px; font-size: var(--fs-ui); color: var(--muted); line-height: 1.4;
     }
     .review-curve {
       width: 100%; height: 96px; display: block;
       border: 1px solid var(--card-border);
-      border-radius: 10px;
+      border-radius: var(--radius-md);
       background: var(--btn-ghost);
       cursor: pointer;
     }
     .review-stat {
-      margin: 8px 0 8px; font-size: 13px; font-weight: 600; color: var(--fg);
+      margin: 8px 0 8px; font-size: var(--fs-body); font-weight: 600; color: var(--fg);
     }
     .review-blunders {
       display: flex; flex-direction: column; gap: 4px;
@@ -749,14 +782,14 @@
       background: var(--panel);
       background: color-mix(in srgb, var(--panel) 92%, transparent);
       border: 1px solid var(--card-border);
-      border-radius: 10px;
+      border-radius: var(--radius-md);
       box-shadow: 0 6px 24px rgba(0,0,0,0.22);
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);
       z-index: 6;
     }
     .swap2-msg {
-      font-size: 13px; font-weight: 600; color: var(--fg); text-align: center;
+      font-size: var(--fs-body); font-weight: 600; color: var(--fg); text-align: center;
     }
     .swap2-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
     .swap2-btn {
@@ -766,8 +799,8 @@
       background: var(--btn-ghost);
       background: color-mix(in srgb, var(--accent) 12%, transparent);
       color: var(--accent-text);
-      font: inherit; font-size: 13px; font-weight: 600;
-      padding: 8px 12px; border-radius: 6px; cursor: pointer;
+      font: inherit; font-size: var(--fs-body); font-weight: 600;
+      padding: 8px 12px; border-radius: var(--radius-sm); cursor: pointer;
       transition: background var(--dur-tap) var(--ease), border-color var(--dur-tap) var(--ease);
     }
     .swap2-btn:hover {
@@ -782,8 +815,8 @@
       display: flex; justify-content: space-between; align-items: baseline;
       gap: 8px; margin: 2px 0 8px; flex-wrap: wrap;
     }
-    .practice-task { font-size: 13px; font-weight: 600; color: var(--fg); }
-    .practice-progress { font-size: 12px; white-space: nowrap; }
+    .practice-task { font-size: var(--fs-body); font-weight: 600; color: var(--fg); }
+    .practice-progress { font-size: var(--fs-ui); white-space: nowrap; }
     .practice-board {
       width: 100%; aspect-ratio: 1 / 1; display: block;
       border: 1px solid var(--card-border);
@@ -796,15 +829,15 @@
       box-shadow: 0 4px 14px rgba(0,0,0,.18);
     }
     .practice-foot { margin: 8px 0 4px; min-height: 34px; }
-    .practice-source { font-size: 12px; display: block; margin-bottom: 2px; }
-    .practice-feedback { font-size: 13px; font-weight: 600; line-height: 1.4; }
+    .practice-source { font-size: var(--fs-ui); display: block; margin-bottom: 2px; }
+    .practice-feedback { font-size: var(--fs-body); font-weight: 600; line-height: 1.4; }
     .practice-feedback.good { color: #2f9e5e; }
     .practice-feedback.bad { color: var(--win); color: color-mix(in srgb, var(--win) 85%, var(--fg)); }
 
     .stats-table {
       width: 100%; border-collapse: collapse;
       margin: 4px 0 12px;
-      font-size: 13px;
+      font-size: var(--fs-body);
     }
     .stats-table th, .stats-table td {
       padding: 4px 8px; text-align: left;
@@ -812,23 +845,23 @@
     }
     .stats-table th { color: var(--muted); font-weight: 600; }
     .stats-table td.num, .stats-table th.num { text-align: right; }
-    .stats-line { font-size: 13px; margin: 8px 0; color: var(--fg); }
+    .stats-line { font-size: var(--fs-body); margin: 8px 0; color: var(--fg); }
     .stats-line.muted2 { color: var(--muted); }
 
     .review-actions {
       display: flex; flex-wrap: wrap; gap: 4px 12px;
       margin: 2px 0 12px;
     }
-    .review-none { font-size: 13px; padding: 4px 2px; }
+    .review-none { font-size: var(--fs-body); padding: 4px 2px; }
     .review-blunder-row {
       -webkit-appearance: none; appearance: none; text-align: left;
       display: flex; justify-content: space-between; align-items: center; gap: 8px;
       padding: 8px 12px;
       border: 1px solid var(--card-border);
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       background: var(--btn-ghost);
       color: var(--fg);
-      font: inherit; font-size: 13px;
+      font: inherit; font-size: var(--fs-body);
       cursor: pointer;
     }
     .review-blunder-row:hover {
@@ -860,16 +893,16 @@
       display: flex; align-items: center; gap: 4px;
       margin-top: 12px; padding-top: 8px;
       border-top: 1px solid var(--card-border);
-      font-size: 12px;
+      font-size: var(--fs-ui);
     }
     .backup-row .muted { margin-right: auto; }
     .text-link {
       line-height: var(--lh-tight);
       -webkit-appearance: none; appearance: none; border: 0; background: transparent;
       color: var(--accent-text);
-      font: inherit; font-size: 12px; font-weight: 500;
+      font: inherit; font-size: var(--fs-ui); font-weight: 500;
       padding: 8px 4px; cursor: pointer;
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       opacity: 0.92;
     }
     .text-link:hover { opacity: 1; background: var(--btn-ghost); }
@@ -883,8 +916,8 @@
       background: var(--btn-ghost);
       background: color-mix(in srgb, var(--accent) 12%, transparent);
       color: var(--accent-text);
-      font: inherit; font-size: 13px; font-weight: 600;
-      padding: 8px 12px; border-radius: 10px;
+      font: inherit; font-size: var(--fs-body); font-weight: 600;
+      padding: 8px 12px; border-radius: var(--radius-md);
       cursor: pointer;
       transition: background var(--dur-tap) var(--ease), border-color var(--dur-tap) var(--ease);
     }
@@ -897,7 +930,7 @@
     .continue-btn:disabled { opacity: 0.4; cursor: default; }
     .hint {
       margin: 12px 0 0;
-      font-size: 11px; color: var(--muted); line-height: 1.5;
+      font-size: var(--fs-ui); color: var(--muted); line-height: 1.5;
       opacity: 0.75;
     }
 
@@ -953,7 +986,7 @@
     .side-scroll[data-below="1"] { --fade-bot: 28px; }
     /* 8px vertical keeps these three at the 24px minimum hit height; the 4px
        the spacing grid rounded them to left them at 23. */
-    .side-foot .text-link { color: var(--muted); font-size: 11px; padding: 8px 4px; }
+    .side-foot .text-link { color: var(--muted); font-size: var(--fs-ui); padding: 8px 4px; }
     .side-foot .text-link:hover { color: var(--text); }
 
     .stone {
@@ -971,7 +1004,7 @@
     [data-theme="day"] .stone.white { background: radial-gradient(circle at 31% 29%, #ffffff, #f2f2f2 50%, #c8c8c8); }
     [data-theme="notebook"] .stone {
       box-shadow: none; border-radius: 0; background: transparent !important;
-      display: grid; place-items: center; font-size: 12px; line-height: 1;
+      display: grid; place-items: center; font-size: var(--fs-ui); line-height: 1;
     }
     [data-theme="notebook"] .stone.black { color: #1e3a5f; }
     [data-theme="notebook"] .stone.white { color: #9a3412; }
@@ -989,14 +1022,14 @@
       color: #fff;
     }
     .badge {
-      font-size: 11px; padding: 2px 4px; border-radius: 999px;
+      font-size: var(--fs-micro); padding: 2px 4px; border-radius: 999px;
       background: var(--accent);
       background: color-mix(in srgb, var(--accent) 80%, #000);
       color: #1a120a; font-weight: 600; letter-spacing: 0.02em;
     }
     [data-theme="day"] .badge,
     [data-theme="notebook"] .badge { color: #fff; }
-    .muted { color: var(--muted); font-size: 12px; }
+    .muted { color: var(--muted); font-size: var(--fs-ui); }
 
     /* legacy class hooks still used by some JS queries */
     .seg { display: contents; }
@@ -1010,7 +1043,7 @@
       background: color-mix(in srgb, var(--panel) 94%, #000);
       color: var(--text);
       border: 1px solid var(--panel-border);
-      padding: 8px 16px; border-radius: 999px; font-size: 13px; font-weight: 500;
+      padding: 8px 16px; border-radius: 999px; font-size: var(--fs-body); font-weight: 500;
       box-shadow: 0 10px 30px rgba(0,0,0,.25);
       opacity: 0; pointer-events: none;
       transition: opacity var(--dur-panel) var(--ease), transform var(--dur-panel) var(--ease), bottom var(--dur-panel) var(--ease);
@@ -1050,7 +1083,7 @@
       from { opacity: 0; transform: translateY(8px) scale(0.98); }
       to { opacity: 1; transform: none; }
     }
-    .modal h3 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+    .modal h3 { margin: 0 0 12px; font-size: var(--fs-icon); font-weight: 600; }
     /* 「按键 → 说明」那张表,只此一张。
        原本写作 `.modal table` / `.modal td` —— 一张具体的表,却按「弹层里的表」来
        选。而统计表也住在弹层里,于是整套被它接管了:`.modal td:first-child` 把难度
@@ -1058,7 +1091,7 @@
        12px;`.modal td { padding: 8px 0 }` 又盖掉了 .stats-table 自己的 4px 8px ——
        两条特异度相同(0,1,1),写在后面的赢,于是表头行 26px、数据行 37.8px,数字
        表头比它标注的数字左 8px。按来源收窄,而不是给统计表加权重。 */
-    .keys-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .keys-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
     .keys-table td { padding: 8px 0; border-bottom: 1px solid var(--card-border); line-height: var(--lh-text); }
     .keys-table td:first-child {
       /* Stays a flat 42%. Measured: the keys use only 7–96px of the 142px, and
@@ -1069,7 +1102,7 @@
          column to 175px. Trading a description wrap for a key wrap is a
          downgrade, so the waste stays. */
       color: var(--accent-text); width: 42%;
-      font-family: var(--font-num); font-size: 12px;
+      font-family: var(--font-num); font-size: var(--fs-ui);
     }
     /* version sits left, button stays right — flex rather than text-align so
        the two never collide when the English label is longer */
@@ -1077,7 +1110,7 @@
       margin-top: 16px; display: flex; align-items: center;
       justify-content: flex-end; gap: 12px;
     }
-    .modal .close-row .app-version { margin-right: auto; font-size: 12px; }
+    .modal .close-row .app-version { margin-right: auto; font-size: var(--fs-ui); }
 
     .scrim {
       display: none; position: absolute; inset: 0; z-index: 25;
