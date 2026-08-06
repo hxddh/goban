@@ -1781,6 +1781,12 @@ async function enableSwap2Pvp(page) {
           title: x.getAttribute("title") || "",
           swatch: img && img !== "none" ? img : (a.backgroundColor || ""),
           h: Math.round(parseFloat(a.height) || 0),
+          // 宽度和高度一样要量。v1.50 实测过这个漏洞:给 .pill button 加了
+          // `place-items: center` 之后,空的 ::after 被压成 0 宽,四块颜色在屏幕上
+          // 当场消失 —— 而 backgroundImage / height 一个没变,这条闸门照样绿。
+          // 「算出来有底色」不等于「画出来看得见」。
+          w: Math.round(parseFloat(a.width) || 0),
+          bw: Math.round(x.getBoundingClientRect().width),
           active: x.classList.contains("active"),
         };
       });
@@ -1791,6 +1797,11 @@ async function enableSwap2Pvp(page) {
       if (!x.name) bad.push(lang + ": " + x.t + " 的文本被删了 —— 无障碍名会变空");
       if (!x.title) bad.push(lang + ": " + x.t + " 没有 title，悬停认不出是哪套主题");
       if (!x.h) bad.push(lang + ": " + x.t + " 的色板高度是 0，等于没画");
+      if (!x.w) bad.push(lang + ": " + x.t + " 的色板宽度是 0，等于没画");
+      // 色板铺满格子:塌成一条窄缝也算没画,但屏幕上不像「高度 0」那么明显。
+      else if (x.w < x.bw * 0.5) {
+        bad.push(lang + ": " + x.t + " 的色板只有 " + x.w + "px 宽，格子有 " + x.bw + "px —— 塌了");
+      }
       // 透明也算没画:纯色支拿到的是 rgba(0, 0, 0, 0) 而不是 "none"
       if (!x.swatch || x.swatch === "none" || /,\s*0\)$/.test(x.swatch)) {
         bad.push(lang + ": " + x.t + " 没有底色（" + x.swatch + "）");
@@ -2585,6 +2596,84 @@ async function enableSwap2Pvp(page) {
     await page.close();
   }
   report("AM 复盘逐手评语覆盖到最后一手，且与整局复盘不打架", bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
+// ---- Test AN: 设置列的控件同高、行距同节奏，且控件不许撑起行高 ----
+// v1.45 用 --ctl-w 定死了设置行的右边缘；行高从来没人定过。v1.50 收敛前实测九行里
+// 控件有三种高度（分段控件 38.2 / 主题色板 34 / 开关 28），行距跟着分成两套
+// （46.2 · 46.1 · 46.2 · [节] · 44 · 44 · 44 · 46.2）。根因只有一处：.pill 比行的
+// 自然高度 36 高出 2.2px，其余本来就在 36 以内。
+//
+// 三半必须写在同一条闸门里，因为它们分开失效 —— 反证是两个方向的：
+//   改得不够（.pill 退回 padding 撑高）→ ①② 报，③ 照样绿
+//   改过头（--ctl-h 调到 44，九行仍然同高同节奏）→ ①② 全绿，只有 ③ 报
+// ③ 的判据是相对的、不写死数字：把每个控件压成 1px 再量一次，只要有任何一行的
+// 顶端动了，就说明那一行的高度是被控件撑出来的 —— 那正是「整列会变高」的机制，
+// 而「设置区从不用滚变成要滚」是被明确否决的退化。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await openPanel(page);
+  const measure = () =>
+    page.evaluate(() => {
+      const rows = [...document.querySelectorAll(".setting-row")]
+        .filter((x) => x.getBoundingClientRect().height > 0);
+      const heights = [], pitches = [];
+      let pills = 0, switches = 0;
+      for (const row of rows) {
+        const c = row.querySelector(".pill, .switch");
+        if (c) {
+          heights.push(+c.getBoundingClientRect().height.toFixed(1));
+          if (c.classList.contains("pill")) pills++; else switches++;
+        }
+        // 只比「同一段里紧挨着的两行」——被小节标题隔开的那一对本来就该更远。
+        const nxt = row.nextElementSibling;
+        if (nxt && nxt.classList.contains("setting-row") && nxt.getBoundingClientRect().height > 0) {
+          pitches.push(+(nxt.getBoundingClientRect().top - row.getBoundingClientRect().top).toFixed(1));
+        }
+      }
+      return {
+        heights, pitches, pills, switches, n: rows.length,
+        tops: rows.map((r) => +r.getBoundingClientRect().top.toFixed(1)),
+      };
+    });
+
+  for (const lang of ["zh", "en"]) {
+    if (lang === "en") {
+      await page.evaluate(() => {
+        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
+        if (b) b.click();
+      });
+      await page.waitForTimeout(450);
+    }
+    const r = await measure();
+    const hs = [...new Set(r.heights)];
+    const ps = [...new Set(r.pitches)];
+    seen[lang] = { 行数: r.n, 控件高: hs, 行距: ps, 分段控件: r.pills, 开关: r.switches };
+    // 覆盖：量不到东西的闸门永远是绿的。
+    if (r.n < 8) bad.push(lang + ": 只量到 " + r.n + " 行设置行 —— 覆盖不足");
+    if (!r.pills || !r.switches) bad.push(lang + ": 分段控件 " + r.pills + " / 开关 " + r.switches + " —— 两种控件都得量到");
+    if (hs.length !== 1) bad.push(lang + ": 控件有 " + hs.length + " 种高度 " + JSON.stringify(hs));
+    if (ps.length !== 1) bad.push(lang + ": 同段内行距有 " + ps.length + " 种 " + JSON.stringify(ps));
+  }
+
+  // ③ 控件不许撑起行高。压扁控件后每一行的顶端都必须原地不动。
+  const before = await measure();
+  await page.addStyleTag({ content: ".setting-row > .pill, .setting-row .switch { height: 1px !important; }" });
+  await page.waitForTimeout(200);
+  const after = await measure();
+  const moved = before.tops
+    .map((t, i) => ({ i, t, t2: after.tops[i] }))
+    .filter((x) => x.t2 == null || Math.abs(x.t2 - x.t) > 0.5);
+  seen.压扁控件后位移 = moved.map((m) => "第" + (m.i + 1) + "行 " + m.t + "→" + m.t2);
+  if (before.tops.length < 8) bad.push("压扁前只量到 " + before.tops.length + " 行 —— 这半条测不到东西");
+  if (moved.length) bad.push("控件在撑行高：压扁后 " + moved.length + " 行的顶端动了 " + JSON.stringify(seen.压扁控件后位移.slice(0, 3)));
+
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AN 设置列控件同高、行距同节奏，且控件不撑行高",
+    bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
 console.log("---");

@@ -13,7 +13,9 @@ cp src/web/index.html frontend/dist/
 cp src/web/styles.css frontend/dist/
 cp src/web/js/*.js frontend/dist/js/
 node scripts/gen-worker-src.mjs frontend/dist/js
+node scripts/build-info.mjs
 # sanity: required files
+test -f frontend/dist/build-info.json
 test -f frontend/dist/index.html
 test -f frontend/dist/js/app.js
 test -f frontend/dist/js/core.js

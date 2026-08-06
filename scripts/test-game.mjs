@@ -1788,6 +1788,50 @@ const Practice = ctx.GobanPractice;
     d.split(",").some((part) => part.trim() && !/var\(--ease\)/.test(part)));
   assert(missingEase.length === 0,
     "过渡的每个属性都显式带曲线 (" + missingEase.slice(0, 2).join(" | ") + ")");
+  // ---- 字号与圆角:一律走 token,源码里不许出现裸值 ----
+  //
+  // v1.50 收敛前实测:样式表里 44 条 font-size 全是字面量、零个 token
+  // (13px×17 / 12px×16 / 11px×7 / 16px×3 —— 13 和 12 差 1px,那不是层级,
+  // 是 33 次各自为政);圆角明明有 --radius-sm/md/lg,却被绕开 14 次
+  // (裸 6px×7 vs var(--radius-sm)×1,裸 10px×7 vs var(--radius-md)×1)。
+  // 颜色早就全走 var(--text)/var(--muted) —— 散的只有这两样。
+  //
+  // 例外只有形状,不含尺度:999px / 50% 是「胶囊」和「圆」,不是圆角档;
+  // font-size: 0 是主题色板刻意隐藏文字(v1.45),只此一处。
+  {
+    const decls = (css, prop) =>
+      [...css.matchAll(new RegExp(prop + "\\s*:\\s*([^;}]+)", "g"))].map((m) => m[1].trim());
+    const badFs = (css) =>
+      decls(css, "font-size").filter((v) => v !== "0" && !/^var\(--fs-[a-z]+\)$/.test(v));
+    const badRad = (css) =>
+      decls(css, "border-radius").filter(
+        (v) => !/^(0|50%|999px|var\(--radius-[a-z]+\)|calc\(var\(--radius-[a-z]+\)[^)]*\)\s*)$/.test(v.trim()));
+
+    const fsAll = decls(cssNoC, "font-size");
+    const radAll = decls(cssNoC, "border-radius");
+    // 覆盖数:扫不到东西的闸门永远是绿的。这两条比收敛后的实际条数低一档,
+    // 只在「选择器被大改 / 扫描器坏掉」时才触发。
+    assert(fsAll.length >= 30, "字号闸门只扫到 " + fsAll.length + " 条声明 —— 覆盖不足,这条闸门测不到东西");
+    assert(radAll.length >= 15, "圆角闸门只扫到 " + radAll.length + " 条声明 —— 覆盖不足,这条闸门测不到东西");
+    assert(badFs(cssNoC).length === 0,
+      "字号一律走 var(--fs-*) (" + badFs(cssNoC).slice(0, 3).join(" | ") + ")");
+    assert(badRad(cssNoC).length === 0,
+      "圆角一律走 var(--radius-*) (" + badRad(cssNoC).slice(0, 3).join(" | ") + ")");
+
+    // 反证:两个方向都得报。裸值要报,token 不许误报,注释里的裸值不算实现
+    // —— 最后这条是第五次防同一个坑(散文被当成代码)。
+    assert(badFs(".a { font-size: 14px; }").length === 1, "字号闸门认得出裸值");
+    assert(badFs(".a { font-size: var(--fs-body); }\n.b { font-size: 0; }").length === 0,
+      "字号闸门放过 token 与刻意的 0");
+    assert(badFs("/* 收敛前是 font-size: 13px */\n.a { font-size: var(--fs-body); }"
+      .replace(/\/\*[\s\S]*?\*\//g, "")).length === 0,
+      "字号闸门不把注释里的裸值当成实现");
+    assert(badRad(".a { border-radius: 10px; }").length === 1, "圆角闸门认得出裸值");
+    assert(badRad(".a { border-radius: var(--radius-md); }\n.b { border-radius: 999px; }\n"
+      + ".c { border-radius: 50%; }\n.d { border-radius: calc(var(--radius-sm) - 2px); }").length === 0,
+      "圆角闸门放过 token 与形状值");
+  }
+
   {
     const scan = (css) => {
       const ds = [...css.matchAll(/transition\s*:\s*([^;}]+)/g)].map((m) => m[1]);
