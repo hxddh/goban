@@ -24,7 +24,7 @@ jobs:
   build:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: resolve release tag
         id: tag
         run: |
@@ -34,9 +34,9 @@ jobs:
           fi
           echo "value=$TAG" >> "$GITHUB_OUTPUT"
           echo "Resolved release tag: '${TAG:-<none>}'"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc
       - name: unit tests
         run: node scripts/test-game.mjs
       - name: install Native SDK CLI
@@ -44,9 +44,8 @@ jobs:
           npm install -g @native-sdk/cli
           native --version || true
           echo "SDK_PATH=$(npm root -g)/@native-sdk/cli" >> "$GITHUB_ENV"
+      # version 省略 —— setup-zig 读 build.zig.zon 的 minimum_zig_version
       - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
       - name: sync frontend dist
         run: |
           rm -rf frontend/dist && mkdir -p frontend/dist/js
@@ -62,7 +61,7 @@ jobs:
           native package --target macos --signing adhoc --output dist/Goban.app --binary zig-out/bin/goban
           ditto -c -k --sequesterRsrc --keepParent dist/Goban.app dist/Goban-macOS-arm64.zip
           ls -lh dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Goban-macOS-arm64
           path: dist/Goban-macOS-arm64.zip

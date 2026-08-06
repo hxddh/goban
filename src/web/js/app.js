@@ -1984,6 +1984,20 @@
   document.getElementById("help-btn").onclick = openHelp;
   document.getElementById("help-close").onclick = closeHelp;
   helpModal.onclick = (ev) => { if (ev.target === helpModal) closeHelp(); };
+
+  // 设置弹层（v1.51：外观那五项从常驻侧栏搬进来）。控件本身一个都没改，
+  // 全部按 id 绑定（#theme-seg / #opt-coords / #opt-analysis / #lang-seg /
+  // #opt-sound），所以搬家对它们的行为是透明的。
+  const settingsModal = document.getElementById("settings-modal");
+  function openSettings() {
+    settingsModal.classList.add("show");
+    const close = document.getElementById("settings-close");
+    if (close) setTimeout(() => close.focus(), 0);
+  }
+  function closeSettings() { settingsModal.classList.remove("show"); }
+  document.getElementById("settings-btn").onclick = openSettings;
+  document.getElementById("settings-close").onclick = closeSettings;
+  settingsModal.onclick = (ev) => { if (ev.target === settingsModal) closeSettings(); };
   document.getElementById("confirm-ok").onclick = () => finishConfirm(true);
   document.getElementById("confirm-cancel").onclick = () => finishConfirm(false);
   confirmModal.onclick = (ev) => { if (ev.target === confirmModal) finishConfirm(false); };
@@ -2003,6 +2017,7 @@
       if (reviewModal && reviewModal.classList.contains("show")) { closeReview(); return; }
       if (statsModal && statsModal.classList.contains("show")) { closeStats(); return; }
       if (Practice.isOpen()) { Practice.close(); return; }
+      if (settingsModal.classList.contains("show")) { closeSettings(); return; }
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
       if (appEl.classList.contains("panel-open")) setPanelOpen(false);
       return;
@@ -2033,6 +2048,10 @@
     }
     if (practiceModal && practiceModal.classList.contains("show")) {
       trapModalTab(ev, practiceModal);
+      return;
+    }
+    if (settingsModal.classList.contains("show")) {
+      trapModalTab(ev, settingsModal);
       return;
     }
     if (helpModal.classList.contains("show")) {

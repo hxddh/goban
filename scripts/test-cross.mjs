@@ -157,6 +157,28 @@ async function openPanel(page) {
   await page.waitForTimeout(120);
 }
 
+/** 语言开关自 v1.51 起住在设置弹层里（外观那五项从常驻侧栏搬走了）。
+ *  每个要换语言的闸门都得走真实那条路：开弹层 → 点 → 关，而不是对着藏起来的
+ *  元素直接 .click()。后者也能触发处理函数，但那证明不了用户够得着它。 */
+async function setLang(page, lang) {
+  // 别的弹层开着时真实指针点不到设置按钮（弹层拦截事件），那不是缺陷，只是这些
+  // 闸门的语言切换发生在观察之间。没有别的弹层挡着就走真实那条路（gate G ——
+  // 真正守语言开关的那一条 —— 永远走这一支），挡着了就退回 JS 触发，
+  // 免得为了换个语言去动闸门自己要观察的状态。
+  const blocked = await page.evaluate(() =>
+    [...document.querySelectorAll(".modal-bg.show")].some((m) => m.id !== "settings-modal"));
+  const hit = async (sel) => {
+    if (blocked) await page.evaluate((s) => document.querySelector(s).click(), sel);
+    else await page.click(sel);
+  };
+  await hit("#settings-btn");
+  await page.waitForTimeout(200);
+  await hit('#lang-seg button[data-lang="' + lang + '"]');
+  await page.waitForTimeout(350);
+  await hit("#settings-close");
+  await page.waitForTimeout(250);
+}
+
 async function dismissConfirm(page) {
   if (await page.evaluate(() => document.getElementById("confirm-modal").classList.contains("show"))) {
     await page.click("#confirm-ok");
@@ -483,7 +505,7 @@ async function enableSwap2Pvp(page) {
     lang: document.documentElement.getAttribute("lang"),
   }));
 
-  await page.click('#lang-seg button[data-lang="en"]');
+  await setLang(page, "en");
   await page.waitForTimeout(300);
   const en = await page.evaluate(() => ({
     undo: document.getElementById("undo").textContent,
@@ -524,7 +546,7 @@ async function enableSwap2Pvp(page) {
   // …and back to 中文
   await page.keyboard.press("]");
   await page.waitForTimeout(420);
-  await page.click('#lang-seg button[data-lang="zh"]');
+  await setLang(page, "zh");
   await page.waitForTimeout(300);
   const backZh = await page.evaluate(() => document.getElementById("undo").textContent);
 
@@ -631,6 +653,22 @@ async function enableSwap2Pvp(page) {
     });
     if (id) seen.add(id);
   }
+  // v1.51：外观那五项搬进设置弹层，侧栏少了 5 个控件（20 → 17）。门槛跟着降是不够的
+  // —— 那样只是把数字改到能过。搬走的东西必须在新家里同样 Tab 走得到，两处一起数。
+  await page.click("#settings-btn");
+  await page.waitForTimeout(300);
+  const inSettings = new Set();
+  for (let i = 0; i < 24; i++) {
+    await page.keyboard.press("Tab");
+    const id = await page.evaluate(() => {
+      const e = document.activeElement;
+      return e && e !== document.body && e.closest("#settings-modal") ? (e.id || e.textContent.trim().slice(0, 8)) : null;
+    });
+    if (id) inSettings.add(id);
+  }
+  await page.click("#settings-close");
+  await page.waitForTimeout(250);
+
   await page.evaluate(() => document.getElementById("help-btn").click());
   await page.waitForTimeout(300);
   let escaped = 0;
@@ -638,9 +676,10 @@ async function enableSwap2Pvp(page) {
     await page.keyboard.press("Tab");
     if (!(await page.evaluate(() => !!(document.activeElement && document.activeElement.closest(".modal-bg"))))) escaped++;
   }
-  report("J Tab 走得进侧栏（≥20 项）且走不出弹层",
-    seen.size >= 20 && escaped === 0 && page.__errors.length === 0,
-    JSON.stringify({ reachable: seen.size, escaped, errs: page.__errors }));
+  const okJ = seen.size >= 15 && inSettings.size >= 8 && escaped === 0 && page.__errors.length === 0;
+  report("J Tab 走得进侧栏（≥15）与设置弹层（≥8）且走不出弹层",
+    okJ,
+    JSON.stringify({ reachable: seen.size, settings: inSettings.size, escaped, errs: page.__errors }));
   await page.close();
 }
 
@@ -1062,7 +1101,7 @@ async function enableSwap2Pvp(page) {
   for (const lang of ["zh", "en"]) {
     const page = await newPage();
     if (lang === "en") {
-      await page.evaluate(() => document.querySelector('button[data-lang="en"]').click());
+      await setLang(page, "en");
       await page.waitForTimeout(400);
     }
     // newPage() 把 storageSet 换成了空函数（防止卸载时的自动存档把 clear 撤销），
@@ -1116,6 +1155,11 @@ async function enableSwap2Pvp(page) {
 {
   const bad = [];
   const page = await newPage();
+  // v1.51：外观搬进设置弹层后侧栏矮了 260px，默认窗口下滚动区不再溢出 —— 这条闸门
+  // 自己的覆盖判据当场报了「测不到东西」。把窗口压矮，让它回到有溢出的处境；
+  // 判据本身（该淡出时淡出、到底了就别再压暗）一个字没动。
+  await page.setViewportSize({ width: 1024, height: 540 });
+  await page.waitForTimeout(250);
   // 落几手，让棋谱区长出内容，滚动区确实溢出
   const click = clicker(page);
   for (const [r, c] of [[7, 7], [6, 8], [8, 6]]) { await click(r, c); await page.waitForTimeout(1300); }
@@ -1221,7 +1265,7 @@ async function enableSwap2Pvp(page) {
     for (const lang of ["zh", "en"]) {
       const page = await newPage();
       if (lang === "en") {
-        await page.evaluate(() => document.querySelector('button[data-lang="en"]').click());
+        await setLang(page, "en");
         await page.waitForTimeout(350);
       }
       if (scale !== 1) {
@@ -1639,11 +1683,7 @@ async function enableSwap2Pvp(page) {
   await openPanel(page);
   for (const lang of ["zh", "en"]) {
     if (lang === "en") {
-      await page.evaluate(() => {
-        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
-        if (b) b.click();
-      });
-      await page.waitForTimeout(450);
+      await setLang(page, "en");
     }
     const r = await page.evaluate(() => {
       const rows = [...document.querySelectorAll(".setting-row")]
@@ -1697,6 +1737,13 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const page = await newPage();
   await openPanel(page);
+  // v1.51：色板随外观搬进设置弹层，得开着量 —— 藏起来的元素聚不了焦，那会读成
+  // 「焦点样式没了」，而真相只是它换了地方。
+  // 用 JS 的 .click() 而不是 page.click()：真实指针事件会把浏览器的交互模态切成
+  // 「指针」，此后所有 el.focus() 都不再匹配 :focus-visible —— 初版就是这么把
+  // 顶栏四个按钮全误报成「没有描边」的。
+  await page.evaluate(() => document.getElementById("settings-btn").click());
+  await page.waitForTimeout(300);
   const r = await page.evaluate(() => {
     const ids = ["btn-new", "btn-hint", "toggle-panel", "help-btn"];
     const out = [];
@@ -1728,6 +1775,8 @@ async function enableSwap2Pvp(page) {
     }
     return { out, rules };
   });
+  await page.evaluate(() => document.getElementById("settings-close").click());
+  await page.waitForTimeout(150);
   if (!r.rules.length) bad.push("样式表里没有任何 :focus-visible 规则");
   for (const x of r.out) {
     if (x.skip) continue;
@@ -1760,12 +1809,12 @@ async function enableSwap2Pvp(page) {
   const seen = {};
   for (const lang of ["zh", "en"]) {
     if (lang === "en") {
-      await page.evaluate(() => {
-        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
-        if (b) b.click();
-      });
-      await page.waitForTimeout(450);
+      await setLang(page, "en");
     }
+    // v1.51：色板随外观搬进设置弹层。setLang 自己开关了一轮，所以每种语言都要
+    // 重新打开 —— 关着的时候宽高都是 0，会误读成「色板没画」。
+    await page.click("#settings-btn");
+    await page.waitForTimeout(300);
     const r = await page.evaluate(() => {
       const bs = [...document.querySelectorAll(".theme-row [data-theme]")];
       return bs.map((x) => {
@@ -1814,6 +1863,8 @@ async function enableSwap2Pvp(page) {
     if (r.filter((x) => x.active).length !== 1) {
       bad.push(lang + ": 选中态有 " + r.filter((x) => x.active).length + " 个");
     }
+    await page.click("#settings-close");
+    await page.waitForTimeout(200);
   }
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
@@ -1854,11 +1905,7 @@ async function enableSwap2Pvp(page) {
   for (const lang of ["zh", "en"]) {
     if (lang === "en") {
       await openPanel(page);
-      await page.evaluate(() => {
-        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
-        if (b) b.click();
-      });
-      await page.waitForTimeout(450);
+      await setLang(page, "en");
     }
     await page.evaluate(() => { const x = document.getElementById("open-stats"); if (x) x.click(); });
     await page.waitForTimeout(500);
@@ -1938,11 +1985,7 @@ async function enableSwap2Pvp(page) {
   for (const lang of ["zh", "en"]) {
     if (lang === "en") {
       await openPanel(page);
-      await page.evaluate(() => {
-        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
-        if (b) b.click();
-      });
-      await page.waitForTimeout(450);
+      await setLang(page, "en");
     }
     await page.evaluate(() => { const x = document.getElementById("sgf-slots"); if (x) x.click(); });
     await page.waitForTimeout(350);
@@ -2444,11 +2487,7 @@ async function enableSwap2Pvp(page) {
   await openPanel(page);
   for (const lang of ["zh", "en"]) {
     if (lang === "en") {
-      await page.evaluate(() => {
-        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
-        if (b) b.click();
-      });
-      await page.waitForTimeout(450);
+      await setLang(page, "en");
     }
     const r = await page.evaluate(() => {
       const out = [];
@@ -2598,15 +2637,18 @@ async function enableSwap2Pvp(page) {
   report("AM 复盘逐手评语覆盖到最后一手，且与整局复盘不打架", bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
-// ---- Test AN: 设置列的控件同高、行距同节奏，且控件不许撑起行高 ----
+// ---- Test AN: 设置行的控件同高、行距同节奏，且控件不许撑起行高 ----
 // v1.45 用 --ctl-w 定死了设置行的右边缘；行高从来没人定过。v1.50 收敛前实测九行里
 // 控件有三种高度（分段控件 38.2 / 主题色板 34 / 开关 28），行距跟着分成两套
 // （46.2 · 46.1 · 46.2 · [节] · 44 · 44 · 44 · 46.2）。根因只有一处：.pill 比行的
 // 自然高度 36 高出 2.2px，其余本来就在 36 以内。
 //
+// v1.51：外观那五项搬进了设置弹层，设置行从此住在两个地方。判据跟着东西走，
+// **两处都量** —— 只量侧栏的话，三个开关全在弹层里，这条闸门会静静地测不到它们。
+//
 // 三半必须写在同一条闸门里，因为它们分开失效 —— 反证是两个方向的：
 //   改得不够（.pill 退回 padding 撑高）→ ①② 报，③ 照样绿
-//   改过头（--ctl-h 调到 44，九行仍然同高同节奏）→ ①② 全绿，只有 ③ 报
+//   改过头（--ctl-h 调到 44，仍然同高同节奏）→ ①② 全绿，只有 ③ 报
 // ③ 的判据是相对的、不写死数字：把每个控件压成 1px 再量一次，只要有任何一行的
 // 顶端动了，就说明那一行的高度是被控件撑出来的 —— 那正是「整列会变高」的机制，
 // 而「设置区从不用滚变成要滚」是被明确否决的退化。
@@ -2615,9 +2657,9 @@ async function enableSwap2Pvp(page) {
   const seen = {};
   const page = await newPage();
   await openPanel(page);
-  const measure = () =>
-    page.evaluate(() => {
-      const rows = [...document.querySelectorAll(".setting-row")]
+  const measure = (scope) =>
+    page.evaluate((sel) => {
+      const rows = [...document.querySelectorAll(sel + " .setting-row")]
         .filter((x) => x.getBoundingClientRect().height > 0);
       const heights = [], pitches = [];
       let pills = 0, switches = 0;
@@ -2637,42 +2679,176 @@ async function enableSwap2Pvp(page) {
         heights, pitches, pills, switches, n: rows.length,
         tops: rows.map((r) => +r.getBoundingClientRect().top.toFixed(1)),
       };
-    });
+    }, scope);
 
+  const scopes = [["侧栏", "#side"], ["设置弹层", "#settings-modal"]];
   for (const lang of ["zh", "en"]) {
-    if (lang === "en") {
-      await page.evaluate(() => {
-        const b = [...document.querySelectorAll("button")].find((x) => /^EN$/.test(x.textContent.trim()));
-        if (b) b.click();
-      });
-      await page.waitForTimeout(450);
+    if (lang === "en") await setLang(page, "en");
+    await page.evaluate(() => document.getElementById("settings-btn").click());
+    await page.waitForTimeout(300);
+    let totalRows = 0, totalPills = 0, totalSwitches = 0;
+    const all = [];
+    for (const [name, sel] of scopes) {
+      const r = await measure(sel);
+      seen[lang + "/" + name] = { 行数: r.n, 控件高: [...new Set(r.heights)], 行距: [...new Set(r.pitches)] };
+      totalRows += r.n; totalPills += r.pills; totalSwitches += r.switches;
+      all.push(...r.heights);
+      const ps = [...new Set(r.pitches)];
+      if (ps.length > 1) bad.push(lang + "/" + name + ": 同段内行距有 " + ps.length + " 种 " + JSON.stringify(ps));
     }
-    const r = await measure();
-    const hs = [...new Set(r.heights)];
-    const ps = [...new Set(r.pitches)];
-    seen[lang] = { 行数: r.n, 控件高: hs, 行距: ps, 分段控件: r.pills, 开关: r.switches };
-    // 覆盖：量不到东西的闸门永远是绿的。
-    if (r.n < 8) bad.push(lang + ": 只量到 " + r.n + " 行设置行 —— 覆盖不足");
-    if (!r.pills || !r.switches) bad.push(lang + ": 分段控件 " + r.pills + " / 开关 " + r.switches + " —— 两种控件都得量到");
+    // 覆盖：量不到东西的闸门永远是绿的。搬家之后两种控件分居两处，所以合起来数。
+    if (totalRows < 8) bad.push(lang + ": 两处合计只量到 " + totalRows + " 行设置行 —— 覆盖不足");
+    if (!totalPills || !totalSwitches) {
+      bad.push(lang + ": 分段控件 " + totalPills + " / 开关 " + totalSwitches + " —— 两种控件都得量到");
+    }
+    // 同高是全局的：搬了家不等于可以两种高度
+    const hs = [...new Set(all)];
     if (hs.length !== 1) bad.push(lang + ": 控件有 " + hs.length + " 种高度 " + JSON.stringify(hs));
-    if (ps.length !== 1) bad.push(lang + ": 同段内行距有 " + ps.length + " 种 " + JSON.stringify(ps));
+    await page.evaluate(() => document.getElementById("settings-close").click());
+    await page.waitForTimeout(200);
   }
 
   // ③ 控件不许撑起行高。压扁控件后每一行的顶端都必须原地不动。
-  const before = await measure();
+  await page.evaluate(() => document.getElementById("settings-btn").click());
+  await page.waitForTimeout(300);
+  const beforeSide = await measure("#side");
+  const beforeMod = await measure("#settings-modal");
   await page.addStyleTag({ content: ".setting-row > .pill, .setting-row .switch { height: 1px !important; }" });
   await page.waitForTimeout(200);
-  const after = await measure();
-  const moved = before.tops
-    .map((t, i) => ({ i, t, t2: after.tops[i] }))
-    .filter((x) => x.t2 == null || Math.abs(x.t2 - x.t) > 0.5);
-  seen.压扁控件后位移 = moved.map((m) => "第" + (m.i + 1) + "行 " + m.t + "→" + m.t2);
-  if (before.tops.length < 8) bad.push("压扁前只量到 " + before.tops.length + " 行 —— 这半条测不到东西");
-  if (moved.length) bad.push("控件在撑行高：压扁后 " + moved.length + " 行的顶端动了 " + JSON.stringify(seen.压扁控件后位移.slice(0, 3)));
+  const afterSide = await measure("#side");
+  const afterMod = await measure("#settings-modal");
+  const movedIn = (name, b, a) =>
+    b.tops.map((t, i) => ({ i, t, t2: a.tops[i] }))
+      .filter((x) => x.t2 == null || Math.abs(x.t2 - x.t) > 0.5)
+      .map((m) => name + "第" + (m.i + 1) + "行 " + m.t + "→" + m.t2);
+  const moved = [...movedIn("侧栏", beforeSide, afterSide), ...movedIn("弹层", beforeMod, afterMod)];
+  seen.压扁控件后位移 = moved;
+  if (beforeSide.tops.length + beforeMod.tops.length < 8) {
+    bad.push("压扁前两处合计只量到 " + (beforeSide.tops.length + beforeMod.tops.length) + " 行 —— 这半条测不到东西");
+  }
+  if (moved.length) bad.push("控件在撑行高：压扁后 " + moved.length + " 行的顶端动了 " + JSON.stringify(moved.slice(0, 3)));
 
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
-  report("AN 设置列控件同高、行距同节奏，且控件不撑行高",
+  report("AN 设置行控件同高、行距同节奏，且控件不撑行高（侧栏 + 设置弹层）",
+    bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
+// ---- Test AO: 图标是我们画的，不是借来的标点 ----
+// v1.50 之前顶栏和棋谱行那七个按钮借的是标点：« ‹ ● › » ☰ ?。逐像素量过，七个同写
+// font-size:16px，而画出来的墨迹高 7 / 7 / 12.33 / 7 / 7.17 / 11.67 / 12 —— 一排五个
+// 按钮里中间那颗圆点比两侧箭头大 76%，光学中心散在 1.84px 里。更要命的是形状由机器上
+// 碰巧装了哪套字体决定（macOS SF / Windows Segoe / 这里跑的 Chromium 是第三套），
+// 所以那种参差**连闸门都测不到** —— 三个平台画的根本不是同一组形状。
+// 换成 SVG 之后几何是我们的，于是它第一次变得可测。
+//
+// 判据按「排」来，不是按全集：v 形箭头天生比圆窄，同一排读起来一样大才是不变式。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await openPanel(page);
+  for (const lang of ["zh", "en"]) {
+    if (lang === "en") {
+      await setLang(page, "en");
+    }
+    const r = await page.evaluate(() => {
+      const rows = { chrome: ".chrome-actions", replay: ".replay-bar" };
+      const host = document.createElement("div");
+      host.style.cssText = "position:fixed;left:0;top:0;opacity:0;pointer-events:none";
+      document.body.appendChild(host);
+      const inkOf = (symId) => {
+        host.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24"><use href="#' + symId + '"/></svg>';
+        const u = host.querySelector("use");
+        try {
+          const bb = u.getBBox();
+          return { w: +bb.width.toFixed(2), h: +bb.height.toFixed(2) };
+        } catch (_) { return null; }
+      };
+      const out = { symbols: [], rows: {}, buttons: [] };
+      for (const sym of document.querySelectorAll(".icon-defs symbol")) {
+        out.symbols.push({ id: sym.id, vb: sym.getAttribute("viewBox") });
+      }
+      for (const [name, sel] of Object.entries(rows)) {
+        const host2 = document.querySelector(sel);
+        const list = [];
+        for (const btn of host2 ? host2.querySelectorAll("button") : []) {
+          const svg = btn.querySelector("svg.icon");
+          // 没有图标的按钮不能直接跳过 —— 那样「把图标删回标点」会让这个按钮从
+          // 统计里整个消失,数量守卫都数不出来(初版就是这么漏的)。带文字标签的
+          // (悔棋/提示/新键)是正常的一类;既没图标又没文字的才是问题。
+          if (!svg) {
+            const label = (btn.textContent || "").trim();
+            if (!/[\p{L}\p{Script=Han}]/u.test(label)) {
+              out.buttons.push({ id: btn.id, sym: "", text: label, box: [0, 0], ink: null,
+                                 aria: btn.getAttribute("aria-label") || "", noIcon: true });
+            }
+            continue;
+          }
+          const use = svg.querySelector("use");
+          const symId = use ? (use.getAttribute("href") || "").replace("#", "") : "";
+          const box = svg.getBoundingClientRect();
+          // 按钮里除了图标不许还留着字符 —— 标点既当画又当名字正是老问题的根
+          const text = [...btn.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).join("");
+          list.push({
+            id: btn.id, sym: symId, text,
+            box: [+box.width.toFixed(1), +box.height.toFixed(1)],
+            ink: inkOf(symId),
+            aria: btn.getAttribute("aria-label") || "",
+          });
+        }
+        out.rows[name] = list;
+        out.buttons.push(...list);
+      }
+      host.remove();
+      return out;
+    });
+    seen[lang] = r;
+
+    // 覆盖:量不到东西的闸门永远是绿的
+    if (r.symbols.length < 7) bad.push(lang + ": 只找到 " + r.symbols.length + " 个图标定义 —— 覆盖不足");
+    if (r.buttons.length < 7) bad.push(lang + ": 只找到 " + r.buttons.length + " 个图标按钮 —— 覆盖不足");
+
+    const vbs = [...new Set(r.symbols.map((x) => x.vb))];
+    if (vbs.length !== 1) bad.push(lang + ": 图标定义有 " + vbs.length + " 种 viewBox " + JSON.stringify(vbs));
+
+    const boxes = [...new Set(r.buttons.map((x) => x.box.join("x")))];
+    if (boxes.length !== 1) bad.push(lang + ": 图标渲染盒有 " + boxes.length + " 种尺寸 " + JSON.stringify(boxes));
+
+    for (const b of r.buttons) {
+      if (b.noIcon) { bad.push(lang + ": " + b.id + " 既没有图标也没有文字标签 —— 又拿字符当图标了 " + JSON.stringify(b.text)); continue; }
+      if (!b.sym) bad.push(lang + ": " + b.id + " 的图标不是 <use> 引用 —— 图标得只有一处定义");
+      if (b.text) bad.push(lang + ": " + b.id + " 里还留着字符 " + JSON.stringify(b.text) + " —— 图标不该同时当名字");
+      if (!b.ink || !b.ink.h) bad.push(lang + ": " + b.id + " 的图标画不出墨迹");
+      // 无障碍名:不许是标点。老状态下这七个里有六个报出来就是 « ‹ ● › » ?
+      if (!/[\p{L}\p{Script=Han}]/u.test(b.aria)) {
+        bad.push(lang + ": " + b.id + " 的无障碍名是 " + JSON.stringify(b.aria) + " —— 读屏念不出这是什么");
+      }
+    }
+    // 同一排里读起来要一样大
+    for (const [name, list] of Object.entries(r.rows)) {
+      const hs = list.map((x) => (x.ink ? x.ink.h : 0)).filter(Boolean);
+      if (hs.length < 2) continue;
+      const ratio = +(Math.max(...hs) / Math.min(...hs)).toFixed(3);
+      seen[lang]["ratio_" + name] = ratio;
+      if (ratio > 1.08) {
+        bad.push(lang + ": " + name + " 那一排图标墨迹高 " + JSON.stringify(hs) + " —— 最大/最小 " + ratio + "，同排读起来不一样大");
+      }
+    }
+  }
+  // 浏览器自己算的无障碍名，和上面的结构判据对一遍（只查结构不查计算值是同义反复）
+  for (const id of ["rep-start", "rep-live", "help-btn", "settings-btn", "toggle-panel"]) {
+    const snap = await page.locator("#" + id).ariaSnapshot().catch(() => "");
+    const m = /button "([^"]*)"/.exec(snap || "");
+    const name = m ? m[1] : "";
+    seen["accname_" + id] = name;
+    if (!/[\p{L}\p{Script=Han}]/u.test(name)) {
+      bad.push(id + " 浏览器算出来的无障碍名是 " + JSON.stringify(name));
+    }
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AO 图标是自带几何的 SVG，同排一样大，且读屏念得出名字",
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 

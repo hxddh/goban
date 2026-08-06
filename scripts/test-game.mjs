@@ -1788,6 +1788,87 @@ const Practice = ctx.GobanPractice;
     d.split(",").some((part) => part.trim() && !/var\(--ease\)/.test(part)));
   assert(missingEase.length === 0,
     "过渡的每个属性都显式带曲线 (" + missingEase.slice(0, 2).join(" | ") + ")");
+  // ---- 工具链:版本要有单一真源,且不许停在会被下架的那一档 ----
+  //
+  // v1.51 收敛前:`node-version: 22` 抄在 6 份工作流里、`version: 0.16.0` 抄在 3 份、
+  // `actions/checkout@v4` 抄在 6 份 —— 跟样式表那套散值是同一种病,只是高了一层。
+  // 而且不是「不够新」而是有到期日:那三个 v4 动作跑在 Node 20 上,GitHub 从
+  // 2026-06-16 起 runner 已默认把 JS 动作切到 Node 24,Node 20 秋天从 runner 移除;
+  // Node 22 本身也已于 2026-07-28 EOL。
+  //
+  // 判据故意不是「必须是最新大版本」—— 那条会在上游发 v8 的当天变红,而那不是这个
+  // 仓库的缺陷。这里守的是两件不会随上游漂的事:①版本只许有一处真源;
+  // ②不许停在已知会被下架的那一档(固定名单,不联网)。
+  {
+    const wfDir = path.join(root, ".github/workflows");
+    const wfFiles = fs.readdirSync(wfDir).filter((f) => f.endsWith(".yml"));
+    const wfs = wfFiles.map((f) => ({ f, t: fs.readFileSync(path.join(wfDir, f), "utf8") }));
+    const stripYamlComments = (t) => t.split("\n").map((l) => l.replace(/(^|\s)#.*$/, "$1")).join("\n");
+
+    // 覆盖:扫不到东西的闸门永远是绿的
+    const usesLines = wfs.flatMap(({ f, t }) =>
+      [...stripYamlComments(t).matchAll(/uses:\s*([^\s@]+)@(\S+)/g)].map((m) => ({ f, action: m[1], ref: m[2] })));
+    assert(wfs.length >= 6, "工作流只扫到 " + wfs.length + " 份 —— 覆盖不足");
+    assert(usesLines.length >= 10, "只扫到 " + usesLines.length + " 条 uses: —— 覆盖不足");
+
+    // ① 单一真源:node 走 .nvmrc,zig 走 build.zig.zon 的 minimum_zig_version
+    const litNode = wfs.filter(({ t }) => /\n\s*node-version:\s*\S/.test(stripYamlComments(t))).map((x) => x.f);
+    assert(litNode.length === 0, "node 版本要走 .nvmrc,不许写死 (" + litNode.join(", ") + ")");
+    const litZig = wfs.filter(({ t }) => /setup-zig@[^\n]*\n(\s*)with:\n\1\s+version:/.test(stripYamlComments(t))).map((x) => x.f);
+    assert(litZig.length === 0, "zig 版本要走 build.zig.zon,不许写死 (" + litZig.join(", ") + ")");
+    const nvmrc = fs.readFileSync(path.join(root, ".nvmrc"), "utf8").trim();
+    assert(/^\d+$/.test(nvmrc), ".nvmrc 应当只写大版本号,实际是 " + JSON.stringify(nvmrc));
+    const nodeMajor = Number(nvmrc);
+    // 偶数才是 LTS 线;22 已 EOL(2026-07-28)
+    assert(nodeMajor >= 24 && nodeMajor % 2 === 0,
+      ".nvmrc 是 Node " + nodeMajor + " —— 要偶数(LTS)且 ≥ 24(22 已于 2026-07-28 EOL)");
+    const zigPinned = fs.readFileSync(path.join(root, "build.zig.zon"), "utf8")
+      .match(/\.minimum_zig_version\s*=\s*"([^"]+)"/);
+    assert(zigPinned, "build.zig.zon 缺 minimum_zig_version —— 省略 setup-zig 的 version 就没有真源了");
+
+    // ② 不许停在已知会被下架的那一档。名单是固定事实,不联网、不随上游发版漂。
+    const nodeTwentyEra = { "actions/checkout": 4, "actions/setup-node": 4, "actions/upload-artifact": 4, "actions/download-artifact": 4 };
+    const stale = usesLines.filter((u) => {
+      const floor = nodeTwentyEra[u.action];
+      if (floor == null) return false;
+      const m = /^v(\d+)/.exec(u.ref);
+      return m && Number(m[1]) <= floor;
+    });
+    assert(stale.length === 0,
+      "这些动作停在跑 Node 20 的大版本上(秋天从 runner 移除):" +
+      stale.map((x) => x.f + " " + x.action + "@" + x.ref).slice(0, 3).join(" | "));
+
+    // ③ 同一个动作在所有工作流里必须同一个大版本 —— 参差是漂移的第一步
+    const byAction = new Map();
+    for (const u of usesLines) {
+      const m = /^v(\d+)/.exec(u.ref);
+      if (!m) continue;
+      if (!byAction.has(u.action)) byAction.set(u.action, new Set());
+      byAction.get(u.action).add(m[1]);
+    }
+    const split = [...byAction.entries()].filter(([, v]) => v.size > 1);
+    assert(split.length === 0,
+      "同一个动作钉了多个大版本:" + split.map(([a, v]) => a + " → v" + [...v].join(" / v")).join(" | "));
+
+    // 反证:三条判据各自都得报,而正确的形状不许误报
+    const fake = (t) => [{ f: "x.yml", t }];
+    const litN = (ws) => ws.filter(({ t }) => /\n\s*node-version:\s*\S/.test(stripYamlComments(t))).length;
+    assert(litN(fake("jobs:\n  a:\n    steps:\n      - with:\n          node-version: 22\n")) === 1,
+      "单一真源闸门认得出写死的 node 版本");
+    assert(litN(fake("jobs:\n  a:\n    steps:\n      - with:\n          node-version-file: .nvmrc\n")) === 0,
+      "单一真源闸门放过 node-version-file");
+    assert(litN(fake("      # node-version: 22 是老写法\n      - uses: x@v7\n")) === 0,
+      "单一真源闸门不把注释里的写法当成实现");
+    const staleN = (action, ref) => {
+      const floor = nodeTwentyEra[action];
+      const m = /^v(\d+)/.exec(ref);
+      return floor != null && m && Number(m[1]) <= floor ? 1 : 0;
+    };
+    assert(staleN("actions/checkout", "v4") === 1, "下架名单认得出 checkout@v4");
+    assert(staleN("actions/checkout", "v7") === 0, "下架名单放过 checkout@v7");
+    assert(staleN("mlugg/setup-zig", "v2") === 0, "下架名单不误伤名单外的动作");
+  }
+
   // ---- 字号与圆角:一律走 token,源码里不许出现裸值 ----
   //
   // v1.50 收敛前实测:样式表里 44 条 font-size 全是字面量、零个 token

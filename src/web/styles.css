@@ -112,6 +112,11 @@
       --fs-ui: 12px;
       --fs-body: 13px;
       --fs-icon: 16px;
+      /* v1.51 —— 图标尺寸也是 token。七个图标此前是标点符号,画出来的墨迹
+         7 / 7 / 12.33 / 7 / 7.17 / 11.67 / 12,大小由字体决定、我们说了不算。
+         现在统一 24 单位 viewBox 画进 18px 的盒子,描边 2 单位(渲染 1.5px)。 */
+      --icon-size: 18px;
+      --icon-stroke: 2;
       --font-num: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
     }
     [data-theme="night"] {
@@ -190,6 +195,19 @@
     }
     #app { position: relative; height: 100%; width: 100%; overflow: hidden; }
     .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+
+    /* 图标定义表本身不占位。用 absolute + 0 尺寸而不是 display:none —— 后者在
+       部分引擎里会让 <use> 引不到 symbol,而这个应用跑的是 WKWebView / WebView2,
+       回归跑的 Chromium 证明不了它们。 */
+    .icon-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+    .icon {
+      display: block;
+      width: var(--icon-size); height: var(--icon-size);
+      fill: none;
+      stroke: currentColor;               /* 跟着按钮的文字色,四套主题不必各写一份 */
+      stroke-width: var(--icon-stroke);
+      stroke-linecap: round; stroke-linejoin: round;
+    }
 
     .chrome {
       position: absolute; top: 0; left: 0; right: 0;
@@ -418,6 +436,10 @@
     .side-section.grow-sec {
       flex: 1; border-bottom: 0;
       padding-bottom: 8px;
+      /* v1.51 —— 外观搬进设置弹层后这一列空出 259.8px。空出来的地方给手数列表:
+         它是对局中唯一会长的东西。列表撑开、导航条与棋谱四按钮被顶到底部,
+         于是从开局到终局这一列都是满的 —— 不再是「上面一堆开关、下面一片空白」。 */
+      display: flex; flex-direction: column; min-height: 0;
     }
     .side-h {
       margin: 0 0 8px;
@@ -605,13 +627,21 @@
     .move-list {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+      grid-auto-rows: max-content;
       gap: 2px;
-      max-height: 176px;
+      /* 高度不再写死 176:由 grow-sec 剩多少给多少,短窗口自然收缩(flex 要
+         min-height:0 才收得下去),长到装不下就自己滚。 */
+      flex: 1; min-height: 0;
       overflow-y: auto;
       padding: 2px;
       margin-bottom: 8px;
     }
     .move-list:empty { display: none; }
+    .move-empty {
+      flex: 1; margin: 0; padding: 8px 2px 0;
+      font-size: var(--fs-ui); color: var(--muted); line-height: var(--lh-text);
+      opacity: 0.75;
+    }
     .move-list button {
       border: 0;
       background: transparent;
@@ -644,7 +674,9 @@
       flex: 1;
       -webkit-appearance: none; appearance: none; border: 0; background: transparent;
       color: var(--text);
-      font: inherit; font-size: var(--fs-icon); line-height: 1;
+      font: inherit; line-height: 1;
+      /* 图标有内在尺寸,不像空的 ::after 会被 place-items 压塌(v1.50 那个坑) */
+      display: grid; place-items: center;
       padding: 8px 0; border-radius: var(--radius-md);
       cursor: pointer;
       transition: background var(--dur-tap) var(--ease);
