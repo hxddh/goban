@@ -123,6 +123,14 @@
          再宽一点内容也不会更矮,所以就停在这里。窄窗口由 min(…, 100vw-32px) 兜底。 */
       --modal-w: 380px;
       --modal-w-table: 640px;
+      /* v1.53 —— 练习/每日的题面是这个应用里信息密度最高的一块,却一直被挤在
+         338px 里(15 路,每格 22.5)。它跟表格弹层同一档宽,但**还得受窗口高度管**:
+         棋盘是方的,只按宽度给就会在矮窗口里把弹层撑到要滚。
+         --modal-board-chrome 是弹层里除棋盘之外的高度(标题 + 题面行 + 反馈行 +
+         按钮行),实测 181,留 3px 余量写 184。它是个量出来的常数,所以配了闸门:
+         有人往弹层里加内容而不调这个数,闸门会报,而不是让弹层悄悄开始滚。 */
+      --modal-w-board: 640px;
+      --modal-board-chrome: 184px;
       --icon-size: 18px;
       --icon-stroke: 2;
       --font-num: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
@@ -398,14 +406,18 @@
     }
     .vs-right { flex-direction: row; text-align: right; }
     .vs-right .vs-name { justify-content: flex-end; }
-    .vs-mid {
+    /* `.vs-mid` 与 `.muted` 同特异性而 `.muted` 在表里更靠后 —— v1.50 把「vs 标记」
+       写进 --fs-micro 的角色清单,这条声明却一直没赢过:实测「对」是 12px,而同档的
+       .side-h / .badge / .meta-chip 都是 11px。加一层选择器让声明真的生效。 */
+    .vs .vs-mid {
       font-size: var(--fs-micro); letter-spacing: 0.14em; flex-shrink: 0; opacity: 0.55;
     }
     .vs-name {
       font-size: var(--fs-body); font-weight: 600;
       display: flex; align-items: center; gap: 4px;
     }
-    .vs-role { font-size: var(--fs-ui); margin-top: 2px; line-height: 1.3; }
+    /* font-size 由 .muted 给（同值，重复声明只会让「死声明」扫描噪声变大） */
+    .vs-role { margin-top: 2px; line-height: 1.3; }
     /* Four items and three dot separators used to sit here as seven equal flex
        children of one wrapping row. At the sidebar's real width that row does
        not fit on one line, and flex-wrap breaks wherever it must: measured at
@@ -850,15 +862,24 @@
       border-color: color-mix(in srgb, var(--accent) 60%, var(--card-border));
     }
 
-    .practice-modal { width: min(440px, calc(100vw - 32px)); }
+    /* v1.24 起这里写的是 `width: min(440px, …)` —— 它**从来没生效过**:`.modal`
+       在表里更靠后、同特异性(都是单个类),源序赢,于是弹层实际一直是 380,
+       整整 28 个版本。现在改成设 token,由 `.modal` 那条统一的 width 去用它。 */
+    #practice-modal .modal { --modal-w: var(--modal-w-board); }
     .practice-head {
       display: flex; justify-content: space-between; align-items: baseline;
       gap: 8px; margin: 2px 0 8px; flex-wrap: wrap;
     }
     .practice-task { font-size: var(--fs-body); font-weight: 600; color: var(--fg); }
-    .practice-progress { font-size: var(--fs-ui); white-space: nowrap; }
+    .practice-progress { white-space: nowrap; }
     .practice-board {
-      width: 100%; aspect-ratio: 1 / 1; display: block;
+      /* 两个预算取小,始终是方的:宽度给满弹层,高度不超过「视口减去弹层其余部分」。
+         130 道题实测包围盒边长 最小 5 / 中位 9 / 最大 13,面积占比中位只有 32% ——
+         裁到题目那一块能省地方,但五子棋里「这条线撞不撞得到边」是战术信息,
+         裁掉就改了题。所以不裁,改成让盘面随窗口长大。 */
+      width: min(100%, calc(100vh - 32px - var(--modal-board-chrome)));
+      margin-inline: auto;
+      aspect-ratio: 1 / 1; display: block;
       border: 1px solid var(--card-border);
       border-radius: var(--radius-md);
       /* 画布自己画满整块盘面(v1.39 起与主棋盘同一个画家),这条底色只在
@@ -869,7 +890,7 @@
       box-shadow: 0 4px 14px rgba(0,0,0,.18);
     }
     .practice-foot { margin: 8px 0 4px; min-height: 34px; }
-    .practice-source { font-size: var(--fs-ui); display: block; margin-bottom: 2px; }
+    .practice-source { display: block; margin-bottom: 2px; }
     .practice-feedback { font-size: var(--fs-body); font-weight: 600; line-height: 1.4; }
     .practice-feedback.good { color: #2f9e5e; }
     .practice-feedback.bad { color: var(--win); color: color-mix(in srgb, var(--win) 85%, var(--fg)); }
