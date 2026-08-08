@@ -2954,6 +2954,139 @@ async function enableSwap2Pvp(page) {
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
+// ---- Test AQ: 写了却永远赢不了的声明 ----
+// v1.53 起。样式表里可以写一条规则，它命中了元素、语法也没错，却因为**后面有一条
+// 同特异性的规则也命中同一批元素、也声明同一个属性**而永远不生效 —— 源序赢。
+// 这类声明看起来像意图，实际是死的，而且它不报错、不留痕。逮到过两条：
+//   `.practice-modal { width: min(440px, …) }` —— 写于 v1.24，被后面的 `.modal` 盖住，
+//      练习弹层实际一直是 380 而不是 440，空转 28 个版本；
+//   `.vs-mid { font-size: var(--fs-micro) }` —— v1.50 把「vs 标记」写进 micro 档，
+//      却被后面的 `.muted` 盖住，「对」一直是 12px，是那一档四个成员里唯一没到位的。
+// 只在**值不同**时才报：同值的重复声明是冗余，不是缺陷。
+{
+  const bad = [];
+  const page = await newPage();
+  await openPanel(page);
+  const r = await page.evaluate(() => {
+    const rules = [];
+    for (const sh of document.styleSheets) {
+      try { for (const rr of sh.cssRules) if (rr.type === 1) rules.push(rr); } catch (_) {}
+    }
+    // 粗略特异性。只用来判「打平」——打平才轮到源序，那正是这条闸门要守的情形。
+    const spec = (sel) => {
+      const a = (sel.match(/#[\w-]+/g) || []).length;
+      const b = (sel.match(/\.[\w-]+|\[[^\]]+\]|:(?!:)(?!where|is)[\w-]+/g) || []).length;
+      const c = (sel.replace(/::?[\w-]+(\([^)]*\))?/g, "").match(/(^|[\s>+~])[a-z]+/gi) || []).length;
+      return a * 10000 + b * 100 + c;
+    };
+    const stateful = /:hover|:focus|:active|:disabled|::/;
+    const els = [...document.querySelectorAll("*")];
+    const dead = [];
+    for (let i = 0; i < rules.length; i++) {
+      const ri = rules[i], si = ri.selectorText || "";
+      if (!si || stateful.test(si)) continue;
+      let matched = null;
+      try { matched = els.filter((e) => e.matches(si)); } catch (_) { continue; }
+      if (!matched.length) continue;
+      for (const prop of ri.style) {
+        if (ri.style.getPropertyPriority(prop)) continue;   // !important 另有规则
+        if (prop.startsWith("--")) continue;
+        for (let j = i + 1; j < rules.length; j++) {
+          const rj = rules[j], sj = rj.selectorText || "";
+          if (!sj || stateful.test(sj)) continue;
+          if (spec(sj) !== spec(si)) continue;
+          if (![...rj.style].includes(prop)) continue;
+          let m2 = null;
+          try { m2 = matched.filter((e) => e.matches(sj)); } catch (_) { continue; }
+          if (m2.length !== matched.length) continue;        // 必须整批都被盖住
+          const va = ri.style.getPropertyValue(prop).trim();
+          const vb = rj.style.getPropertyValue(prop).trim();
+          if (va !== vb) dead.push({ 先: si, 属性: prop, 写的: va, 被: sj, 实际: vb, 元素数: matched.length });
+          break;
+        }
+      }
+    }
+    return { 规则数: rules.length, dead };
+  });
+  // 覆盖：扫不到规则的闸门永远是绿的
+  if (r.规则数 < 150) bad.push("只扫到 " + r.规则数 + " 条规则 —— 覆盖不足，这条闸门测不到东西");
+  for (const d of r.dead) {
+    bad.push("`" + d.先 + "` 的 " + d.属性 + ": " + d.写的 + " 永远赢不了 —— 后面的 `" +
+      d.被 + "` 同特异性、同批元素，实际是 " + d.实际);
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AQ 样式表里没有「写了却永远赢不了」的声明",
+    bad.length === 0, JSON.stringify({ bad, 规则数: r.规则数 }));
+}
+
+// ---- Test AR: 练习题面随窗口长大，且一处不滚 ----
+// 题面是这个应用里信息密度最高的一块，却一直被挤在 338px 里（15 路，每格 22.5）。
+// 130 道题实测：包围盒边长 最小 5 / 中位 9 / 最大 13，占棋盘面积 中位只有 32% ——
+// 裁到题目那一块能省地方，但五子棋里「这条线撞不撞得到边」是战术信息，裁掉就改了题。
+// 所以不裁，改成让盘面吃掉两个预算里小的那个（宽度给满弹层，高度不超过视口余量）。
+//
+// ② 是**相对判据**：窗口从矮拉到高，棋盘必须跟着变大 —— 写死一个尺寸会立刻被抓，
+//    而任何具体数字都会随字号/文案变化而过期。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  const sizes = [[1024, 600], [1280, 720], [1280, 749], [1280, 900]];
+  const boards = [];
+  for (const [vw, vh] of sizes) {
+    await page.setViewportSize({ width: vw, height: vh });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => {
+      const a = document.getElementById("app");
+      if (!a.classList.contains("panel-open")) document.getElementById("toggle-panel").click();
+    });
+    await page.waitForTimeout(200);
+    await page.evaluate(() => document.getElementById("open-practice").click());
+    await page.waitForTimeout(600);
+    const r = await page.evaluate(() => {
+      const m = document.querySelector("#practice-modal .modal");
+      const cv = m.querySelector("canvas");
+      const cr = cv.getBoundingClientRect();
+      return {
+        board: +cr.width.toFixed(0), boardH: +cr.height.toFixed(0),
+        need: m.scrollHeight, avail: m.clientHeight,
+        // 弹层里除棋盘之外的高度 —— 它必须留在声明的预算之内
+        chrome: +(m.scrollHeight - cr.height).toFixed(0),
+        budget: parseFloat(getComputedStyle(document.documentElement)
+          .getPropertyValue("--modal-board-chrome")) || 0,
+      };
+    });
+    seen[vw + "×" + vh] = r;
+    boards.push(r.board);
+    if (!r.board) bad.push(vw + "×" + vh + ": 量不到练习棋盘 —— 覆盖不足");
+    if (Math.abs(r.board - r.boardH) > 1) bad.push(vw + "×" + vh + ": 棋盘不是方的 " + r.board + "×" + r.boardH);
+    if (r.need > r.avail + 1) bad.push(vw + "×" + vh + ": 练习弹层要滚（need " + r.need + " > avail " + r.avail + "）");
+    // 常数守卫：有人往弹层里加内容而不调预算，这里报，而不是让弹层悄悄开始滚
+    if (!r.budget) bad.push("--modal-board-chrome 读不到 —— 预算没有声明处");
+    else if (r.chrome > r.budget) {
+      bad.push(vw + "×" + vh + ": 弹层里除棋盘之外占了 " + r.chrome +
+        "px，超过声明的预算 " + r.budget + " —— 加了内容就得同步调这个数");
+    }
+    await page.evaluate(() => document.getElementById("practice-close").click());
+    await page.waitForTimeout(250);
+  }
+  // ② 相对判据：窗口越高，棋盘越大（允许相等——宽度那一侧可能先封顶）
+  for (let i = 1; i < boards.length; i++) {
+    if (boards[i] < boards[i - 1]) {
+      bad.push("窗口变高，棋盘反而变小了：" + JSON.stringify(boards));
+    }
+  }
+  if (boards[boards.length - 1] <= boards[0]) {
+    bad.push("窗口从 600 拉到 900，棋盘一点没长（" + boards[0] + " → " +
+      boards[boards.length - 1] + "）—— 尺寸是写死的");
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AR 练习题面随窗口长大，四档窗口一处不滚",
+    bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");
