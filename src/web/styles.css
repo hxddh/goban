@@ -115,6 +115,14 @@
       /* v1.51 —— 图标尺寸也是 token。七个图标此前是标点符号,画出来的墨迹
          7 / 7 / 12.33 / 7 / 7.17 / 11.67 / 12,大小由字体决定、我们说了不算。
          现在统一 24 单位 viewBox 画进 18px 的盒子,描边 2 单位(渲染 1.5px)。 */
+      /* v1.52 —— 弹层宽度此前是一个写死的 380 管五个弹层:统计 380×132(空得慌)、
+         说明 380×834(挤到在 749/720/600 三档窗口下都要滚)。分成两档,按内容:
+         一列内容用 --modal-w,两列表格用 --modal-w-table。
+         640 不是拍的:那是这张快捷键表**不再折行**的宽度(逐档实测 520→626/709、
+         560→626/688、600→626/647、640→626/626,中英到 640 都停在 626)。
+         再宽一点内容也不会更矮,所以就停在这里。窄窗口由 min(…, 100vw-32px) 兜底。 */
+      --modal-w: 380px;
+      --modal-w-table: 640px;
       --icon-size: 18px;
       --icon-stroke: 2;
       --font-num: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
@@ -981,7 +989,11 @@
       padding: 16px 20px 20px;
       border-top: 1px solid var(--card-border);
       display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center;
-      gap: 4px 8px;
+      /* v1.52 —— 英文那五个词要 259.4px(盒宽合计 227.4 + 四个间隙 32),容器只有
+         243:差 16.4,于是 Stats 掉到第二行、底栏从 69.2 长到 105.4。
+         横向内边距 4→2(省 20)、间隙 8→6(省 8),共省 28,余 11.6。
+         纵向 8px 不动 —— 那是 v1.32 为 24px 最小点击高度定的。 */
+      gap: 4px 6px;
     }
     .side-scroll {
       flex: 1;
@@ -1018,7 +1030,7 @@
     .side-scroll[data-below="1"] { --fade-bot: 28px; }
     /* 8px vertical keeps these three at the 24px minimum hit height; the 4px
        the spacing grid rounded them to left them at 23. */
-    .side-foot .text-link { color: var(--muted); font-size: var(--fs-ui); padding: 8px 4px; }
+    .side-foot .text-link { color: var(--muted); font-size: var(--fs-ui); padding: 8px 2px; }
     .side-foot .text-link:hover { color: var(--text); }
 
     .stone {
@@ -1098,7 +1110,7 @@
        paint over the confirm buttons, so keep confirm above every other modal. */
     #confirm-modal { z-index: 60; }
     .modal {
-      width: min(380px, calc(100vw - 32px));
+      width: min(var(--modal-w), calc(100vw - 32px));
       /* A dialog had no ceiling and no scroll: 说明 renders 732px tall, so in
          a 720px or 600px window it was simply cut off with no way to reach the
          rest — 600px was already clipped before v1.36 widened the leading.
@@ -1123,18 +1135,25 @@
        12px;`.modal td { padding: 8px 0 }` 又盖掉了 .stats-table 自己的 4px 8px ——
        两条特异度相同(0,1,1),写在后面的赢,于是表头行 26px、数据行 37.8px,数字
        表头比它标注的数字左 8px。按来源收窄,而不是给统计表加权重。 */
+    /* 说明弹层装的是两列表格,走宽的那一档 */
+    #help-modal .modal { --modal-w: var(--modal-w-table); }
     .keys-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
     .keys-table td { padding: 8px 0; border-bottom: 1px solid var(--card-border); line-height: var(--lh-text); }
     .keys-table td:first-child {
-      /* Stays a flat 42%. Measured: the keys use only 7–96px of the 142px, and
-         five description cells wrap — but every alternative tried was worse.
-         width:1% shrank the column to 45px and made 9 of 13 KEYS wrap
-         (`Home / End` split across lines) and the dialog 150px taller;
-         white-space:nowrap let the longest key (⌘⌃F · 绿键 · F) alone push the
-         column to 175px. Trading a description wrap for a key wrap is a
-         downgrade, so the waste stays. */
-      color: var(--accent-text); width: 42%;
+      /* 上面那条注释记着:width:1% 单用会让键自己折行,white-space:nowrap 单用会让
+         最长的那个键把整列撑到 175px —— 两条都试过,都更糟,于是 42% 的浪费留着了。
+         漏掉的是**两个一起**:width:1% 给出「收到内容宽」的意图,nowrap 保证收的是
+         整行文字而不是折出来的窄块。实测(1280 宽窗口,英文):
+             现状 42%           键列 142  弹层高 834
+             只加 width:1%      —— 键折行
+             只加 nowrap        键列 159  弹层高 896  ← 更糟,正是那条注释记的
+             两个一起 + 左列不再塞句子   键列 72   弹层高 751
+         前提是左列**只放键**:`⌘⌃F · green button · F` 这类句子留在左列时,nowrap
+         会照着它定宽(159),两个一起也救不回来 —— 所以 index.html 那三行的句子
+         同时挪进了说明列。缺一不可。 */
+      color: var(--accent-text); width: 1%; white-space: nowrap;
       font-family: var(--font-num); font-size: var(--fs-ui);
+      padding-right: 16px;
     }
     /* version sits left, button stays right — flex rather than text-align so
        the two never collide when the English label is longer */
