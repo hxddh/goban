@@ -2852,6 +2852,108 @@ async function enableSwap2Pvp(page) {
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
+// ---- Test AP: 写死的宽度要对得上里面装的东西 ----
+// 两处，同一种病，必须写在一条闸门里：
+//
+// 一、弹层宽度此前是一个写死的 380 管五个弹层。统计弹层 380×132（空得慌），说明弹层
+//     380×834（英文），在 1280×749 / 720 / 1024×600 三档窗口下**中英都要滚** —— 一张
+//     13 行的快捷键表，在 1280px 宽的窗口里要上下滚，而它只用了其中 380px。
+// 二、快捷键表的键列写着 `width: 42%`。样式表里那条注释记着两次失败：`width:1%` 单用
+//     会让键自己折行，`nowrap` 单用会让最长的那个键把列撑到 175px —— 于是「浪费留着」。
+//     漏掉的是**两个一起**，而且前提是左列只放键（三行的句子挪进了说明列）。
+//     实测（1280 宽，英文）：42% → 键列 142、弹层高 834、**两个键还折了行**；
+//     两个一起 + 左列不塞句子 → 键列 88、弹层高 626、键折 0。
+//
+// ② 的判据是**相对的**，不写死数字：把弹层强行加宽到 1000px 再量一次，如果它在当前宽度
+//    下要滚、加宽之后就不滚了，那就说明「要滚」是宽度造成的，不是内容真的太多。
+//    初版这里写的是「加宽后不许变矮」—— 太严：`Record` 那一行的说明本来就长，任何带
+//    散文的弹层都会在某个宽度上还剩一行折行，那不是缺陷。已收窄成上面这条。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.waitForTimeout(200);
+  await openPanel(page);
+
+  const readHelp = () =>
+    page.evaluate(() => {
+      const m = document.querySelector("#help-modal .modal");
+      const rows = [...m.querySelectorAll(".keys-table tr")];
+      const lines = (td) => {
+        const lh = parseFloat(getComputedStyle(td).lineHeight);
+        const rg = document.createRange(); rg.selectNodeContents(td);
+        return Math.round(rg.getBoundingClientRect().height / lh);
+      };
+      return {
+        w: +m.getBoundingClientRect().width.toFixed(0),
+        need: m.scrollHeight, avail: m.clientHeight,
+        col0: +(rows[0] ? rows[0].children[0].getBoundingClientRect().width : 0).toFixed(0),
+        rows: rows.length,
+        keyWrap: rows.filter((r) => lines(r.children[0]) > 1).map((r) => r.children[0].textContent.trim()),
+        keyClip: rows.filter((r) => r.children[0].scrollWidth > r.children[0].clientWidth + 1).length,
+      };
+    });
+
+  for (const lang of ["zh", "en"]) {
+    if (lang === "en") await setLang(page, "en");
+
+    // ---- 底栏：中英都得是一行，且每个入口点得着 ----
+    const foot = await page.evaluate(() => {
+      const f = document.querySelector(".side-foot");
+      const bs = [...f.querySelectorAll("button")].filter((x) => x.getBoundingClientRect().height > 0);
+      return {
+        h: +f.getBoundingClientRect().height.toFixed(1),
+        n: bs.length,
+        rows: [...new Set(bs.map((x) => Math.round(x.getBoundingClientRect().top)))].length,
+        minW: +Math.min(...bs.map((x) => x.getBoundingClientRect().width)).toFixed(1),
+        minH: +Math.min(...bs.map((x) => x.getBoundingClientRect().height)).toFixed(1),
+      };
+    });
+    seen[lang + "/底栏"] = foot;
+    if (foot.n < 5) bad.push(lang + ": 底栏只量到 " + foot.n + " 个入口 —— 覆盖不足");
+    if (foot.rows !== 1) bad.push(lang + ": 底栏折成 " + foot.rows + " 行（高 " + foot.h + "）—— 五个入口塞不下");
+    // 24px 是 v1.32 定的最小命中尺寸，省宽度不许省到这条线以下
+    if (foot.minW < 24) bad.push(lang + ": 底栏最窄入口只有 " + foot.minW + "px 宽，低于 24 的最小命中尺寸");
+    if (foot.minH < 24) bad.push(lang + ": 底栏最矮入口只有 " + foot.minH + "px 高");
+
+    // ---- 说明弹层 ----
+    await page.evaluate(() => document.getElementById("help-btn").click());
+    await page.waitForTimeout(300);
+    const at = await readHelp();
+    seen[lang + "/说明弹层"] = at;
+    if (at.rows < 13) bad.push(lang + ": 快捷键表只量到 " + at.rows + " 行 —— 覆盖不足");
+    if (at.need > at.avail + 1) {
+      bad.push(lang + ": 1280×720 下说明弹层要滚（need " + at.need + " > avail " + at.avail + "）");
+    }
+    if (at.keyWrap.length) bad.push(lang + ": 键自己折了行 " + JSON.stringify(at.keyWrap) + " —— 键列该收到内容宽，不是把键挤断");
+    if (at.keyClip) bad.push(lang + ": 有 " + at.keyClip + " 个键被列宽裁掉了");
+
+    // ②「再宽也不会更矮」：宽度已经够了，才谈得上不是在挤内容
+    await page.addStyleTag({ content: "#help-modal .modal { width: 1000px !important; }" });
+    await page.waitForTimeout(250);
+    const wide = await readHelp();
+    seen[lang + "/强行 1000 宽"] = { need: wide.need };
+    const scrollsNow = at.need > at.avail + 1;
+    const scrollsWide = wide.need > wide.avail + 1;
+    if (scrollsNow && !scrollsWide) {
+      bad.push(lang + ": 当前宽度 " + at.w + " 下要滚（" + at.need + " > " + at.avail +
+        "），加宽到 1000px 就不滚了（" + wide.need + "）—— 是宽度在挤，不是内容太多");
+    }
+    await page.evaluate(() => {
+      for (const st of document.querySelectorAll("style")) {
+        if (/#help-modal .modal \{ width: 1000px/.test(st.textContent)) st.remove();
+      }
+    });
+    await page.evaluate(() => document.getElementById("help-close").click());
+    await page.waitForTimeout(250);
+  }
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AP 弹层宽度与底栏宽度都对得上内容（1280×720，中英）",
+    bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");
