@@ -38,6 +38,7 @@
       win: "rgba(160, 70, 50, 0.55)",
       hint: "rgba(40, 110, 180, 0.75)",
       analysis: "rgba(210, 150, 30, 0.9)",
+      forbid: "rgba(122, 38, 24, 0.85)",
     },
     night: {
       /* Matches the CSS --win token; before v1.36 the board used its own
@@ -52,6 +53,7 @@
       win: "rgba(125, 206, 160, 0.55)",
       hint: "rgba(120, 220, 180, 0.8)",
       analysis: "rgba(240, 190, 90, 0.95)",
+      forbid: "rgba(232, 119, 106, 0.85)",
     },
     day: {
       /* Matches the CSS --win token; before v1.36 the board used its own
@@ -66,6 +68,7 @@
       win: "rgba(140, 90, 50, 0.5)",
       hint: "rgba(50, 100, 170, 0.75)",
       analysis: "rgba(190, 130, 20, 0.9)",
+      forbid: "rgba(160, 58, 36, 0.85)",
     },
     notebook: {
       /* Matches the CSS --win token; before v1.36 the board used its own
@@ -86,6 +89,7 @@
       win: "rgba(120, 60, 55, 0.5)",
       hint: "rgba(30, 100, 160, 0.85)",
       analysis: "rgba(180, 120, 20, 0.9)",
+      forbid: "rgba(192, 57, 43, 0.85)",
     },
   };
 
@@ -648,6 +652,33 @@
 
     ctx.clearRect(0, 0, w, w);
     ctx.drawImage(baseCanvas, 0, 0);
+
+    // 禁手点(连珠,黑到手时)。落子前就画出来,规则才是能看见的东西,而不是走
+    // 下去才弹出来的一句话。
+    //
+    // 形状是**空心方框**,不是叉 —— 叉这个形状已经有主了:练习本主题的星位画的
+    // 正是同尺寸的叉(见 paintPosition 那一支)。截图里两者并排,只有颜色不同;
+    // 而星位就在 (3,3)…(11,11) 九个点上,禁手点完全可能正落在其中一个上,那时
+    // 会是两个叉叠在一起。一个形状只该有一个意思,所以换形状,不是换颜色。
+    // 方框在四套主题里都没人用:圆点是星位、细圆环是最后一手、虚线圆是提示、
+    // 虚线菱形是分析、三角与圆是练习本的棋子。描边而不是填充,是因为它是注记
+    // 不是棋子 —— 与提示、分析同一个语域。
+    const forbidden = m.forbidden;
+    if (forbidden && forbidden.length) {
+      ctx.save();
+      ctx.strokeStyle = th.forbid || "rgba(150,58,44,0.5)";
+      const lw = Math.max(1, step * 0.05);
+      ctx.lineWidth = lw;
+      ctx.lineJoin = "miter";
+      const s2 = Math.max(2.5, step * 0.15);
+      for (const p of forbidden) {
+        if (board[p.r][p.c]) continue;
+        const x = crisp(pad + p.c * step, lw);
+        const y = crisp(pad + p.r * step, lw);
+        ctx.strokeRect(x - s2, y - s2, s2 * 2, s2 * 2);
+      }
+      ctx.restore();
+    }
 
     // Hover ghost (next stone preview)
     const hover = m.hover;

@@ -135,11 +135,14 @@
                 <button type="button" data-human="w" data-i18n="side.white">白</button>
               </div>
             </div>
-            <div class="setting-row" id="opening-field">
-              <span class="setting-k" data-i18n="set.opening">开局</span>
-              <div class="pill" id="opening-seg" role="group" aria-label="开局规则" data-i18n-aria="aria.opening">
-                <button type="button" data-opening="standard" class="active" title="标准开局" data-i18n="opening.standard" data-i18n-title="opening.standard.title">标准</button>
-                <button type="button" data-opening="swap2" title="平衡开局：先手放 3 子，对手选边或加两手" data-i18n-title="opening.swap2.title">swap2</button>
+            <!-- swap2 与禁手是同一个问题的两个答案:黑先手占优,拿什么补。
+                 所以它们是一个三选一,不是两行 —— 侧栏也因此没有多长出一行。 -->
+            <div class="setting-row" id="rule-field">
+              <span class="setting-k" data-i18n="set.rule">规则</span>
+              <div class="pill" id="rule-seg" role="group" aria-label="对局规则" data-i18n-aria="aria.rule">
+                <button type="button" data-rule="free" class="active" title="自由式：无禁手，标准开局" data-i18n="rule.free" data-i18n-title="rule.free.title">自由</button>
+                <button type="button" data-rule="swap2" title="平衡开局：先手放 3 子，对手选边或加两手" data-i18n-title="rule.swap2.title">swap2</button>
+                <button type="button" data-rule="renju" title="连珠：黑不得长连、双四、双三，且只有恰好五连算胜（双人对局）" data-i18n="rule.renju" data-i18n-title="rule.renju.title">禁手</button>
               </div>
             </div>
           </div>

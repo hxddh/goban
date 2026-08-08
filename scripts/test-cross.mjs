@@ -247,7 +247,7 @@ async function enableSwap2Pvp(page) {
   await page.click('button[data-mode="pvp"]');
   await page.waitForTimeout(100);
   await dismissConfirm(page);
-  await page.click('button[data-opening="swap2"]');
+  await page.click('button[data-rule="swap2"]');
   await page.waitForTimeout(120);
   await dismissConfirm(page);
 }
@@ -404,7 +404,7 @@ async function enableSwap2Pvp(page) {
   await page.click("#sgf-slots"); await page.waitForTimeout(120);
   await page.click("#slot-save-current"); await page.waitForTimeout(120);
   await page.click("#slots-close"); await page.waitForTimeout(80);
-  await page.click('button[data-opening="swap2"]');
+  await page.click('button[data-rule="swap2"]');
   await page.waitForTimeout(120);
   await dismissConfirm(page);
   await click(10, 10); await page.waitForTimeout(120);
@@ -472,7 +472,7 @@ async function enableSwap2Pvp(page) {
   const click = clicker(page);
   await openPanel(page);
   await page.waitForTimeout(80);
-  await page.click('button[data-opening="swap2"]');
+  await page.click('button[data-rule="swap2"]');
   await page.waitForTimeout(120);
   await dismissConfirm(page);
   await click(7, 7); await page.waitForTimeout(80);
@@ -3084,6 +3084,164 @@ async function enableSwap2Pvp(page) {
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
   report("AR 练习题面随窗口长大，四档窗口一处不滚",
+    bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
+// AS 规则档:自由 / swap2 / 禁手。
+// 这一格是三选一而不是两行,因为 swap2 与禁手是同一个问题的两个答案(黑先手
+// 占优,拿什么补) —— 也因此侧栏一行没多长。「设置区从不用滚变成要滚」是被
+// 明确否决的退化,所以 ⑤ 直接量它:先前(v1.53)量过 960×620 中英两语都不滚,
+// 拆成两行时中文溢出 7px、英文溢出 44px。那正是这一格必须是三选一的原因。
+//
+// 六半写在同一条闸门里,因为它们分开失效,反证都是两个方向的:
+//   ① 只把模式带过去、不把规则带回来 → ① 报,其余全绿
+//   ② 拦落子的判据抄成「一律不让黑落」→ ② 的反证(自由档同一点落得下)报
+//   ③ 标点画在了看不见的地方        → ③ 报,而对照盘那一半仍绿
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await openPanel(page);
+  const click = clicker(page);
+  const pick = async (rule) => {
+    await page.click('#rule-seg button[data-rule="' + rule + '"]');
+    await page.waitForTimeout(200);
+  };
+  const st = () => page.evaluate(() => ({
+    rule: (document.querySelector("#rule-seg button.active") || {}).dataset?.rule || null,
+    mode: (document.querySelector("#mode-seg button.active") || {}).dataset?.mode || null,
+  }));
+  const stoneCount = () => page.evaluate(() =>
+    Number((document.getElementById("replay-pos").textContent.split("/")[1] || "0").trim()));
+
+  // ① 规则与模式的联动,两个方向
+  await pick("renju");
+  seen.afterRenju = await st();
+  if (seen.afterRenju.rule !== "renju") bad.push("点了禁手,规则没跟上:" + seen.afterRenju.rule);
+  if (seen.afterRenju.mode !== "pvp") bad.push("禁手档没有切到双人:" + seen.afterRenju.mode);
+  await page.click('#mode-seg button[data-mode="ai"]');
+  await page.waitForTimeout(200);
+  seen.afterAi = await st();
+  if (seen.afterAi.mode !== "ai") bad.push("点了人机,模式没跟上:" + seen.afterAi.mode);
+  if (seen.afterAi.rule !== "free") bad.push("切回人机时规则没带回自由:" + seen.afterAi.rule);
+  // 反证:swap2 也是这一格里的一档,而且不该把模式带走
+  await pick("swap2");
+  seen.afterSwap2 = await st();
+  if (seen.afterSwap2.rule !== "swap2") bad.push("swap2 不在这一格里:" + seen.afterSwap2.rule);
+  if (seen.afterSwap2.mode !== "ai") bad.push("反证:swap2 不该把模式改掉,却改成了 " + seen.afterSwap2.mode);
+
+  // ② 禁手点落不下去 —— 构造 (8,8) 的双三
+  const build = async () => {
+    for (const [r, c] of [[8, 6], [0, 0], [8, 7], [0, 2], [6, 8], [0, 4], [7, 8], [0, 6]]) {
+      await click(r, c);
+      await page.waitForTimeout(60);
+    }
+  };
+  await pick("renju");
+  await build();
+  seen.built = await stoneCount();
+  if (seen.built !== 8) bad.push("构造局面没摆成:落了 " + seen.built + " 子");
+  await click(8, 8);
+  await page.waitForTimeout(200);
+  seen.afterForbidden = await stoneCount();
+  if (seen.afterForbidden !== 8) bad.push("禁手点落下去了(子数 " + seen.built + " → " + seen.afterForbidden + ")");
+  seen.toast = await page.evaluate(() => {
+    const el = document.getElementById("toast");
+    return el ? el.textContent.trim() : null;
+  });
+  if (!seen.toast || !/禁手|Forbidden/.test(seen.toast)) bad.push("拦下来了却没说为什么:toast=" + JSON.stringify(seen.toast));
+
+  // ③ 禁手点画在盘上。判据是**同一个交叉点、有标记 vs 没标记** —— 不是拿两个
+  //    不同的交叉点比:木纹与渐变让不同位置本来就不同亮度(实测干净盘上 (8,8)
+  //    与 (5,5) 差 30,而标记本身只带来 70)。取样窗口也跟着格距走,不写死:
+  //    标记是空心方框,墨迹在 ±0.15·step 上,窗口比它窄就只取到框内的空白 ——
+  //    这一版从叉换成方框时,写死 7px 的窗口当场失灵,那是探针的毛病不是标记的。
+  const px = (pg) => (r, c) => pg.evaluate(({ r, c }) => {
+    const cv = document.getElementById("board");
+    const g = window.GobanDraw.pitchFor(cv.width);
+    const h = Math.max(6, Math.round(g.step * 0.22));
+    const d = cv.getContext("2d").getImageData(
+      Math.round(g.pad + c * g.step) - h, Math.round(g.pad + r * g.step) - h,
+      h * 2 + 1, h * 2 + 1).data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+    return Math.round(sum / (d.length / 4));
+  }, { r, c });
+  const inkA = px(page);
+  seen.markOn = await inkA(8, 8);
+  seen.ctrlOn = await inkA(5, 5);   // 同盘上一个没有标记的空交叉点
+  // 同样是禁手档,但局面里没有禁手点 —— (8,8) 与 (5,5) 都空着、都没有标记
+  const page2 = await newPage();
+  await openPanel(page2);
+  const click2 = clicker(page2);
+  await page2.click('#rule-seg button[data-rule="renju"]');
+  await page2.waitForTimeout(200);
+  await click2(8, 6); await page2.waitForTimeout(80);
+  await click2(0, 0); await page2.waitForTimeout(250);
+  const inkB = px(page2);
+  seen.markOff = await inkB(8, 8);
+  seen.ctrlOff = await inkB(5, 5);
+  if (Math.abs(seen.markOn - seen.markOff) < 8) {
+    bad.push("禁手点没画出来:(8,8) 有标记 " + seen.markOn + " · 无标记 " + seen.markOff);
+  }
+  // 反证:一个**没有**标记的交叉点在两盘上必须一模一样 —— 否则上面那点差异
+  // 可能只是两个局面的背景差,而不是标记
+  if (Math.abs(seen.ctrlOn - seen.ctrlOff) >= 8) {
+    bad.push("反证:无标记的 (5,5) 两盘也不一样(" + seen.ctrlOn + " vs " + seen.ctrlOff +
+      ")—— ③ 测的不是标记");
+  }
+  if (page2.__errors.length) bad.push("errs2 " + page2.__errors.join("|"));
+  await page2.close();
+
+  // ④ 反证:同一个点在自由档下落得下去 —— 否则 ② 可能只是「黑一律不许落」
+  const page3 = await newPage();
+  await openPanel(page3);
+  // 双人 —— 默认是人机,那样白的四手会被引擎抢着下,九手根本摆不出来(实测只落 5 子)
+  await page3.click('#mode-seg button[data-mode="pvp"]');
+  await page3.waitForTimeout(200);
+  const click3 = clicker(page3);
+  for (const [r, c] of [[8, 6], [0, 0], [8, 7], [0, 2], [6, 8], [0, 4], [7, 8], [0, 6], [8, 8]]) {
+    await click3(r, c);
+    await page3.waitForTimeout(60);
+  }
+  seen.freeStones = await page3.evaluate(() =>
+    Number((document.getElementById("replay-pos").textContent.split("/")[1] || "0").trim()));
+  if (seen.freeStones !== 9) bad.push("反证:自由档下同一点也没落下去(子数 " + seen.freeStones + ")");
+  // ⑤ SGF 的 RU[]:两档各写各的
+  seen.sgfFree = await page3.evaluate(() => window.GobanSgfIo.buildSgf().match(/RU\[[^\]]*\]/)[0]);
+  if (seen.sgfFree !== "RU[Gomoku]") bad.push("自由档 SGF 写的是 " + seen.sgfFree);
+  if (page3.__errors.length) bad.push("errs3 " + page3.__errors.join("|"));
+  await page3.close();
+  seen.sgfRenju = await page.evaluate(() => window.GobanSgfIo.buildSgf().match(/RU\[[^\]]*\]/)[0]);
+  if (seen.sgfRenju !== "RU[Renju]") bad.push("禁手档 SGF 写的是 " + seen.sgfRenju);
+
+  // ⑥ 否决项:960×620 中英两语,设置区都不许开始滚。
+  //    v1.53 实测两语都是 0px;拆成「规则」+「开局」两行时中文 7px、英文 44px。
+  for (const lang of ["zh", "en"]) {
+    const p = await newPage();
+    await p.setViewportSize({ width: 960, height: 620 });
+    await openPanel(p);
+    if (lang === "en") await setLang(p, "en");
+    await p.waitForTimeout(200);
+    const r = await p.evaluate(() => {
+      const sc = document.getElementById("side-scroll");
+      const rows = [...document.querySelectorAll("#side .setting-row")]
+        .filter((x) => x.getBoundingClientRect().height > 0).length;
+      const seg = [...document.querySelectorAll("#rule-seg button")].map((b) => ({
+        clipped: b.scrollWidth > b.clientWidth + 1,
+        text: b.textContent.trim(),
+      }));
+      return { overflow: sc ? sc.scrollHeight - sc.clientHeight : -1, rows, seg };
+    });
+    seen["fit_" + lang] = r;
+    if (r.overflow > 1) bad.push(lang + " 960×620 设置区开始滚了(溢出 " + r.overflow + "px)");
+    if (r.seg.length !== 3) bad.push(lang + " 规则这一格不是三选一(" + r.seg.length + " 个)");
+    for (const b of r.seg) if (b.clipped) bad.push(lang + " 规则档「" + b.text + "」被截断了");
+  }
+
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AS 规则三选一:联动、拦子、标点、RU[]，且侧栏一行没多长",
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 

@@ -682,6 +682,196 @@ const Practice = ctx.GobanPractice;
   assert(outcome.result === "b" && outcome.winLine, "resultFromBoard finds mid-win");
 }
 
+// ---- 连珠禁手 ------------------------------------------------------------
+// 判定进的是 core.js —— 引擎(ai.js / ai2.js)也从这里加载,所以这条闸门先钉住
+// 一件事:findWin 的行为一个字没变。引擎的强度全建立在它上面,而 v1.53 之前
+// 那四条确定性断言(b/23 · b/21 · w/32 · deep 4 shallow 2)就是拿它当地基的。
+//
+// 反证是两个方向的,这是 v1.49 立下的规矩:
+//   「黑六连不算胜」要配「自由式下算胜」和「白六连在禁手下照样算胜」,
+//   「这些点是禁手」要配「这些点不是禁手」。
+// 少哪一半,闸门都会在把判定写死成常量的实现下照样绿。
+{
+  const mk = (cells) => {
+    const b = Core.emptyBoard();
+    for (const [col, list] of Object.entries(cells)) for (const [r, c] of list) b[r][c] = col;
+    return b;
+  };
+
+  // ① findWin 没变:拿旧实现逐点比对随机盘面
+  function oldFindWin(board, r, c, color) {
+    const S = 15;
+    for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+      const a = Core.countDir(board, r, c, dr, dc, color);
+      const b2 = Core.countDir(board, r, c, -dr, -dc, color);
+      if (1 + a + b2 >= 5) {
+        const line = [{ r, c }];
+        let rr = r + dr, cc = c + dc;
+        while (rr >= 0 && rr < S && cc >= 0 && cc < S && board[rr][cc] === color) { line.push({ r: rr, c: cc }); rr += dr; cc += dc; }
+        rr = r - dr; cc = c - dc;
+        while (rr >= 0 && rr < S && cc >= 0 && cc < S && board[rr][cc] === color) { line.push({ r: rr, c: cc }); rr -= dr; cc -= dc; }
+        return line;
+      }
+    }
+    return null;
+  }
+  let seed = 12345 >>> 0;
+  const rng = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  let compared = 0, drifted = 0;
+  for (let g = 0; g < 200; g++) {
+    const b = Core.emptyBoard();
+    for (let k = 0; k < 60; k++) {
+      const r = Math.floor(rng() * 15), c = Math.floor(rng() * 15);
+      if (b[r][c]) continue;
+      b[r][c] = k % 2 ? "w" : "b";
+      for (const col of ["b", "w"]) {
+        compared++;
+        if (JSON.stringify(oldFindWin(b, r, c, col)) !== JSON.stringify(Core.findWin(b, r, c, col))) drifted++;
+      }
+    }
+  }
+  assert(compared > 10000, "findWin 比对样本够大(" + compared + " 次)");
+  assert(drifted === 0, "findWin 的行为与 v1.53 逐点一致(" + compared + " 次比对,0 处不同)");
+  // 反证:比对确实分得出不同的实现
+  assert(JSON.stringify(oldFindWin(mk({ b: [[7, 3], [7, 4], [7, 5], [7, 6]] }), 7, 7, "b")) !==
+    JSON.stringify(Core.findWinRule(mk({ b: [[7, 3], [7, 4], [7, 5], [7, 6], [7, 8]] }), 7, 7, "b", true)),
+    "反证:比对不是恒等式(六连处两版给出不同结果)");
+
+  // ② 禁手判定 —— 该禁的
+  const forb = [
+    ["长连", mk({ b: [[7, 2], [7, 3], [7, 4], [7, 6], [7, 7]] }), 7, 5, "overline"],
+    ["双四", mk({ b: [[7, 4], [7, 5], [7, 6], [4, 7], [5, 7], [6, 7]] }), 7, 7, "double4"],
+    ["双三", mk({ b: [[7, 5], [7, 6], [5, 7], [6, 7]] }), 7, 7, "double3"],
+  ];
+  for (const [name, bd, r, c, why] of forb) {
+    assert(Core.renjuForbidden(bd, r, c) === why, "禁手:" + name + " 判为 " + why);
+  }
+  // ③ 反证 —— 不该禁的。少了这一半,`return "double3"` 也能过上面三条
+  const okMoves = [
+    ["空盘天元", mk({}), 7, 7],
+    ["成五优先", mk({ b: [[7, 3], [7, 4], [7, 5], [7, 6]] }), 7, 7],
+    ["五连压长连", mk({ b: [[7, 3], [7, 4], [7, 5], [7, 6], [3, 7], [4, 7], [5, 7], [6, 7], [8, 7]] }), 7, 7],
+    ["单活三", mk({ b: [[7, 5], [7, 6]] }), 7, 7],
+    ["眠三不算三", mk({ b: [[7, 5], [7, 6], [5, 7], [6, 7]], w: [[7, 4], [7, 8]] }), 7, 7],
+    ["白方同形", mk({ w: [[7, 5], [7, 6], [5, 7], [6, 7]] }), 7, 7],
+    ["已有子", mk({ b: [[7, 7]] }), 7, 7],
+  ];
+  for (const [name, bd, r, c] of okMoves) {
+    assert(Core.renjuForbidden(bd, r, c) === null, "不禁:" + name);
+  }
+
+  // ④ 每一种 why 都真能出现,而且中英两本字典里都有话说 —— renju.blocked.* 是
+  //    运行时拼出来的键,dead-key 闸门放行了它们,这里把那个洞补上
+  const reasons = new Set(forb.map((x) => x[4]));
+  assert(reasons.size === 3, "三种禁手原因都构造得出(" + [...reasons].join(",") + ")");
+  const i18nSrc = fs.readFileSync(path.join(root, "src/web/js/i18n.js"), "utf8");
+  const zhBlock = i18nSrc.slice(i18nSrc.indexOf("zh:"), i18nSrc.indexOf("en:"));
+  const enBlock = i18nSrc.slice(i18nSrc.indexOf("en:"));
+  for (const why of reasons) {
+    const key = '"renju.blocked.' + why + '"';
+    assert(zhBlock.includes(key) && enBlock.includes(key), "两本字典都有 " + key);
+  }
+
+  // ⑤ 全盘标点:该出现的点出现了,该干净的盘是干净的
+  const pts = Core.renjuForbiddenPoints(mk({ b: [[7, 5], [7, 6], [5, 7], [6, 7]] }));
+  assert(pts.length === 1 && pts[0].r === 7 && pts[0].c === 7 && pts[0].why === "double3",
+    "全盘标点找到那一个双三点(实得 " + JSON.stringify(pts) + ")");
+  assert(Core.renjuForbiddenPoints(Core.emptyBoard()).length === 0, "反证:空盘没有禁手点");
+
+  // ⑥ 规则版胜负 —— 四个方向都要,否则「黑永远不赢」也能过
+  const six = mk({ b: [[7, 2], [7, 3], [7, 4], [7, 5], [7, 6], [7, 7]] });
+  assert((Core.findWinRule(six, 7, 7, "b", false) || []).length === 6, "自由式:黑六连算胜");
+  assert(Core.findWinRule(six, 7, 7, "b", true) === null, "禁手式:黑六连不算胜");
+  const sixW = mk({ w: [[7, 2], [7, 3], [7, 4], [7, 5], [7, 6], [7, 7]] });
+  assert((Core.findWinRule(sixW, 7, 7, "w", true) || []).length === 6, "禁手式:白六连照样算胜");
+  const five = mk({ b: [[7, 3], [7, 4], [7, 5], [7, 6], [7, 7]] });
+  assert((Core.findWinRule(five, 7, 7, "b", true) || []).length === 5, "禁手式:黑恰好五算胜");
+  // 一个方向六、另一个方向五:不能因为先撞上六就说没赢
+  const both = mk({ b: [[7, 2], [7, 3], [7, 4], [7, 5], [7, 6], [7, 7], [3, 7], [4, 7], [5, 7], [6, 7]] });
+  assert((Core.findWinRule(both, 7, 7, "b", true) || []).length === 5, "禁手式:六与五并存时认出那条五");
+
+  // ⑦ 规则要一路传到静态盘面判定 —— 这是导入/存档恢复走的那条路
+  assert(State.resultFromBoard(six, false).result === "b", "resultFromBoard 自由式:黑六连是黑胜");
+  assert(State.resultFromBoard(six, true).result === "play", "resultFromBoard 禁手式:黑六连不决出胜负");
+  assert(State.resultFromBoard(sixW, true).result === "w", "反证:白六连在禁手式下仍是白胜");
+  assert(Core.winLineAt([{ r: 7, c: 2 }, { r: 0, c: 0 }, { r: 7, c: 3 }, { r: 0, c: 1 },
+    { r: 7, c: 4 }, { r: 0, c: 2 }, { r: 7, c: 5 }, { r: 0, c: 3 },
+    { r: 7, c: 6 }, { r: 0, c: 4 }, { r: 7, c: 7 }], 11, true) === null,
+    "winLineAt 认规则:黑第六子在禁手式下不判胜");
+
+  // ⑧ SGF 写 RU[] —— 两档各写各的,且解析器不被自己写的东西噎住
+  for (const [rule, want] of [["renju", "RU[Renju]"], ["free", "RU[Gomoku]"], [undefined, "RU[Gomoku]"]]) {
+    const text = Sgf.buildSgf({ history: [{ r: 7, c: 7 }], result: "play", mode: "pvp", originalStartedAt: Date.now(), ruleSet: rule });
+    assert(text.includes(want), "SGF ruleSet=" + rule + " 写出 " + want);
+    assert(!Sgf.parseSgf(text).error, "SGF ruleSet=" + rule + " 自己解析得回来");
+  }
+  assert(!Sgf.buildSgf({ history: [{ r: 7, c: 7 }], result: "play", mode: "pvp", originalStartedAt: Date.now(), ruleSet: "renju" }).includes("RU[Gomoku]"),
+    "反证:禁手档不会同时写出 RU[Gomoku]");
+
+  // ⑨ 禁手标记在四套主题上都看得见。判据是 WCAG 1.4.11 的图形对象门槛 3:1
+  //    —— 它不是文字,但它是一句规则声明,看不清等于没说。第一版四套全不合格
+  //    (1.75 / 2.36 / 1.90 / 2.43),是截图先看出来的,数字是后补的。
+  //    上界同样要守:标记比星位还重就成了棋子,而它是注记。
+  {
+    const drawSrc = fs.readFileSync(path.join(root, "src/web/js/draw.js"), "utf8");
+    const themes = [...drawSrc.matchAll(/^    (\w+): \{$/gm)].map((m) => m[1]);
+    const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const lum = ([r, g, b]) => {
+      const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    };
+    const ratio = (a2, b2) => {
+      const l1 = lum(a2), l2 = lum(b2);
+      return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    };
+    const grab = (theme, key) => {
+      const blk = drawSrc.slice(drawSrc.indexOf("    " + theme + ": {"));
+      const m = blk.slice(0, blk.indexOf("\n    },")).match(new RegExp(key + ':\\s*"([^"]+)"'));
+      return m ? m[1] : null;
+    };
+    let checked = 0;
+    const bad = [];
+    for (const th of themes) {
+      const forbid = grab(th, "forbid");
+      if (!forbid) { bad.push(th + " 没有 forbid 颜色"); continue; }
+      const bgHex = grab(th, "paper") || grab(th, "boardMid");
+      const starHex = grab(th, "star") || grab(th, "pencil");
+      const p2 = forbid.match(/rgba?\(([^)]+)\)/)[1].split(",").map(Number);
+      const alpha = p2[3] === undefined ? 1 : p2[3];
+      const bg = hex(bgHex);
+      const comp = p2.slice(0, 3).map((v, i) => Math.round(v * alpha + bg[i] * (1 - alpha)));
+      const r2 = ratio(comp, bg);
+      const rStar = ratio(hex(starHex), bg);
+      checked++;
+      if (r2 < 3) bad.push(th + " 禁手标记只有 " + r2.toFixed(2) + ":1");
+      if (r2 > rStar) bad.push(th + " 禁手标记(" + r2.toFixed(2) + ")比星位(" + rStar.toFixed(2) + ")还重");
+    }
+    assert(checked === 4, "四套主题都量到了(" + checked + ")");
+    assert(bad.length === 0, "禁手标记四套主题都过 3:1 且不重过星位 (" + bad.join("; ") + ")");
+    // 反证:把 wood 换回第一版那个色,这条闸门必须报
+    const weak = [150, 58, 44].map((v, i) => Math.round(v * 0.5 + hex("#d4a574")[i] * 0.5));
+    assert(ratio(weak, hex("#d4a574")) < 3, "反证:第一版的 wood 标记色确实不合格(" +
+      ratio(weak, hex("#d4a574")).toFixed(2) + ":1)");
+  }
+
+  // ⑩ 成本:判定挂在每一手上,不能把落子拖慢。基准是困难档 2000ms 的预算。
+  {
+    const bd = Core.emptyBoard();
+    let turn = "b", s2 = 7 >>> 0;
+    const rng2 = () => ((s2 = (s2 * 1664525 + 1013904223) >>> 0) / 4294967296);
+    for (let k = 0; k < 40; k++) {
+      const m = Ai2.aiMove({ board: bd, side: turn, difficulty: "normal", nodeBudget: 1200, vary: true, rng: rng2 });
+      if (!m || bd[m.r][m.c]) break;
+      bd[m.r][m.c] = turn; turn = Core.opp(turn);
+    }
+    Core.renjuForbiddenPoints(bd);
+    const t0 = performance.now();
+    for (let i = 0; i < 50; i++) Core.renjuForbiddenPoints(bd);
+    const ms = (performance.now() - t0) / 50;
+    assert(ms < 60, "全盘标点在 60ms 以内(实测 " + ms.toFixed(1) + "ms,每落一手算一次)");
+  }
+}
+
 // stats: unrecordByEndedAt removes the matching entry (undo-after-win)
 {
   load("src/web/js/host.js");
@@ -1560,7 +1750,10 @@ const Practice = ctx.GobanPractice;
   }
   // Keys assembled at runtime (t("diff." + difficulty + ".full")) never appear
   // literally; they are covered by the suites that render those strings.
-  const DYNAMIC = /^(diff|think|coach|status|result|practice\.kind)\./;
+  // renju.blocked.* is assembled from the reason renjuForbidden returns; the
+  // 禁手 gate below asserts every reason it can return has a string in **both**
+  // dictionaries, which is the coverage this allowlist would otherwise drop.
+  const DYNAMIC = /^(diff|think|coach|status|result|practice\.kind|renju\.blocked)\./;
   const deadKeys = dictKeys.filter((k) => !DYNAMIC.test(k) && !uses.includes('"' + k + '"'));
   const KNOWN_ORPHANS = ["slots.saved", "practice.src.game", "practice.src.builtin"];
   const fresh = deadKeys.filter((k) => !KNOWN_ORPHANS.includes(k));
