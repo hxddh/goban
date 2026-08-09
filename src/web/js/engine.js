@@ -19,7 +19,7 @@
 
   /**
    * deps: {
-   *   defaults(): {board, humanColor, difficulty, think},
+   *   defaults(): {board, humanColor, difficulty, think, renju},
    *   budgetFor(diff): number,
    *   engineFor(diff): {aiMove},
    *   toast(msg),
@@ -59,6 +59,8 @@
       humanColor: (opts && opts.humanColor) || d.humanColor,
       side: opts && opts.side,
       difficulty: (opts && opts.difficulty) || d.difficulty,
+      // 禁手规则要一路带到引擎:引擎在交货口验这一手是否合法(见 legalizeRenju)
+      renju: !!(opts && opts.renju !== undefined ? opts.renju : d.renju),
     };
   }
 
@@ -74,6 +76,7 @@
       difficulty: diff,
       timeMs: timeMs,
       think: d.think,
+      renju: !!(opts && opts.renju !== undefined ? opts.renju : d.renju),
     });
   }
 
@@ -93,6 +96,7 @@
           side: opts && opts.side,
           difficulty: "normal",
           timeMs: 200,
+          renju: !!(opts && opts.renju !== undefined ? opts.renju : d.renju),
         });
       } catch (_) {
         return null;
@@ -292,6 +296,7 @@
             difficulty: payload.difficulty,
             timeMs: timeMs,
             think: think,
+            renju: payload.renju,
           });
           workerJobs++;
         } catch (e) {

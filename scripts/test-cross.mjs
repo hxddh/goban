@@ -3114,16 +3114,18 @@ async function enableSwap2Pvp(page) {
   const stoneCount = () => page.evaluate(() =>
     Number((document.getElementById("replay-pos").textContent.split("/")[1] || "0").trim()));
 
-  // ① 规则与模式的联动,两个方向
+  // ① 规则与模式**互不影响**。v1.54 里两者互斥(引擎不认禁手,选禁手就被切去双人);
+  //    v1.55 起引擎在交货口保证合法,所以「禁手 + 人机」是一个正常组合 —— 这条
+  //    闸门守的是那个联动确实被拆掉了,而不是还剩半截。
   await pick("renju");
   seen.afterRenju = await st();
   if (seen.afterRenju.rule !== "renju") bad.push("点了禁手,规则没跟上:" + seen.afterRenju.rule);
-  if (seen.afterRenju.mode !== "pvp") bad.push("禁手档没有切到双人:" + seen.afterRenju.mode);
+  if (seen.afterRenju.mode !== "ai") bad.push("选禁手把模式改掉了:" + seen.afterRenju.mode);
   await page.click('#mode-seg button[data-mode="ai"]');
   await page.waitForTimeout(200);
   seen.afterAi = await st();
   if (seen.afterAi.mode !== "ai") bad.push("点了人机,模式没跟上:" + seen.afterAi.mode);
-  if (seen.afterAi.rule !== "free") bad.push("切回人机时规则没带回自由:" + seen.afterAi.rule);
+  if (seen.afterAi.rule !== "renju") bad.push("点人机把规则改掉了:" + seen.afterAi.rule);
   // 反证:swap2 也是这一格里的一档,而且不该把模式带走
   await pick("swap2");
   seen.afterSwap2 = await st();
@@ -3138,6 +3140,8 @@ async function enableSwap2Pvp(page) {
     }
   };
   await pick("renju");
+  await page.click('#mode-seg button[data-mode="pvp"]');   // 手工摆局面,别让电脑抢手
+  await page.waitForTimeout(200);
   await build();
   seen.built = await stoneCount();
   if (seen.built !== 8) bad.push("构造局面没摆成:落了 " + seen.built + " 子");
@@ -3285,16 +3289,19 @@ async function enableSwap2Pvp(page) {
     const click = clicker(page);
     await page.click('#rule-seg button[data-rule="renju"]');
     await page.waitForTimeout(200);
+    await page.click('#mode-seg button[data-mode="pvp"]');
+    await page.waitForTimeout(200);
     for (const [r, c] of [[8, 6], [0, 0], [8, 7], [0, 2]]) { await click(r, c); await page.waitForTimeout(60); }
     seen.saved = await state(page);
     await saveSlot(page);
-    await segClick(page, '#mode-seg button[data-mode="ai"]');
+    // v1.55 起规则不再跟着模式走,所以要显式换规则,才造得出「载入时的规则与存档不同」
+    await segClick(page, '#rule-seg button[data-rule="free"]');
     seen.between = await state(page);
-    if (seen.between.rule !== "free") bad.push("切人机后规则没回自由:" + seen.between.rule);
+    if (seen.between.rule !== "free") bad.push("没能把规则切到自由:" + seen.between.rule);
     await loadSlot(page);
     seen.loaded = await state(page);
     if (seen.loaded.rule !== "renju") bad.push("禁手存档载回来成了 " + seen.loaded.rule + " 档");
-    if (seen.loaded.mode !== "pvp") bad.push("禁手存档载回来是 " + seen.loaded.mode + " 模式（禁手没有电脑）");
+    if (seen.loaded.mode !== seen.saved.mode) bad.push("模式没跟着存档回来:" + seen.saved.mode + "→" + seen.loaded.mode);
     if (seen.loaded.moves !== seen.saved.moves) bad.push("手数对不上 " + seen.saved.moves + "→" + seen.loaded.moves);
     if (page.__errors.length) bad.push("errs1 " + page.__errors.join("|"));
     await page.close();
@@ -3316,20 +3323,96 @@ async function enableSwap2Pvp(page) {
     if (seen.free.moves !== 2) bad.push("②的前置手数不是 2:" + seen.free.moves);
     await segClick(page, '#rule-seg button[data-rule="renju"]');
     seen.freeBetween = await state(page);
-    if (seen.freeBetween.mode !== "pvp") bad.push("切禁手后模式没变双人:" + seen.freeBetween.mode);
+    if (seen.freeBetween.mode !== "ai") bad.push("切禁手把模式改掉了:" + seen.freeBetween.mode);
     await loadSlot(page);
     seen.freeLoaded = await state(page);
     if (seen.freeLoaded.rule !== "free") bad.push("自由档存档载回来成了 " + seen.freeLoaded.rule + " 档");
     if (seen.freeLoaded.mode !== "ai") bad.push("人机存档载回来是 " + seen.freeLoaded.mode + " 模式");
-    if (seen.freeLoaded.rule === "renju" && seen.freeLoaded.mode === "ai") {
-      bad.push("凑出了「人机 + 禁手」—— 这个组合会让电脑卡住不出手");
-    }
     if (seen.freeLoaded.moves !== seen.free.moves) bad.push("手数对不上 " + seen.free.moves + "→" + seen.freeLoaded.moves);
     if (page.__errors.length) bad.push("errs2 " + page.__errors.join("|"));
     await page.close();
   }
 
   report("AT 存档带着规则走（两个方向）", bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
+// AU 禁手档下的人机这条**通路**是通的:renju 一路传到 worker 里的引擎,电脑真在
+// 走棋,SGF 记的是 RU[Renju],而且这几手黑棋逐手回放都合法。
+//
+// **这一条没有区分力,是量过的**:把 GobanAi.legalizeRenju 里那次判定整个删掉,
+// AU 照样绿 —— 开局四五手根本走不到禁手点(实测首次越线的中位手数是 17 / 43)。
+// 真正守「出口闸在拦」的是单测里那条构造闸门(黑两条活三交于一点,自由式下两个
+// 引擎都选它、禁手档下都不选;删掉判定,4 条断言当场报)。
+// 这里守的是另一件事,而且是单测守不到的:**opts.renju 有没有真的穿过 app →
+// engine.js → postMessage → ai-worker.js 这条链**。链断了,单测全绿而应用里失效。
+//
+// 判据用逐手回放而不是终局盘面 —— 终局盘面看不出中途踩没踩线。
+// 两个引擎都覆盖:普通档走 C1,困难档走 C2,是两套完全不同的搜索。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await openPanel(page);
+  const click = clicker(page);
+
+  const setup = async (diff) => {
+    await page.evaluate(() => document.querySelector("#btn-new").click());
+    await page.waitForTimeout(150);
+    await dismissConfirm(page);
+    await page.waitForTimeout(200);
+    await page.click('#rule-seg button[data-rule="renju"]'); await page.waitForTimeout(150);
+    await dismissConfirm(page); await page.waitForTimeout(150);
+    await page.click('#mode-seg button[data-mode="ai"]'); await page.waitForTimeout(150);
+    await dismissConfirm(page); await page.waitForTimeout(150);
+    await page.click('#diff-seg button[data-diff="' + diff + '"]'); await page.waitForTimeout(150);
+    await dismissConfirm(page); await page.waitForTimeout(150);
+    // 人执白 ⇒ 电脑执黑,禁手约束落在电脑身上
+    await page.click('#color-seg button[data-human="w"]'); await page.waitForTimeout(150);
+    await dismissConfirm(page); await page.waitForTimeout(400);
+  };
+  for (const [diff, plies] of [["normal", 8], ["hard", 4]]) {
+    await setup(diff);
+    // 电脑执黑先手:等它落第一手
+    await page.waitForTimeout(diff === "hard" ? 2600 : 900);
+    for (let k = 0; k < plies; k++) {
+      await click(1 + ((k * 3) % 13), 1 + ((k * 5) % 13));
+      await page.waitForTimeout(diff === "hard" ? 2600 : 900);
+      const over = await page.evaluate(() =>
+        /胜|Win|平局|Draw/.test(document.getElementById("status").textContent));
+      if (over) break;
+    }
+    // 从棋谱面板读出手数序列,再用 SGF 拿到真实坐标
+    const sgf = await page.evaluate(() => window.GobanSgfIo.buildSgf());
+    const moves = [...sgf.matchAll(/;([BW])\[([a-o])([a-o])\]/g)].map((m) => ({
+      col: m[1] === "B" ? "b" : "w",
+      c: m[2].charCodeAt(0) - 97,
+      r: m[3].charCodeAt(0) - 97,
+    }));
+    const verdict = await page.evaluate((mvs) => {
+      const C = window.GobanCore;
+      const bd = C.emptyBoard();
+      const illegal = [];
+      for (const m of mvs) {
+        if (m.col === "b") {
+          const why = C.renjuForbidden(bd, m.r, m.c);
+          if (why) illegal.push({ r: m.r, c: m.c, why: why });
+        }
+        bd[m.r][m.c] = m.col;
+      }
+      return { n: mvs.length, black: mvs.filter((x) => x.col === "b").length, illegal: illegal };
+    }, moves);
+    seen[diff] = verdict;
+    if (verdict.black < 3) bad.push(diff + ":电脑只落了 " + verdict.black + " 手黑棋,测不到东西");
+    if (verdict.illegal.length) {
+      bad.push(diff + ":电脑走出禁手 " + JSON.stringify(verdict.illegal));
+    }
+    if (!sgf.includes("RU[Renju]")) bad.push(diff + ":这局的 SGF 不是 RU[Renju]");
+  }
+
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AU 禁手档下人机通路打通（renju 传到 worker · 逐手回放合法 · RU[Renju]）",
+    bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
 console.log("---");

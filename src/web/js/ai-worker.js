@@ -52,6 +52,7 @@ self.onmessage = function (ev) {
       difficulty: difficulty,
       timeMs: timeMs,
       think: think,
+      renju: !!data.renju,
     });
     self.postMessage({ id: id, move: move });
   } catch (err) {

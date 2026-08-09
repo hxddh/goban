@@ -457,7 +457,8 @@
    *  once, at the outer edge, so every return path inside is covered and the
    *  delegation to C1 below cannot double-randomise (it runs with vary:false). */
   function aiMove(opts) {
-    return C1.varyBySymmetry(opts.board, aiMoveCore(opts), opts);
+    // 同一道出口闸,和 C1 共用一处实现 —— 见 GobanAi.legalizeRenju
+    return C1.legalizeRenju(opts, C1.varyBySymmetry(opts.board, aiMoveCore(opts), opts));
   }
 
   function aiMoveCore(opts) {
