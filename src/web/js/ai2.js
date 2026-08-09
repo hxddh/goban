@@ -522,7 +522,13 @@
     }
 
     // 3) C1 forced hierarchy
-    const force = C1.forcedMove(board2d, me2);
+    // 节点预算模式下必须按节点计,否则这一级的 300ms 墙钟会毁掉整条链的确定性
+    // (见 GobanAi.forcedMove 的注释)。墙钟模式下传 undefined,行为与从前逐字相同。
+    const force = C1.forcedMove(
+      board2d,
+      me2,
+      detEvals > 0 ? { t1: 0, e1: C1.ticks() + Math.max(2000, detEvals >> 3) } : undefined
+    );
     if (force && force._decisive) {
       lastStage = "force!";
       return force;

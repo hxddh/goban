@@ -1317,8 +1317,17 @@
     analyzePlace: analyzePlace,
     mustDefendPoints: mustDefendPoints,
     profileFor: profileFor,
-    forcedMove: function (b, me) {
-      return forcedMove(cloneBoard(b), me, { t1: nowMs() + 300 });
+    /**
+     * 公开包装。第三个参数是调用方的预算 ctx —— 不传才退回那条写死的 300ms 墙钟。
+     *
+     * 加这个参数是为了确定性:C2 每一手都调这里(ai2.js 的战术级联第 3 级),而这
+     * 个包装原本**无条件**用墙钟,连调用方明明在节点预算模式下也照用。于是 C2 在
+     * 「确定性」模式下的着法序列跟机器快慢有关 —— 实测同一进程连跑两次,着法从第
+     * 一手就分岔。指纹闸门(自由式逐位零影响)因此根本立不起来。
+     * 不传 ctx 时的行为一个字没变,墙钟档的棋力不受影响。
+     */
+    forcedMove: function (b, me, ctx) {
+      return forcedMove(cloneBoard(b), me, ctx || { t1: nowMs() + 300 });
     },
     lastStage: function () {
       return lastStage;
