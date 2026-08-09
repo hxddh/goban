@@ -3245,6 +3245,93 @@ async function enableSwap2Pvp(page) {
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
+// AT 存档带着规则走。
+// 规则不是外观设置,它决定这盘棋怎么读:一盘禁手棋在自由档下载入,黑的六连会被重算
+// 成黑胜、禁手点也不再拦人;反过来,一盘人机棋在禁手档下载入会把 mode 恢复成 ai ——
+// 那正是「人机 + 禁手」这个被两向联动挡掉的组合,而引擎走出的禁手会被落子那一关拦下,
+// 电脑再也不出手,棋局卡死。v1.54 首版的快照里没有 ruleSet,两条路都会踩中。
+//
+// 两个方向都测,因为它们分开失效:只存不读 → ①报;只读不存 → 两条都报。
+{
+  const bad = [];
+  const seen = {};
+  const state = (pg) => pg.evaluate(() => ({
+    rule: (document.querySelector("#rule-seg button.active") || {}).dataset?.rule || null,
+    mode: (document.querySelector("#mode-seg button.active") || {}).dataset?.mode || null,
+    moves: Number((document.getElementById("replay-pos").textContent.split("/")[1] || "0").trim()),
+  }));
+  const saveSlot = async (pg) => {
+    await pg.click("#sgf-slots"); await pg.waitForTimeout(150);
+    await pg.click("#slot-save-current"); await pg.waitForTimeout(150);
+    await pg.click("#slots-close"); await pg.waitForTimeout(120);
+  };
+  const loadSlot = async (pg) => {
+    await pg.click("#sgf-slots"); await pg.waitForTimeout(150);
+    await pg.click(".slot-load"); await pg.waitForTimeout(150);
+    await dismissConfirm(pg);          // 盘上有子时载入会先问一句
+    await pg.waitForTimeout(250);
+  };
+  // 换规则 / 换模式在有棋时都要确认(确认即新局)—— 不答这一句,后面的点击全被弹层拦掉
+  const segClick = async (pg, sel) => {
+    await pg.click(sel); await pg.waitForTimeout(150);
+    await dismissConfirm(pg);
+    await pg.waitForTimeout(250);
+  };
+
+  // ① 禁手档存 → 切到人机(规则被带回自由)→ 载入:规则必须回到禁手,模式回到双人
+  {
+    const page = await newPage();
+    await openPanel(page);
+    const click = clicker(page);
+    await page.click('#rule-seg button[data-rule="renju"]');
+    await page.waitForTimeout(200);
+    for (const [r, c] of [[8, 6], [0, 0], [8, 7], [0, 2]]) { await click(r, c); await page.waitForTimeout(60); }
+    seen.saved = await state(page);
+    await saveSlot(page);
+    await segClick(page, '#mode-seg button[data-mode="ai"]');
+    seen.between = await state(page);
+    if (seen.between.rule !== "free") bad.push("切人机后规则没回自由:" + seen.between.rule);
+    await loadSlot(page);
+    seen.loaded = await state(page);
+    if (seen.loaded.rule !== "renju") bad.push("禁手存档载回来成了 " + seen.loaded.rule + " 档");
+    if (seen.loaded.mode !== "pvp") bad.push("禁手存档载回来是 " + seen.loaded.mode + " 模式（禁手没有电脑）");
+    if (seen.loaded.moves !== seen.saved.moves) bad.push("手数对不上 " + seen.saved.moves + "→" + seen.loaded.moves);
+    if (page.__errors.length) bad.push("errs1 " + page.__errors.join("|"));
+    await page.close();
+  }
+
+  // ② 反方向,而且快照里的 mode 必须真的是 ai —— 这正是评审指出的那条路:
+  //    规则不随存档走时,载入会把 mode 恢复成 ai 而规则还停在禁手,凑出「人机 + 禁手」;
+  //    引擎走出的禁手会被落子那一关拦下,电脑再也不出手,棋局卡死。
+  //    所以这里落一手让电脑应一手(手数确定是 2,落点随它),而不是先切双人摆棋。
+  {
+    const page = await newPage();
+    await openPanel(page);
+    const click = clicker(page);
+    await click(7, 7);
+    await page.waitForTimeout(1800);      // 等电脑应手
+    await saveSlot(page);
+    seen.free = await state(page);
+    if (seen.free.mode !== "ai") bad.push("②的前置没摆成人机:" + seen.free.mode);
+    if (seen.free.moves !== 2) bad.push("②的前置手数不是 2:" + seen.free.moves);
+    await segClick(page, '#rule-seg button[data-rule="renju"]');
+    seen.freeBetween = await state(page);
+    if (seen.freeBetween.mode !== "pvp") bad.push("切禁手后模式没变双人:" + seen.freeBetween.mode);
+    await loadSlot(page);
+    seen.freeLoaded = await state(page);
+    if (seen.freeLoaded.rule !== "free") bad.push("自由档存档载回来成了 " + seen.freeLoaded.rule + " 档");
+    if (seen.freeLoaded.mode !== "ai") bad.push("人机存档载回来是 " + seen.freeLoaded.mode + " 模式");
+    if (seen.freeLoaded.rule === "renju" && seen.freeLoaded.mode === "ai") {
+      bad.push("凑出了「人机 + 禁手」—— 这个组合会让电脑卡住不出手");
+    }
+    if (seen.freeLoaded.moves !== seen.free.moves) bad.push("手数对不上 " + seen.free.moves + "→" + seen.freeLoaded.moves);
+    if (page.__errors.length) bad.push("errs2 " + page.__errors.join("|"));
+    await page.close();
+  }
+
+  report("AT 存档带着规则走（两个方向）", bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");

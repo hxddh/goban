@@ -802,13 +802,18 @@
 
   function serialize() {
     return {
-      v: 3,
+      v: 4,
       board,
       turn,
       result,
       mode,
       difficulty,
       humanColor,
+      // v4 起随存档走:胜负规则决定这盘棋怎么读。不存的话,一盘禁手棋在自由档下
+      // 载入,黑的六连会被重算成黑胜;反过来,一盘人机棋在禁手档下载入会把 mode
+      // 恢复成 ai —— 那正是「人机 + 禁手」这个不该存在的组合,而引擎走出的禁手
+      // 会被落子那一关拦下,电脑再也不出手,棋局就卡死在那里。
+      ruleSet,
       history,
       winLine,
       startedAt,
@@ -849,7 +854,7 @@
    * never trusted. @returns {boolean} true when applied.
    */
   function applySnapshot(s) {
-    if (!s || (s.v !== 1 && s.v !== 2 && s.v !== 3)) return false;
+    if (!s || (s.v !== 1 && s.v !== 2 && s.v !== 3 && s.v !== 4)) return false;
     // Resume only with a move list — board-only snapshots cannot place safely.
     const loadedHistory = Array.isArray(s.history) ? s.history : [];
     if (!loadedHistory.length) return false;
@@ -878,6 +883,14 @@
       difficulty = "normal";
     }
     humanColor = s.humanColor === "w" ? "w" : "b";
+    // 规则要在算胜负**之前**恢复。v3 及更早没有这个字段,那时只有自由式一种规则,
+    // 所以缺省成 free 就是它们当初实际用的规则。恢复完再把不可能的组合收回去 ——
+    // 与 loadSettings 同一处不变量。
+    ruleSet = s.ruleSet === "renju" ? "renju" : "free";
+    if (isRenju()) {
+      applyMode("pvp");
+      openingRule = "standard";
+    }
     viewIndex = history.length;
     board = boardAfter(history.length);
     turn = history.length % 2 === 0 ? "b" : "w";

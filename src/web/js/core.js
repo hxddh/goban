@@ -111,11 +111,18 @@
     return out;
   }
 
-  /** With the stone already down: does this axis hold a four? */
+  /* 下面三个判据都从**落子点自己**量,不从补进去的那个空点量 —— 那是 v1.54 首版
+   * 的 bug:补子后只检查「过 (rr,cc) 的连子是不是五」,而那条五可能根本不含落子点。
+   * 实测:黑在 7 行 0–3 与 7 列 0–3 各有一条四,天元 (7,7) 离两条各三格、碰都碰不到,
+   * 却被判成双四 —— 于是 UI 画上标记并拒绝这一手**合法棋**。这正是「误判会拦掉一手
+   * 本来能走的棋」那条,所以判据换成:补子之后,**过落子点的连子**恰好成五。
+   * 落子点在那条五里是构造保证的,不必再验一次。 */
+
+  /** With the stone already down at (r,c): does this axis hold a four through it? */
   function axisIsFour(board, r, c, dr, dc) {
     for (const [rr, cc] of axisEmpties(board, r, c, dr, dc)) {
       board[rr][cc] = "b";
-      const five = lineLen(board, rr, cc, dr, dc, "b") === WIN;
+      const five = lineLen(board, r, c, dr, dc, "b") === WIN;
       board[rr][cc] = "";
       if (five) return true;
     }
@@ -126,7 +133,7 @@
     let n = 0;
     for (const [rr, cc] of axisEmpties(board, r, c, dr, dc)) {
       board[rr][cc] = "b";
-      if (lineLen(board, rr, cc, dr, dc, "b") === WIN) n++;
+      if (lineLen(board, r, c, dr, dc, "b") === WIN) n++;
       board[rr][cc] = "";
       if (n >= 2) return true;
     }
@@ -136,7 +143,8 @@
   function axisIsOpenThree(board, r, c, dr, dc, depth) {
     for (const [rr, cc] of axisEmpties(board, r, c, dr, dc)) {
       board[rr][cc] = "b";
-      const grows = axisIsOpenFour(board, rr, cc, dr, dc);
+      // 活四同样从 (r,c) 量:要的是「这条三能长成含落子点的活四」
+      const grows = axisIsOpenFour(board, r, c, dr, dc);
       board[rr][cc] = "";
       if (!grows) continue;
       // 该点自己是禁手的话,这条三长不成活四,不算活三
