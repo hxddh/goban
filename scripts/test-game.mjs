@@ -818,7 +818,48 @@ const Practice = ctx.GobanPractice;
   assert(!Sgf.buildSgf({ history: [{ r: 7, c: 7 }], result: "play", mode: "pvp", originalStartedAt: Date.now(), ruleSet: "renju" }).includes("RU[Gomoku]"),
     "反证:禁手档不会同时写出 RU[Gomoku]");
 
-  // ⑨ 禁手标记在四套主题上都看得见。判据是 WCAG 1.4.11 的图形对象门槛 3:1
+  // ⑨ 出口那一关:引擎交出去的那一手必须合法(v1.55)。
+  //
+  // 判据要有**区分力** —— 这一条是踩过坑补上的:交叉闸门 AU 在真实对局里跑,
+  // 开局四五手根本走不到禁手点(实测首次越线的中位手数是 17 / 43),所以把出口
+  // 判定整个删掉,AU 照样绿。一条不会失败的闸门等于没有。
+  //
+  // 所以这里构造一个**引擎自己就想要**的禁手点:黑两条活三交于一点,白子摆在
+  // 四角不构成任何威胁。自由式下两个引擎都选中它(那一半证明它确实想要),
+  // 禁手档下都不选(这一半证明闸真的在拦)。少任何一半都不成立。
+  {
+    const mkb = (bs, ws) => {
+      const b = Core.emptyBoard();
+      for (const [r, c] of bs) b[r][c] = "b";
+      for (const [r, c] of ws) b[r][c] = "w";
+      return b;
+    };
+    const BS = [[8, 6], [8, 7], [6, 8], [7, 8]];
+    const WS = [[0, 0], [14, 14], [0, 14], [14, 0]];
+    const board = mkb(BS, WS);
+    assert(Core.renjuForbidden(board, 8, 8) === "double3", "构造点 (8,8) 是双三");
+    for (const [nm, eng] of [["C1", Ai], ["C2", Ai2]]) {
+      const free = eng.aiMove({ board: board, side: "b", difficulty: "hard", nodeBudget: 6000 });
+      assert(free.r === 8 && free.c === 8,
+        nm + " 自由式下确实想要那个禁手点(选了 " + free.r + "," + free.c + ")");
+      const before = Ai.renjuFallbacks();
+      const rj = eng.aiMove({ board: board, side: "b", difficulty: "hard", nodeBudget: 6000, renju: true });
+      assert(Core.renjuForbidden(board, rj.r, rj.c) === null,
+        nm + " 禁手档下交出去的是合法一手(" + rj.r + "," + rj.c + ")");
+      assert(Ai.renjuFallbacks() > before, nm + " 走的是出口兜底那条路(计数器涨了)");
+      assert(!board[rj.r][rj.c], nm + " 交出去的点是空的");
+    }
+    // 白方不受约束:同一盘让白走,出口闸必须原样放行
+    const wb = mkb([[8, 6], [8, 7], [6, 8], [7, 8], [0, 1]], WS);
+    const wmv = Ai.aiMove({ board: wb, side: "w", difficulty: "normal", nodeBudget: 1500, renju: true });
+    assert(wmv && !wb[wmv.r][wmv.c], "反证:白方在禁手档下照常出手");
+    // 自由式下这道闸是彻底的空操作 —— 强度基线四条断言靠的就是这一点
+    const a1 = Ai.aiMove({ board: board, side: "b", difficulty: "hard", nodeBudget: 6000 });
+    const a2 = Ai.aiMove({ board: board, side: "b", difficulty: "hard", nodeBudget: 6000, renju: false });
+    assert(a1.r === a2.r && a1.c === a2.c, "反证:renju 为假时出口闸不改变任何结果");
+  }
+
+  // ⑩ 禁手标记在四套主题上都看得见。判据是 WCAG 1.4.11 的图形对象门槛 3:1
   //    —— 它不是文字,但它是一句规则声明,看不清等于没说。第一版四套全不合格
   //    (1.75 / 2.36 / 1.90 / 2.43),是截图先看出来的,数字是后补的。
   //    上界同样要守:标记比星位还重就成了棋子,而它是注记。
@@ -864,7 +905,7 @@ const Practice = ctx.GobanPractice;
       ratio(weak, hex("#d4a574")).toFixed(2) + ":1)");
   }
 
-  // ⑩ 成本:判定挂在每一手上,不能把落子拖慢。基准是困难档 2000ms 的预算。
+  // ⑪ 成本:判定挂在每一手上,不能把落子拖慢。基准是困难档 2000ms 的预算。
   {
     const bd = Core.emptyBoard();
     let turn = "b", s2 = 7 >>> 0;

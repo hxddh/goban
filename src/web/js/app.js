@@ -237,8 +237,12 @@
   let openingRule = "standard";
   /**
    * 'free' = 无禁手五子棋(黑六连也算胜);'renju' = 连珠,黑受长连/双四/双三
-   * 三条禁手约束、且只有恰好五连才算胜。两个引擎都不认识禁手 —— 实测执黑时
-   * 会有三成到四成的对局走出禁手 —— 所以 renju 档下只开双人。
+   * 三条禁手约束、且只有恰好五连才算胜。
+   *
+   * v1.54 里 renju 档只开双人:两个引擎不认识禁手,实测执黑 24 局有 8(C1)/
+   * 10(C2)局走出禁手。v1.55 起引擎在**交货口**验一次(见 GobanAi.legalizeRenju)
+   * —— 12 局自战违规手 0,所以人机档开了回来。搜索内部仍按自由式算,那一层的
+   * 动态判定要在引擎自己的扁平棋盘上重写,不在这一版。
    * @type {'free' | 'renju'}
    */
   let ruleSet = "free";
@@ -336,7 +340,7 @@
     analysisVerdict = null;
     // Never kick off analysis while the live AI is thinking — aiMoveAsync
     // rebuilds a busy worker and would resolve the game move as null.
-    if (!analysisOn || viewIndex < 1 || aiThinking || !engineAdviceOk()) return;
+    if (!analysisOn || viewIndex < 1 || aiThinking || !reviewAdviceOk()) return;
     // 只在**棋还在下**的时候封住头部那一手 —— 那时候评它等于给提示。
     //
     // 此前的判据是光秃秃的 isLive()，它不区分「棋还在下」和「棋已经下完」，于是
@@ -532,7 +536,6 @@
   }
 
   async function requestHint() {
-    if (!engineAdviceOk()) { toast(t("advice.renju")); return; }
     if (swap2) { toast(t("hint.swap2")); return; }
     if (aiThinking || hintBusy) {
       toast(t("hint.wait"));
@@ -639,13 +642,9 @@
       if (typeof s.analysisOn === "boolean") analysisOn = s.analysisOn;
       if (s.openingRule === "standard" || s.openingRule === "swap2") openingRule = s.openingRule;
       if (s.ruleSet === "free" || s.ruleSet === "renju") ruleSet = s.ruleSet;
-      // 存下来的两个字段各存各的,组合可能是旧版本写的,也可能是手改的。侧栏那
-      // 一格是三选一,所以这里把不可能被选出来的组合收回去:禁手档没有引擎(恢复
-      // 成人机等于让一个不认识禁手的引擎执黑),也不叠 swap2(两者都是平衡手段)。
-      if (ruleSet === "renju") {
-        applyMode("pvp");
-        openingRule = "standard";
-      }
+      // 侧栏那一格是三选一,所以把选不出来的组合收回去:禁手不叠 swap2
+      // (两者都是平衡手段)。v1.55 起禁手不再蕴含双人 —— 引擎交货口已保证合法。
+      if (ruleSet === "renju") openingRule = "standard";
     } catch (_) {}
   }
 
@@ -659,24 +658,21 @@
   function isRenju() { return ruleSet === "renju"; }
 
   /**
-   * 引擎的一切建议 —— 提示、复盘分析标记、复盘报告 —— 都从同一套自由式静态
-   * 评估来:它会把黑的六连当成胜,也会把禁手点当成好点。在禁手档下这些建议
-   * 不是「略有偏差」,而是可能直接指向一个本应用自己拒绝落的点。与其给错的,
-   * 先不给 —— 引擎认得禁手之后(下一版)再开回来。
+   * 复盘这一侧还不能开。
+   *
+   * 提示走的是 aiMove,交货口那一关会把它变成合法的一手,所以 v1.55 开了回来。
+   * 但复盘曲线与失着讲解读的是**静态评估**(evalStatic / coachFacts),它们绕过
+   * 那道闸:会把黑的六连当成胜,也会把禁手点当成「更优点」。所以这两样继续关着,
+   * 等评估函数自己认得禁手。
    */
-  function engineAdviceOk() { return !isRenju(); }
+  function reviewAdviceOk() { return !isRenju(); }
 
   /**
    * 唯一改 mode 的入口。人机与禁手互斥(见 ruleSet),切到人机就把规则一并带回
    * 自由 —— 分段控件、⌘1、⌘2 三个入口共用这一处,否则总会漏掉一个。
    * @returns {boolean} 规则是否被一并改回了自由
    */
-  function applyMode(next) {
-    mode = next;
-    const followed = next === "ai" && isRenju();
-    if (followed) ruleSet = "free";
-    return followed;
-  }
+  function applyMode(next) { mode = next; }
 
   /**
    * 侧栏那一格三选一映射到的两个内部字段。swap2 与禁手都是「黑先手占优,拿
@@ -689,15 +685,9 @@
     return openingRule === "swap2" ? "swap2" : "free";
   }
 
-  /** @returns {boolean} 是否顺带把模式切成了双人 */
   function applyRuleChoice(val) {
     ruleSet = val === "renju" ? "renju" : "free";
     openingRule = val === "swap2" ? "swap2" : "standard";
-    if (isRenju() && mode === "ai") {
-      applyMode("pvp");
-      return true;
-    }
-    return false;
   }
 
   /**
@@ -887,10 +877,7 @@
     // 所以缺省成 free 就是它们当初实际用的规则。恢复完再把不可能的组合收回去 ——
     // 与 loadSettings 同一处不变量。
     ruleSet = s.ruleSet === "renju" ? "renju" : "free";
-    if (isRenju()) {
-      applyMode("pvp");
-      openingRule = "standard";
-    }
+    if (isRenju()) openingRule = "standard";
     viewIndex = history.length;
     board = boardAfter(history.length);
     turn = history.length % 2 === 0 ? "b" : "w";
@@ -1026,7 +1013,7 @@
   }
 
   function openReview() {
-    if (!engineAdviceOk()) { toast(t("advice.renju")); return; }
+    if (!reviewAdviceOk()) { toast(t("advice.renju")); return; }
     Review.render();
     const m = document.getElementById("review-modal");
     if (m) {
@@ -1855,6 +1842,7 @@
   Engine.init({
     defaults: () => ({
       board: board, humanColor: humanColor, difficulty: difficulty, think: thinkLevel,
+      renju: isRenju(),
     }),
     budgetFor: budgetForDiff,
     engineFor: engineFor,
@@ -1963,11 +1951,10 @@
     if (!b) return;
     if (b.dataset.mode === mode) return;
     if (history.length && !(await confirmNative(t("confirm.switchMode"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
-    // 两边都能点,点了就把另一边带过去,而不是摆一个点不动的灰按钮让人猜为什么。
-    const ruleFollowed = applyMode(b.dataset.mode);
+    applyMode(b.dataset.mode);
     saveSettings();
     reset({ keepSettings: true });
-    toast(t(ruleFollowed ? "toast.modeAiFree" : mode === "ai" ? "toast.modeAi" : "toast.modePvp"));
+    toast(t(mode === "ai" ? "toast.modeAi" : "toast.modePvp"));
   };
 
   const ruleSeg = document.getElementById("rule-seg");
@@ -1979,12 +1966,11 @@
       if (val !== "free" && val !== "swap2" && val !== "renju") return;
       if (val === ruleChoice()) return;
       if (history.length && !(await confirmNative(t("confirm.switchRule"), t("confirm.switchRuleTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
-      const modeFollowed = applyRuleChoice(val);
+      applyRuleChoice(val);
       saveSettings();
       reset({ keepSettings: true });
       toast(t(
-        modeFollowed ? "toast.ruleRenjuPvp"
-          : val === "renju" ? "toast.ruleRenju"
+        val === "renju" ? "toast.ruleRenju"
           : val === "swap2" ? "toast.ruleSwap2" : "toast.ruleFree"
       ));
     };
@@ -2203,10 +2189,10 @@
       if (mode === "ai") return;
       (async () => {
         if (history.length && !(await confirmNative(t("confirm.switchToAi"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
-        const ruleFollowed = applyMode("ai");
+        applyMode("ai");
         saveSettings();
         reset({ keepSettings: true });
-        toast(t(ruleFollowed ? "toast.modeAiFree" : "toast.modeAi"));
+        toast(t("toast.modeAi"));
       })();
     } else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
     else if (k === "n" && !ev.metaKey && !ev.ctrlKey) requestNewGame();

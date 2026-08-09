@@ -1086,8 +1086,47 @@
 
   function aiMove(opts) {
     const mv = aiMoveCore(opts);
-    return varyBySymmetry(opts.board, mv, opts);
+    return legalizeRenju(opts, varyBySymmetry(opts.board, mv, opts));
   }
+
+  /**
+   * 连珠禁手:引擎交出去的那一手必须合法。
+   *
+   * 这是**出口精确**,不是搜索内部认规则 —— 后者的价钱量过:困难档一手展开
+   * 43 万(C1)/ 135 万(C2)个候选,每个调一次 Core.renjuForbidden(13.5µs)
+   * 要 5.9s / 18.2s,是 2000ms 预算的 292% / 911%。所以搜索照自由式算,只在
+   * 交货口验一次:一个点,13.5µs,预算的 0.0007%。
+   *
+   * 也**不能**把判定塞进 emptiesNear —— 那个辅助函数不知道自己在为谁生成候选,
+   * 13 个调用点黑白共用,挂上去会把这些点从**白方**的候选里一并删掉,而那正是
+   * 白方最想占的地方(黑走不了,白占了就赚)。等于把规则的好处送给对手。
+   *
+   * 兜底用静态排序里第一个合法点。它比搜索结果弱,但只在引擎真踩线时才用得上
+   * —— 实测 24 局里 8 局各踩一次(C1)、10 局各踩一次(C2),约每 60–150 手一次。
+   */
+  function legalizeRenju(opts, mv) {
+    if (!opts || !opts.renju || !mv) return mv;
+    const me = opts.side === "b" || opts.side === "w" ? opts.side : Core.opp(opts.humanColor || "b");
+    if (me !== "b") return mv;                       // 禁手只约束黑
+    const board = opts.board;
+    if (!Core.renjuForbidden(board, mv.r, mv.c)) return mv;
+    renjuFallbacks++;
+    const ranked = rankMoves(cloneBoard(board), "b", 60, null);
+    for (let i = 0; i < ranked.length; i++) {
+      const m = ranked[i];
+      if (!Core.renjuForbidden(board, m.r, m.c)) return { r: m.r, c: m.c };
+    }
+    // 排序里一个合法点都没有(极罕见):全盘找
+    for (let r = 0; r < SZ; r++) {
+      for (let c = 0; c < SZ; c++) {
+        if (!board[r][c] && !Core.renjuForbidden(board, r, c)) return { r: r, c: c };
+      }
+    }
+    return mv;   // 黑无处可走 —— 交回原手,由对局层处理
+  }
+
+  /** 出口兜底触发过多少次(闸门用:它必须真的会触发,也必须罕见)。 */
+  let renjuFallbacks = 0;
 
   function aiMoveCore(opts) {
     const board = cloneBoard(opts.board);
@@ -1283,6 +1322,10 @@
     },
     lastStage: function () {
       return lastStage;
+    },
+    legalizeRenju: legalizeRenju,
+    renjuFallbacks: function () {
+      return renjuFallbacks;
     },
     /** Current analyzePlace tick — lets callers build deterministic sub-budgets. */
     ticks: function () {
