@@ -31,8 +31,8 @@
   function emptyBoard() { return Core.emptyBoard(); }
   function opp(t) { return Core.opp(t); }
   function boardAfter(n) { return Core.boardAfter(history, n); }
-  function winLineAt(n) { return Core.winLineAt(history, n); }
-  function findWin(r, c, color) { return Core.findWin(board, r, c, color); }
+  function winLineAt(n) { return Core.winLineAt(history, n, isRenju()); }
+  function findWin(r, c, color) { return Core.findWinRule(board, r, c, color, isRenju()); }
   function boardFull() { return Core.boardFull(board); }
   function wouldWin(r, c, color) { return Core.wouldWin(board, r, c, color); }
   /** @type {'fast' | 'normal' | 'deep'} hard-mode think budget */
@@ -102,6 +102,7 @@
       soundOn: soundOn,
       themeId: themeId,
       gameGen: gameGen,
+      ruleSet: ruleSet,
     });
     if (!applied.ok) {
       toast(applied.error || t("import.fail"));
@@ -235,6 +236,13 @@
   /** @type {'standard' | 'swap2'} opening protocol */
   let openingRule = "standard";
   /**
+   * 'free' = 无禁手五子棋(黑六连也算胜);'renju' = 连珠,黑受长连/双四/双三
+   * 三条禁手约束、且只有恰好五连才算胜。两个引擎都不认识禁手 —— 实测执黑时
+   * 会有三成到四成的对局走出禁手 —— 所以 renju 档下只开双人。
+   * @type {'free' | 'renju'}
+   */
+  let ruleSet = "free";
+  /**
    * swap2 opening state, null outside the opening.
    * phase: 'place' (P1 lays 3) → 'p2choose' → ('place2' P2 lays 2 → 'p1choose') → done.
    * Board stones stay strictly alternating (B,W,B,…) — swap2 only decides who
@@ -328,7 +336,7 @@
     analysisVerdict = null;
     // Never kick off analysis while the live AI is thinking — aiMoveAsync
     // rebuilds a busy worker and would resolve the game move as null.
-    if (!analysisOn || viewIndex < 1 || aiThinking) return;
+    if (!analysisOn || viewIndex < 1 || aiThinking || !engineAdviceOk()) return;
     // 只在**棋还在下**的时候封住头部那一手 —— 那时候评它等于给提示。
     //
     // 此前的判据是光秃秃的 isLive()，它不区分「棋还在下」和「棋已经下完」，于是
@@ -493,7 +501,7 @@
     // Live games end at five; only imports/saves with post-win moves keep
     // result≠play while the last stone is not the winning one.
     if (result === "play") return null;
-    return GameState.resultFromBoard(boardAfter(n)).winLine;
+    return GameState.resultFromBoard(boardAfter(n), isRenju()).winLine;
   }
 
   function setViewIndex(n) {
@@ -524,6 +532,7 @@
   }
 
   async function requestHint() {
+    if (!engineAdviceOk()) { toast(t("advice.renju")); return; }
     if (swap2) { toast(t("hint.swap2")); return; }
     if (aiThinking || hintBusy) {
       toast(t("hint.wait"));
@@ -629,14 +638,92 @@
       if (typeof s.showCoords === "boolean") showCoords = s.showCoords;
       if (typeof s.analysisOn === "boolean") analysisOn = s.analysisOn;
       if (s.openingRule === "standard" || s.openingRule === "swap2") openingRule = s.openingRule;
+      if (s.ruleSet === "free" || s.ruleSet === "renju") ruleSet = s.ruleSet;
+      // 存下来的两个字段各存各的,组合可能是旧版本写的,也可能是手改的。侧栏那
+      // 一格是三选一,所以这里把不可能被选出来的组合收回去:禁手档没有引擎(恢复
+      // 成人机等于让一个不认识禁手的引擎执黑),也不叠 swap2(两者都是平衡手段)。
+      if (ruleSet === "renju") {
+        applyMode("pvp");
+        openingRule = "standard";
+      }
     } catch (_) {}
   }
 
   function saveSettings() {
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel, showCoords, analysisOn, openingRule })
+      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel, showCoords, analysisOn, openingRule, ruleSet })
     );
+  }
+
+  function isRenju() { return ruleSet === "renju"; }
+
+  /**
+   * 引擎的一切建议 —— 提示、复盘分析标记、复盘报告 —— 都从同一套自由式静态
+   * 评估来:它会把黑的六连当成胜,也会把禁手点当成好点。在禁手档下这些建议
+   * 不是「略有偏差」,而是可能直接指向一个本应用自己拒绝落的点。与其给错的,
+   * 先不给 —— 引擎认得禁手之后(下一版)再开回来。
+   */
+  function engineAdviceOk() { return !isRenju(); }
+
+  /**
+   * 唯一改 mode 的入口。人机与禁手互斥(见 ruleSet),切到人机就把规则一并带回
+   * 自由 —— 分段控件、⌘1、⌘2 三个入口共用这一处,否则总会漏掉一个。
+   * @returns {boolean} 规则是否被一并改回了自由
+   */
+  function applyMode(next) {
+    mode = next;
+    const followed = next === "ai" && isRenju();
+    if (followed) ruleSet = "free";
+    return followed;
+  }
+
+  /**
+   * 侧栏那一格三选一映射到的两个内部字段。swap2 与禁手都是「黑先手占优,拿
+   * 什么补」的答案,所以它们互斥;而 openingRule 与 ruleSet 分开存,是因为
+   * swap2 的协议和禁手的判定是两套互不相干的代码。
+   * @returns {'free'|'swap2'|'renju'}
+   */
+  function ruleChoice() {
+    if (isRenju()) return "renju";
+    return openingRule === "swap2" ? "swap2" : "free";
+  }
+
+  /** @returns {boolean} 是否顺带把模式切成了双人 */
+  function applyRuleChoice(val) {
+    ruleSet = val === "renju" ? "renju" : "free";
+    openingRule = val === "swap2" ? "swap2" : "standard";
+    if (isRenju() && mode === "ai") {
+      applyMode("pvp");
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 黑在 (r,c) 落子的禁手原因,没有则 null。白方与自由式一律 null。
+   * @returns {null|'overline'|'double4'|'double3'}
+   */
+  function forbiddenReason(bd, r, c, color) {
+    if (!isRenju() || color !== "b") return null;
+    return Core.renjuForbidden(bd, r, c);
+  }
+
+  /** 当前活盘上黑不能落的点,按局面缓存 —— draw 每帧都会问一次。 */
+  let forbidSig = "";
+  let forbidPts = [];
+  function forbiddenPoints() {
+    if (!isRenju() || result !== "play" || !isLive() || turn !== "b") {
+      forbidSig = "";
+      forbidPts = [];
+      return forbidPts;
+    }
+    const sig = history.length + "|" + gameGen;
+    if (sig !== forbidSig) {
+      forbidSig = sig;
+      forbidPts = Core.renjuForbiddenPoints(board);
+    }
+    return forbidPts;
   }
 
   /** True when human may place on the live board (hover preview allowed). */
@@ -715,13 +802,18 @@
 
   function serialize() {
     return {
-      v: 3,
+      v: 4,
       board,
       turn,
       result,
       mode,
       difficulty,
       humanColor,
+      // v4 起随存档走:胜负规则决定这盘棋怎么读。不存的话,一盘禁手棋在自由档下
+      // 载入,黑的六连会被重算成黑胜;反过来,一盘人机棋在禁手档下载入会把 mode
+      // 恢复成 ai —— 那正是「人机 + 禁手」这个不该存在的组合,而引擎走出的禁手
+      // 会被落子那一关拦下,电脑再也不出手,棋局就卡死在那里。
+      ruleSet,
       history,
       winLine,
       startedAt,
@@ -762,7 +854,7 @@
    * never trusted. @returns {boolean} true when applied.
    */
   function applySnapshot(s) {
-    if (!s || (s.v !== 1 && s.v !== 2 && s.v !== 3)) return false;
+    if (!s || (s.v !== 1 && s.v !== 2 && s.v !== 3 && s.v !== 4)) return false;
     // Resume only with a move list — board-only snapshots cannot place safely.
     const loadedHistory = Array.isArray(s.history) ? s.history : [];
     if (!loadedHistory.length) return false;
@@ -791,12 +883,20 @@
       difficulty = "normal";
     }
     humanColor = s.humanColor === "w" ? "w" : "b";
+    // 规则要在算胜负**之前**恢复。v3 及更早没有这个字段,那时只有自由式一种规则,
+    // 所以缺省成 free 就是它们当初实际用的规则。恢复完再把不可能的组合收回去 ——
+    // 与 loadSettings 同一处不变量。
+    ruleSet = s.ruleSet === "renju" ? "renju" : "free";
+    if (isRenju()) {
+      applyMode("pvp");
+      openingRule = "standard";
+    }
     viewIndex = history.length;
     board = boardAfter(history.length);
     turn = history.length % 2 === 0 ? "b" : "w";
     // Full-board outcome (same as import): last-move-only missed mid-history
     // fives and could restore a decided game as "play" → AI continues.
-    const outcome = GameState.resultFromBoard(board);
+    const outcome = GameState.resultFromBoard(board, isRenju());
     result = outcome.result;
     winLine = outcome.winLine;
     elapsedBaseMs = typeof s.elapsedBaseMs === "number" ? s.elapsedBaseMs : 0;
@@ -926,6 +1026,7 @@
   }
 
   function openReview() {
+    if (!engineAdviceOk()) { toast(t("advice.renju")); return; }
     Review.render();
     const m = document.getElementById("review-modal");
     if (m) {
@@ -953,7 +1054,7 @@
       });
     return SgfMod.buildSgf({
       history, result, mode, humanColor, originalStartedAt,
-      comments, rootComment,
+      ruleSet, comments, rootComment,
     });
   }
 
@@ -1071,6 +1172,7 @@
     hint: hintCell,
     analysis: analysisCell,
     variation: variationCells,
+    forbidden: forbiddenPoints(),
     coords: showCoords,
     clearPlaceAnim: () => { placeAnim = null; },
   }));
@@ -1289,6 +1391,15 @@
     turn = history.length % 2 === 0 ? "b" : "w";
     if (board[r][c]) return;
     if (!fromAi && !isHumanTurn()) return;
+    // 禁手:拦下不让走,而不是判负。判负要求对手看着你踩进去,一个人对着屏幕
+    // 下棋时那只是把棋局作废;拦下来还能顺带把原因说出来,规则才学得会。
+    // 对 fromAi 一并生效:禁手档下按构造没有电脑(规则一选中就切双人,读设置时也
+    // 收口),真走到这里说明那条约束破了 —— 那时宁可拦住,也不让引擎破规则。
+    const why = forbiddenReason(board, r, c, turn);
+    if (why) {
+      toast(t("renju.blocked." + why));
+      return;
+    }
     // Human/AI place ends import pause
     if (importPaused) importPaused = false;
 
@@ -1491,8 +1602,8 @@
     document.querySelectorAll("#theme-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.theme === themeId);
     });
-    document.querySelectorAll("#opening-seg button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.opening === openingRule);
+    document.querySelectorAll("#rule-seg button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.rule === ruleChoice());
     });
     const aiOnly = mode === "ai";
     const diffField = document.getElementById("diff-field");
@@ -1754,6 +1865,7 @@
     getGame: () => ({
       history: history, result: result, mode: mode,
       humanColor: humanColor, originalStartedAt: originalStartedAt,
+      ruleSet: ruleSet,
     }),
     toast: toast,
   });
@@ -1851,11 +1963,32 @@
     if (!b) return;
     if (b.dataset.mode === mode) return;
     if (history.length && !(await confirmNative(t("confirm.switchMode"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
-    mode = b.dataset.mode;
+    // 两边都能点,点了就把另一边带过去,而不是摆一个点不动的灰按钮让人猜为什么。
+    const ruleFollowed = applyMode(b.dataset.mode);
     saveSettings();
     reset({ keepSettings: true });
-    toast(t(mode === "ai" ? "toast.modeAi" : "toast.modePvp"));
+    toast(t(ruleFollowed ? "toast.modeAiFree" : mode === "ai" ? "toast.modeAi" : "toast.modePvp"));
   };
+
+  const ruleSeg = document.getElementById("rule-seg");
+  if (ruleSeg) {
+    ruleSeg.onclick = async (ev) => {
+      const b = ev.target.closest("button[data-rule]");
+      if (!b) return;
+      const val = b.dataset.rule;
+      if (val !== "free" && val !== "swap2" && val !== "renju") return;
+      if (val === ruleChoice()) return;
+      if (history.length && !(await confirmNative(t("confirm.switchRule"), t("confirm.switchRuleTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
+      const modeFollowed = applyRuleChoice(val);
+      saveSettings();
+      reset({ keepSettings: true });
+      toast(t(
+        modeFollowed ? "toast.ruleRenjuPvp"
+          : val === "renju" ? "toast.ruleRenju"
+          : val === "swap2" ? "toast.ruleSwap2" : "toast.ruleFree"
+      ));
+    };
+  }
   document.getElementById("diff-seg").onclick = (ev) => {
     const b = ev.target.closest("button[data-diff]");
     if (!b) return;
@@ -1948,22 +2081,6 @@
       syncSettingsUI();
     }
   };
-
-  const openingSeg = document.getElementById("opening-seg");
-  if (openingSeg) {
-    openingSeg.onclick = async (ev) => {
-      const b = ev.target.closest("button[data-opening]");
-      if (!b) return;
-      const val = b.dataset.opening;
-      if (val !== "standard" && val !== "swap2") return;
-      if (val === openingRule) return;
-      if (history.length && !(await confirmNative(t("confirm.switchOpening"), t("confirm.switchOpeningTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
-      openingRule = val;
-      saveSettings();
-      reset({ keepSettings: true });
-      toast(t(val === "swap2" ? "toast.openingSwap2" : "toast.openingStandard"));
-    };
-  }
 
   const swap2Btns = document.getElementById("swap2-btns");
   if (swap2Btns) {
@@ -2076,7 +2193,7 @@
       if (mode === "pvp") return;
       (async () => {
         if (history.length && !(await confirmNative(t("confirm.switchToPvp"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
-        mode = "pvp";
+        applyMode("pvp");
         saveSettings();
         reset({ keepSettings: true });
         toast(t("toast.modePvp"));
@@ -2086,10 +2203,10 @@
       if (mode === "ai") return;
       (async () => {
         if (history.length && !(await confirmNative(t("confirm.switchToAi"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
-        mode = "ai";
+        const ruleFollowed = applyMode("ai");
         saveSettings();
         reset({ keepSettings: true });
-        toast(t("toast.modeAi"));
+        toast(t(ruleFollowed ? "toast.modeAiFree" : "toast.modeAi"));
       })();
     } else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
     else if (k === "n" && !ev.metaKey && !ev.ctrlKey) requestNewGame();

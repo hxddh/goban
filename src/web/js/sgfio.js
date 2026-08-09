@@ -14,7 +14,7 @@
   const Sgf = global.GobanSgf;
   const Host = global.GobanHost;
 
-  /** deps: { getGame(): {history,result,mode,humanColor,originalStartedAt}, toast(msg) } */
+  /** deps: { getGame(): {history,result,mode,humanColor,originalStartedAt,ruleSet}, toast(msg) } */
   let deps = null;
   function init(d) { deps = d; }
 
@@ -26,6 +26,7 @@
       mode: g.mode,
       humanColor: g.humanColor,
       originalStartedAt: g.originalStartedAt,
+      ruleSet: g.ruleSet,
     });
   }
 

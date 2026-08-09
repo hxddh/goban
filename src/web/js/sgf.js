@@ -31,6 +31,7 @@
    * @param {string} opts.result play|b|w|draw
    * @param {string} opts.mode
    * @param {string} opts.humanColor
+   * @param {string} [opts.ruleSet] free|renju — written as RU[Gomoku]/RU[Renju]
    * @param {number} opts.originalStartedAt
    * @param {Object<number,string>} [opts.comments] 0-based move index → C[] note
    * @param {string} [opts.rootComment] C[] note on the game-info (root) node
@@ -40,6 +41,9 @@
     const result = opts.result || "play";
     const mode = opts.mode || "ai";
     const humanColor = opts.humanColor || "b";
+    // RU 是 SGF 的标准规则字段。以前不写,于是导出的每一份棋谱都默认按自由式
+    // 读 —— 一局连珠里黑的六连在别的软件里会显示成黑胜,而这局棋里它是禁手。
+    const ruleSet = opts.ruleSet === "renju" ? "Renju" : "Gomoku";
     const comments = opts.comments || null;
     const rootComment = opts.rootComment || "";
     const dt = new Date(opts.originalStartedAt || Date.now());
@@ -63,6 +67,8 @@
       dtStr +
       "]RE[" +
       re +
+      "]RU[" +
+      ruleSet +
       "]";
     if (mode === "ai") {
       s += "PB[" + (humanColor === "b" ? "Human" : "Computer") + "]";

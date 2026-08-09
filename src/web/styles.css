@@ -554,7 +554,7 @@
       box-shadow: 0 1px 3px rgba(0,0,0,.1);
     }
 
-    /* 主题 is the same "pick one of N" control as 模式/难度/执子/开局/语言, and
+    /* 主题 is the same "pick one of N" control as 模式/难度/执子/规则/语言, and
        since v1.34 it wears the same .pill capsule. It was the lone exception
        from v1.9.1 on — a transparent row of separately bordered buttons next to
        five filled capsules.

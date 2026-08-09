@@ -7,13 +7,18 @@
   const Core = global.GobanCore;
   const SIZE = Core.SIZE;
 
-  /** Scan the whole board for any five-in-a-row. @returns {{color,line}|null} */
-  function boardWinLine(board) {
+  /**
+   * Scan the whole board for a win. Under Renju a black six is 长连禁手 rather
+   * than a win, so the rule has to reach this scan too — otherwise a loaded
+   * game would be called a black win the live board would never have allowed.
+   * @returns {{color,line}|null}
+   */
+  function boardWinLine(board, renju) {
     for (let r = 0; r < SIZE; r++) {
       for (let c = 0; c < SIZE; c++) {
         const s = board[r][c];
         if (!s) continue;
-        const line = Core.findWin(board, r, c, s);
+        const line = Core.findWinRule(board, r, c, s, renju);
         if (line) return { color: s, line: line };
       }
     }
@@ -26,8 +31,8 @@
    * counts as finished.
    * @returns {{ result: 'play'|'b'|'w'|'draw', winLine: object[]|null }}
    */
-  function resultFromBoard(board) {
-    const won = boardWinLine(board);
+  function resultFromBoard(board, renju) {
+    const won = boardWinLine(board, renju);
     if (won) return { result: won.color, winLine: won.line };
     if (Core.boardFull(board)) return { result: "draw", winLine: null };
     return { result: "play", winLine: null };
@@ -63,7 +68,7 @@
     // Hand-edited or non-standard SGFs can carry a win mid-history followed by
     // more stones; checking only the last move would import that as "playable"
     // and let 续下 continue a decided position.
-    const outcome = resultFromBoard(session.board);
+    const outcome = resultFromBoard(session.board, session.ruleSet === "renju");
     session.result = outcome.result;
     session.winLine = outcome.winLine;
     if (outcome.result !== "play") {
