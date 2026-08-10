@@ -905,7 +905,76 @@ const Practice = ctx.GobanPractice;
       ratio(weak, hex("#d4a574")).toFixed(2) + ":1)");
   }
 
-  // ⑪ 成本:判定挂在每一手上,不能把落子拖慢。基准是困难档 2000ms 的预算。
+  // ⑪ 复盘的硬判定认规则(v1.56)。
+  //
+  // 复盘的「制胜一手 / 错失胜着 / 漏防」读的是 wouldWin,它是自由式的:黑的六连
+  // 在那里算赢,而连珠规则说那是长连禁手 —— 判负。差一个字,讲解里差的是
+  // 「制胜一手」和「你输了」。实测 8 局合法连珠自战 341 手黑棋一次没踩到,
+  // 但「罕见」不是「不可能」,踩到一次就是把输棋讲成赢棋。
+  //
+  // 判据两个方向都要:该赢的还得赢(成五在连珠下**永远不是禁手**,这是
+  // 「成五优先于一切禁手」的直接推论),白方一律不受影响。
+  {
+    const mk2 = (bs) => { const b = Core.emptyBoard(); for (const [r, c] of bs) b[r][c] = "b"; return b; };
+    // 黑在 (7,2)…(7,6) 已有五连缺口在 (7,7) 之外 —— 摆成「补上就是六」
+    const preSix = mk2([[7, 2], [7, 3], [7, 4], [7, 5], [7, 6]]);
+    assert(Core.wouldWin(preSix, 7, 7, "b") === true, "自由式:补第六子算赢");
+    assert(Core.wouldWinRule(preSix, 7, 7, "b", true) === false, "禁手式:补第六子不算赢(长连)");
+    assert(Core.wouldWinRule(preSix, 7, 7, "b", false) === true, "反证:renju 为假时与自由式逐字一致");
+    // 恰好五 —— 两档都算赢
+    const preFive = mk2([[7, 3], [7, 4], [7, 5], [7, 6]]);
+    assert(Core.wouldWinRule(preFive, 7, 7, "b", true) === true, "禁手式:成五照样算赢");
+    assert(Core.wouldWinRule(preFive, 7, 7, "b", false) === true, "自由式:成五算赢");
+    // 白方不受任何影响 —— 六连照样是白胜
+    const wPre = Core.emptyBoard();
+    for (const [r, c] of [[7, 2], [7, 3], [7, 4], [7, 5], [7, 6]]) wPre[r][c] = "w";
+    assert(Core.wouldWinRule(wPre, 7, 7, "w", true) === true, "反证:白补第六子在禁手式下仍算赢");
+    // 空位判据:已占的点谁都不算赢
+    assert(Core.wouldWinRule(preFive, 7, 4, "b", true) === false, "已占点不算赢");
+  }
+
+  // ⑫ 失着圆点不再借用「胜」色(v1.56)。
+  //
+  // 弹层文案一直写着「红点为失着」,而 review.js 取的是 --win —— 四套主题下它分别是
+  // 金 / 薄荷绿 / 棕 / 红,**只有练习本那一套碰巧对得上**;而且用「胜」色标失着
+  // 本身就是反的。这条闸门守两件:取的是 --bad,且 --bad 四套都定义了并且看得见。
+  //
+  // 背景不是棋盘而是曲线面板(--btn-ghost 叠在 --panel 上),所以门槛按实测背景算。
+  {
+    const revSrc = fs.readFileSync(path.join(root, "src/web/js/review.js"), "utf8");
+    const noComments = revSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const dot = noComments.match(/g\.fillStyle\s*=\s*css\.getPropertyValue\("(--[\w-]+)"\)/);
+    assert(dot, "找得到失着圆点的取色处(扫不到东西的闸门永远是绿的)");
+    assert(dot[1] === "--bad", "失着圆点取 --bad,而不是 " + dot[1]);
+
+    const cssSrc = fs.readFileSync(path.join(root, "src/web/styles.css"), "utf8");
+    const cssNo = cssSrc.replace(/\/\*[\s\S]*?\*\//g, "");
+    const bads = [...cssNo.matchAll(/--bad:\s*(#[0-9a-fA-F]{6})\s*;/g)].map((m) => m[1]);
+    assert(bads.length === 4, "四套主题都定义了 --bad(找到 " + bads.length + ")");
+    // 曲线面板实测合成背景(浏览器里量的,见 v1.56 说明):
+    const panels = { wood: "#312a26", night: "#1e2524", day: "#eae6df", notebook: "#edeef1" };
+    const hx = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const lm = ([r, g, b]) => {
+      const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    };
+    const rt = (a2, b2) => { const l1 = lm(a2), l2 = lm(b2); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+    const names = Object.keys(panels);
+    const weakOnes = [];
+    bads.forEach((c, i) => {
+      const r2 = rt(hx(c), hx(panels[names[i]]));
+      if (r2 < 3) weakOnes.push(names[i] + " " + r2.toFixed(2) + ":1");
+    });
+    assert(weakOnes.length === 0, "四套主题的失着点都过 3:1 (" + weakOnes.join("; ") + ")");
+    // 反证:借回 --win 时,四套里有几套其实根本不是红的 —— 用色相判,不是亮度
+    const wins = [...cssNo.matchAll(/--win:\s*(#[0-9a-fA-F]{6})\s*;/g)].map((m) => m[1]);
+    assert(wins.length === 4, "四套主题都定义了 --win");
+    const reddish = (h) => { const [r, g, b] = hx(h); return r > g * 1.5 && r > b * 1.5; };
+    assert(bads.every(reddish), "反证:四套的 --bad 全是红系");
+    assert(!wins.every(reddish), "反证:--win 并非四套都是红系 —— 这正是它当不了「红点」的原因");
+  }
+
+  // ⑬ 成本:判定挂在每一手上,不能把落子拖慢。基准是困难档 2000ms 的预算。
   {
     const bd = Core.emptyBoard();
     let turn = "b", s2 = 7 >>> 0;

@@ -229,6 +229,23 @@
     return w;
   }
 
+  /**
+   * wouldWin under the active rule set.
+   *
+   * 自由式下黑的六连是胜;连珠下它是长连禁手,也就是**判负**。两者差一个字,
+   * 讲解里差的是「制胜一手」和「你输了」。复盘的硬判定(coachFacts)此前一律走
+   * 自由式的 wouldWin —— 实测 8 局合法连珠自战 341 手黑棋一次没踩到,但那是
+   * 「罕见」,不是「不可能」,而踩到一次就是把输棋讲成赢棋。
+   */
+  function wouldWinRule(board, r, c, color, renju) {
+    if (!renju || color !== "b") return wouldWin(board, r, c, color);
+    if (board[r][c]) return false;
+    board[r][c] = color;
+    const w = !!findWinRule(board, r, c, color, true);
+    board[r][c] = "";
+    return w;
+  }
+
   function winLineAt(history, n, renju) {
     if (n <= 0) return null;
     const b = boardAfter(history, n);
@@ -273,6 +290,7 @@
     renjuForbiddenPoints,
     boardFull,
     wouldWin,
+    wouldWinRule,
     winLineAt,
     createInitialState,
   };

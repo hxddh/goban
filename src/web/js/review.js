@@ -156,7 +156,9 @@
     for (const b of data.blunders) {
       g.beginPath();
       g.arc(x(b.i), y(adv[b.i]), 3, 0, Math.PI * 2);
-      g.fillStyle = css.getPropertyValue("--win").trim() || "#c0392b";
+      // --bad,不是 --win:弹层文案写着「红点为失着」,而借用 --win 时它在四套主题
+      // 里分别是金 / 薄荷绿 / 棕 / 红 —— 只有练习本那一套碰巧对得上。
+      g.fillStyle = css.getPropertyValue("--bad").trim() || "#c0392b";
       g.fill();
     }
     // current view marker
@@ -185,6 +187,9 @@
       const s = data.summary;
       stat.textContent = t(s.b + s.w === 0 ? "review.statClean" : "review.stat", { b: s.b, w: s.w });
     }
+    // 禁手档下曲线仍按无禁手估 —— 说在它旁边,不藏进发布说明
+    const note = document.getElementById("review-renju-note");
+    if (note) note.hidden = !(deps.getRenju && deps.getRenju());
     const list = document.getElementById("review-blunders");
     if (list) {
       list.innerHTML = "";

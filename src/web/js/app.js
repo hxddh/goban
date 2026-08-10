@@ -319,17 +319,28 @@
    * instantly from tactical primitives (no engine think). Returns null when
    * there's no hard call — the soft best/other verdict is decided async.
    */
+  /**
+   * 成五的点在连珠下**永远不是禁手**(成五优先于一切禁手),所以黑的「五」照旧算胜;
+   * 被规则拿掉的只有六连 —— 自由式当胜,连珠是长连禁手。这里把两处硬判定都换成
+   * 规则版,`listWinCells` 的结果也照同一条筛一遍。白方不受影响,原样返回。
+   */
+  function winCellsRule(board, color) {
+    const cells = Ai.listWinCells(board, color);
+    if (!isRenju() || color !== "b") return cells;
+    return cells.filter((m) => Core.wouldWinRule(board, m.r, m.c, "b", true));
+  }
+
   function coachFacts(preBoard, sColor, played) {
     const oppC = opp(sColor);
-    const playedWins = Core.wouldWin(preBoard, played.r, played.c, sColor);
+    const playedWins = Core.wouldWinRule(preBoard, played.r, played.c, sColor, isRenju());
     if (playedWins) return { grade: "best", text: t("coach.winning") };
     // missed win: a five was available but not taken
-    const myWins = Ai.listWinCells(preBoard, sColor);
+    const myWins = winCellsRule(preBoard, sColor);
     if (myWins.length) return { grade: "blunder", text: t("coach.missedWin"), best: myWins[0] };
     // allowed opponent win-in-1 the move failed to prevent
     const after = preBoard.map((row) => row.slice());
     after[played.r][played.c] = sColor;
-    if (Ai.listWinCells(after, oppC).length) return { grade: "blunder", text: t("coach.missedBlock") };
+    if (winCellsRule(after, oppC).length) return { grade: "blunder", text: t("coach.missedBlock") };
     return null;
   }
 
@@ -340,7 +351,7 @@
     analysisVerdict = null;
     // Never kick off analysis while the live AI is thinking — aiMoveAsync
     // rebuilds a busy worker and would resolve the game move as null.
-    if (!analysisOn || viewIndex < 1 || aiThinking || !reviewAdviceOk()) return;
+    if (!analysisOn || viewIndex < 1 || aiThinking) return;
     // 只在**棋还在下**的时候封住头部那一手 —— 那时候评它等于给提示。
     //
     // 此前的判据是光秃秃的 isLive()，它不区分「棋还在下」和「棋已经下完」，于是
@@ -658,19 +669,10 @@
   function isRenju() { return ruleSet === "renju"; }
 
   /**
-   * 复盘这一侧还不能开。
+   * 唯一改 mode 的入口。三个入口(分段控件、⌘1、⌘2)共用这一处,否则总会漏掉一个。
    *
-   * 提示走的是 aiMove,交货口那一关会把它变成合法的一手,所以 v1.55 开了回来。
-   * 但复盘曲线与失着讲解读的是**静态评估**(evalStatic / coachFacts),它们绕过
-   * 那道闸:会把黑的六连当成胜,也会把禁手点当成「更优点」。所以这两样继续关着,
-   * 等评估函数自己认得禁手。
-   */
-  function reviewAdviceOk() { return !isRenju(); }
-
-  /**
-   * 唯一改 mode 的入口。人机与禁手互斥(见 ruleSet),切到人机就把规则一并带回
-   * 自由 —— 分段控件、⌘1、⌘2 三个入口共用这一处,否则总会漏掉一个。
-   * @returns {boolean} 规则是否被一并改回了自由
+   * v1.54 时这里还要把规则一并带回自由 —— 那时禁手只开双人。v1.55 起引擎交货口
+   * 已保证合法,禁手与人机是一个正常组合,这层联动连同它的返回值一起没了。
    */
   function applyMode(next) { mode = next; }
 
@@ -1005,6 +1007,7 @@
     winLineAt,
     coachFacts,
     evaluateBoard: Ai.evaluateBoard,
+    getRenju: isRenju,
   });
 
   function reviewJump(i) {
@@ -1012,8 +1015,25 @@
     closeReview();
   }
 
+  /**
+   * v1.54–v1.55 期间禁手档下这里只弹一句 toast,弹层根本不开。当时给了两条理由,
+   * v1.56 逐条复查 —— 一条早就不成立,一条已经修掉:
+   *
+   * 1. **「会把禁手点当成更优点」** —— 从 v1.55 起就已经是假的。「更优点」走
+   *    `aiMoveAsync`,而 `Engine.init` 的 defaults 带着 `renju: isRenju()`,
+   *    `withDefaults` 把它填进 payload 一路送到 worker,最后落在 `legalizeRenju`
+   *    的交货口上 —— 和提示同一道闸。当时把提示开了回来,却没发现同一条通路
+   *    也把这一半解决了。
+   * 2. **「会把黑的六连当成胜」** —— 这条是真的,现由 `Core.wouldWinRule` 修掉
+   *    (见 coachFacts / winCellsRule)。
+   *
+   * 剩下的唯一偏差是曲线自己:`evalStatic` 不知道黑受限。实测 8 局合法连珠自战
+   * 341 手黑棋,黑的静态首选点有 12 次(**3.52%**)是禁手点,曲线在这些局面偏乐观。
+   * 权衡:继续关着,用户得到 0;开着,得到完全正确的硬判定、合法的更优点,和一条
+   * 已知在 3.5% 上偏乐观的曲线。选后者,并把这句话放进弹层(#review-renju-note),
+   * 而不是藏进发布说明。
+   */
   function openReview() {
-    if (!reviewAdviceOk()) { toast(t("advice.renju")); return; }
     Review.render();
     const m = document.getElementById("review-modal");
     if (m) {
