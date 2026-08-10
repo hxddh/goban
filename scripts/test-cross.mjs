@@ -3415,6 +3415,94 @@ async function enableSwap2Pvp(page) {
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
+// AV 禁手档下复盘真的开得出来（v1.56），而且那条已知偏差就写在弹层里。
+//
+// v1.54–v1.55 期间禁手档下点「复盘」只会弹一句 toast，弹层根本不开。开回来的
+// 依据是逐条复查了当初关掉它的两条理由：「更优点会指到禁手点」从 v1.55 起就已经
+// 不成立（走 aiMoveAsync → Engine defaults 带 renju → legalizeRenju），
+// 「六连当成胜」是真的、由 Core.wouldWinRule 修掉。
+//
+// 判据要有区分力，所以两个方向都量：
+//   ① 禁手档下弹层**真的开了**且曲线画布有内容 —— 光看 classList 不够，
+//      render() 里任何一步抛异常都会留下一个空壳；
+//   ② 那条「曲线仍按无禁手估」的说明在禁手档下**可见**、自由档下**隐藏** ——
+//      少了后半，把 hidden 写死成 false 也能过。
+{
+  const bad = [];
+  const seen = {};
+  const page = await newPage();
+  await openPanel(page);
+  const click = clicker(page);
+
+  const playAFew = async () => {
+    for (let k = 0; k < 6; k++) {
+      await click(4 + k, 5 + ((k * 2) % 5));
+      await page.waitForTimeout(160);
+    }
+  };
+  const probe = async (label) => {
+    await page.evaluate(() => document.getElementById("sgf-review").click());
+    await page.waitForTimeout(1200);
+    const st = await page.evaluate(() => {
+      const m = document.getElementById("review-modal");
+      const body = document.getElementById("review-body");
+      const note = document.getElementById("review-renju-note");
+      const cv = document.getElementById("review-curve");
+      let ink = 0;
+      if (cv && cv.width) {
+        const g = cv.getContext("2d");
+        const d = g.getImageData(0, 0, cv.width, cv.height).data;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 8) ink++;
+      }
+      return {
+        open: !!(m && m.classList.contains("show")),
+        bodyShown: !!(body && !body.hidden),
+        noteShown: !!(note && !note.hidden),
+        ink: ink,
+      };
+    });
+    seen[label] = st;
+    // 关弹层只能走它自己的按钮,**不能按 Esc**:没有弹层打开时 Esc 会去收侧栏
+    // (app.js 的 keydown 链最后一档),于是后面点 #rule-seg 会被 #app 挡住而超时。
+    // 反证 A(把 v1.55 的拦截加回 openReview)第一次跑就是这样死的 —— 闸门抛异常
+    // 而不是报错,在批量脚本里表现为**一片安静**,和「没问题」长得一模一样。
+    if (st.open) {
+      await page.evaluate(() => document.getElementById("review-close").click());
+      await page.waitForTimeout(300);
+    }
+    return st;
+  };
+
+  // ── 禁手档:双人,自己摆几手就够(这条闸门量的是复盘,不是引擎)
+  await page.click('#rule-seg button[data-rule="renju"]'); await page.waitForTimeout(150);
+  await dismissConfirm(page); await page.waitForTimeout(150);
+  await page.click('#mode-seg button[data-mode="pvp"]'); await page.waitForTimeout(150);
+  await dismissConfirm(page); await page.waitForTimeout(300);
+  await playAFew();
+  const rj = await probe("renju");
+  if (!rj.open) bad.push("禁手档:复盘弹层没开(v1.55 的 toast 拦截还在?)");
+  if (!rj.bodyShown) bad.push("禁手档:弹层开了但正文是空的");
+  if (rj.ink < 200) bad.push("禁手档:曲线画布几乎没画东西(ink=" + rj.ink + ")");
+  if (!rj.noteShown) bad.push("禁手档:没显示「曲线仍按无禁手估」那条说明");
+
+  // ── 自由档:同样开得出来,但那条说明必须收起来
+  await openPanel(page);          // 侧栏可能已被别处收起,重开一次再点里面的控件
+  await page.evaluate(() => document.querySelector("#btn-new").click());
+  await page.waitForTimeout(150);
+  await dismissConfirm(page); await page.waitForTimeout(150);
+  await page.click('#rule-seg button[data-rule="free"]'); await page.waitForTimeout(150);
+  await dismissConfirm(page); await page.waitForTimeout(300);
+  await playAFew();
+  const fr = await probe("free");
+  if (!fr.open || !fr.bodyShown) bad.push("自由档:复盘反而打不开了");
+  if (fr.noteShown) bad.push("反证:自由档下不该出现禁手说明 —— hidden 可能被写死了");
+
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AV 禁手档下复盘开得出来，且那条已知偏差写在弹层里（两个方向）",
+    bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");

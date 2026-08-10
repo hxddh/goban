@@ -344,6 +344,9 @@
                   aria-label="评分曲线，逐手优劣；具体失着见下方列表" data-i18n-aria="aria.reviewCurve"
                   title="点击跳到对应手" data-i18n-title="review.curve.title"></canvas>
           <div class="review-stat" id="review-stat"></div>
+          <!-- v1.56：禁手档下复盘开了回来，但曲线仍按无禁手估（实测黑方 3.5% 的手
+               偏乐观）。把这条偏差写在它旁边，而不是藏在发布说明里。 -->
+          <p class="review-hint" id="review-renju-note" hidden data-i18n="review.renjuNote">禁手档：胜负判定与更优点已按规则算；优劣曲线仍按无禁手估，黑方略偏乐观</p>
           <div class="review-actions">
             <button type="button" class="text-link" id="review-pv" title="从当前查看的一手起，引擎推演后续着法（虚影）" data-i18n="review.pv" data-i18n-title="review.pv.title">推演当前局面</button>
             <button type="button" class="text-link" id="review-export" data-i18n="review.exportSgf">导出带评注 SGF</button>
