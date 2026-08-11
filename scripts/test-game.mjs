@@ -8,6 +8,7 @@ import path from "path";
 import vm from "vm";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
+import { checkFrameworks, frameworksImported } from "./check-frameworks.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -2303,6 +2304,57 @@ const Practice = ctx.GobanPractice;
     "dangling-id gate allows the guarded optional-element idiom");
 
   fs.rmSync(outDir, { recursive: true, force: true });
+}
+
+// ---- macOS 框架清单守卫的逻辑本身(v1.56 之后) ----
+//
+// 真正的比对要有 SDK 才跑得起来(见 scripts/check-frameworks.mjs,挂在
+// build-macos 的 zig build 之前)。但**逻辑**不该只在有 SDK 的机器上被覆盖 ——
+// 所以这里用合成输入把它测干净,单测机上没有 SDK 也守得住。
+//
+// 背景:SDK 0.8.4 给 appkit_host.m 加了 ScreenCaptureKit,build.zig 的
+// linkFramework 清单没跟上,macOS 构建 10 个未定义符号。而 release.yml 是先建
+// release 再串构建,所以那会是「发布成功但 macOS 包缺席」。
+{
+  const HOST = [
+    '#import "appkit_host.h"',
+    "#import <AppKit/AppKit.h>",
+    "#import <ScreenCaptureKit/ScreenCaptureKit.h>",
+    "#import <QuartzCore/CAMetalLayer.h>",
+    "#import <CoreFoundation/CoreFoundation.h>",
+    "#import <dispatch/dispatch.h>",
+    "#import <ImageIO/ImageIO.h>",
+  ].join("\n");
+  const ZIG_OK = [
+    'app_mod.linkFramework("AppKit", .{});',
+    'app_mod.linkFramework("ScreenCaptureKit", .{});',
+    'app_mod.linkFramework("QuartzCore", .{});',
+  ].join("\n");
+
+  const ok = checkFrameworks(HOST, ZIG_OK);
+  assert(ok.missing.length === 0, "齐全时不报 (" + ok.missing.join(",") + ")");
+  assert(ok.imported === 6, "只数 <框架> 形式的 import,不把 \"appkit_host.h\" 算进去(得到 " + ok.imported + ")");
+  assert(ok.skipped.join(",") === "CoreFoundation,ImageIO,dispatch", "免链接名单命中三条,得到 " + ok.skipped.join(","));
+
+  // 反证一:少一个框架就要报,而且报的是那一个
+  const missing = checkFrameworks(HOST, ZIG_OK.replace(/.*ScreenCaptureKit.*\n/, ""));
+  assert(missing.missing.join(",") === "ScreenCaptureKit",
+    "反证:去掉 ScreenCaptureKit 后当场报出它(得到 [" + missing.missing.join(",") + "])");
+
+  // 反证二:注释里的 linkFramework 不算数 —— 否则把那行注释掉也能过
+  const commented = checkFrameworks(HOST, ZIG_OK.replace(
+    'app_mod.linkFramework("ScreenCaptureKit", .{});',
+    '// app_mod.linkFramework("ScreenCaptureKit", .{});'));
+  assert(commented.missing.join(",") === "ScreenCaptureKit",
+    "反证:注释掉的 linkFramework 不算数(得到 [" + commented.missing.join(",") + "])");
+
+  // 反证三:免链接名单不是万能挡箭牌 —— 名单外的新框架一定要报
+  const novel = checkFrameworks(HOST + "\n#import <SomeNewKit/SomeNewKit.h>", ZIG_OK);
+  assert(novel.missing.join(",") === "SomeNewKit",
+    "反证:名单外的新框架照报(得到 [" + novel.missing.join(",") + "])");
+
+  // 反证四:名单里的三条确实是被「放过」而不是「没扫到」
+  assert(frameworksImported(HOST).has("dispatch"), "dispatch 确实被扫到了,只是被放过");
 }
 
 if (failed) {
