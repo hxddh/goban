@@ -378,6 +378,17 @@ fn linkPlatform(b: *std.Build, target: std.Build.ResolvedTarget, app_mod: *std.B
         app_mod.linkFramework("Security", .{});
         app_mod.linkFramework("Metal", .{});
         app_mod.linkFramework("QuartzCore", .{});
+        // SDK 0.8.4 给 appkit_host.m 加了 NativeSdkScreenAudioCapture(屏幕/系统音频
+        // 采集),它 #import <ScreenCaptureKit/…> 并用 CoreMedia 的 CMSampleBuffer* /
+        // CMTimeMake。五子棋一个字节都用不到这套东西 —— 但这份 .m 是整体编进来的,
+        // 少一个框架就是 10 个未定义符号。
+        //
+        // 这份清单在**我们这边**维护,SDK 只交源码不交链接需求,所以每次它动
+        // appkit_host.m 都可能悄悄多要一个框架。scripts/check-frameworks.mjs 就是
+        // 为这件事写的:比对 .m 里的 #import 与这里的 linkFramework,少了当场报,
+        // 而不是等发布日的构建。
+        app_mod.linkFramework("ScreenCaptureKit", .{});
+        app_mod.linkFramework("CoreMedia", .{});
         app_mod.linkSystemLibrary("c", .{});
         if (web_engine == .chromium) app_mod.linkSystemLibrary("c++", .{});
     } else if (platform == .linux) {

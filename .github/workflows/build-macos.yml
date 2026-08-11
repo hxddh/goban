@@ -44,6 +44,12 @@ jobs:
           npm install -g @native-sdk/cli
           native --version || true
           echo "SDK_PATH=$(npm root -g)/@native-sdk/cli" >> "$GITHUB_ENV"
+      # SDK 只交 appkit_host.m,不交它自己的链接需求 —— 那份 linkFramework 清单在
+      # build.zig 里由我们维护。0.8.4 加了 ScreenCaptureKit,我们没跟上,结果是
+      # zig build 里 10 个未定义符号。这一步把同一类失败提前到编译前,并且说人话。
+      # (只看 #import,抓不到传递性符号依赖 —— 那一半仍然靠下面的真构建。)
+      - name: framework guard — build.zig must link what appkit_host.m imports
+        run: node scripts/check-frameworks.mjs
       # version 省略 —— setup-zig 读 build.zig.zon 的 minimum_zig_version
       - uses: mlugg/setup-zig@v2
       - name: sync frontend dist
