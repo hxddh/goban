@@ -364,7 +364,7 @@
     return best;
   }
 
-  function searchRoot(me, maxDepth) {
+  function searchRoot(me, maxDepth, rootWidth) {
     const opp = me === B ? W : B;
     killers.fill(-1);
     ttGen++;
@@ -373,7 +373,7 @@
       ttGenA.fill(0);
     }
     hardStop = false;
-    const nRoot = genMoves(0, me, 28, -1);
+    const nRoot = genMoves(0, me, rootWidth || 28, -1);
     if (!nRoot) return null;
     // copy root moves (ply-0 buffers get reused by the search below)
     const rootIdx = Array.from(mIdx[0].slice(0, nRoot));
@@ -437,6 +437,21 @@
       vcfDepth: 24,
       vctDepth: extreme ? 10 : 8,
       maxDepth: extreme ? 14 : 12,
+      // 根节点候选宽度。此前两档都硬编码 28,于是「极」相对「难」只多了 2 层
+      // maxDepth 和 2 层 vctDepth —— 实测两档 **92% 的手选同一点**,40 局配对
+      // 4胜10平6负(p=0.377),分不出强弱,而极档要用户多等 2.3 倍时间。
+      //
+      // 更要命的是极档**没在兑现自己的定义**(「5–8 秒深算」):同 30 个局面实测
+      // 中位每手 28ms、只有 5/30 用满预算,而 20 万 → 200 万节点 **0 处改变** ——
+      // 搜索到 maxDepth 就返回,多给的算力根本花不出去。
+      //
+      // 加深已被证伪(12→14 换不出胜负),预算也证伪(10 倍无感),剩下的维度
+      // 就是宽度。实测(固定节点预算、12 开局配对):根宽 34 对原样 28
+      // **4胜8平0负**,根宽 40 **5胜6平1负** —— 方向一致、零到一败。取 34:
+      // 它零败且更便宜,而 40 的额外收益在样本内看不出来。
+      //
+      // 只动极档 —— 难档保持 28,行为逐字节不变。
+      rootWidth: extreme ? 34 : 28,
     };
   }
 
@@ -591,7 +606,7 @@
     ctxT1 = deadline;
     // calibration: C2 make() ticks run ~40x faster than C1 analyzePlace evals
     ctxTick1 = detEvals > 0 ? tick + Math.max(20000, Math.floor(detEvals * 18)) : 0;
-    const mv = searchRoot(meC, prof.maxDepth);
+    const mv = searchRoot(meC, prof.maxDepth, prof.rootWidth);
     lastStage = "search";
     if (mv != null) return { r: (mv / SZ) | 0, c: mv % SZ };
     lastStage = "fallback";
