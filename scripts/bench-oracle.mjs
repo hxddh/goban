@@ -62,6 +62,9 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 const CACHE_PATH = path.join(ROOT, "scripts/baseline/oracle-cache.json");
+// 引擎答案缓存是纯派生的加速件（每台引擎 × 每个局面），不进版本库；
+// 预言机裁决则相反 —— 每条 33 秒，那才是要留下来的答案。
+const ENGINE_CACHE_PATH = path.join(ROOT, ".oracle-engine-cache.json");
 
 const SRC = {};
 for (const f of ["version", "i18n", "core", "sgf", "ai", "ai2"])
@@ -98,14 +101,33 @@ export function makeEngine(patch) {
     );
   if (patch && patch.S) hit(ANCHOR_S, `const S = [${patch.S.join(", ")}, 0];`);
   vm.runInContext(s, c, { filename: "ai2.js" });
-  return { Core: c.GobanCore, C1: c.GobanAi, Ai2: c.GobanAi2 };
+  return { Core: c.GobanCore, C1: c.GobanAi, Ai2: c.GobanAi2, __key: configKey(patch) };
 }
 
 /** 预言机：宽度开到远超可交互的程度。慢到不可能出厂，正因如此才有资格当参照。 */
 export const ORACLE_PATCH = { rootWidth: 72, caps: [24, 28, 32] };
 export const ORACLE_NODES = Number(process.env.ORACLE_NODES || 600000);
+/** 题面手数下限 —— 低于这个手数的局面两档必然同手，进题面只会稀释信号。 */
+const MIN_PLY = Number(process.env.MIN_PLY || 12);
 
-const boardKey = (board, side) => board.map((r) => r.map((x) => x || ".").join("")).join("/") + "|" + side;
+/**
+ * 局面指纹。首版直接拿 240 字符的棋盘串当键 —— 预言机缓存只装分歧局面（几十条）
+ * 还撑得住，但引擎答案缓存是每台引擎 × 每个局面，几千条乘 240 字节就没法看了。
+ * 换成 FNV-1a 双 32 位（16 位十六进制），碰撞概率在万级条目下可忽略。
+ */
+function hashKey(board, side) {
+  const s = board.map((r) => r.map((x) => x || ".").join("")).join("") + side;
+  let h1 = 0x811c9dc5, h2 = 0x01000193;
+  for (let i = 0; i < s.length; i++) {
+    h1 = ((h1 ^ s.charCodeAt(i)) * 0x01000193) >>> 0;
+    h2 = ((h2 + s.charCodeAt(i)) * 0x85ebca6b) >>> 0;
+  }
+  return h1.toString(16).padStart(8, "0") + h2.toString(16).padStart(8, "0");
+}
+
+/** 引擎配置指纹 —— 引擎答案缓存的另一半键。 */
+const configKey = (patch) =>
+  !patch ? "base" : JSON.stringify(patch, Object.keys(patch).sort());
 
 /** 8 种对称下的最小串 —— 只用来给题面去重，缓存仍按原样局面存，避免变换错位。 */
 function canonical(board) {
@@ -197,7 +219,10 @@ export function positions(limit) {
       }
       if (bad) continue;
       for (let ply = open.length; ply < 28 && out.length < limit; ply++) {
-        if (quiet(bd, side)) {
+        // 手数下限不能省。重写开局册时我把原来的 ply>=6 删掉了，题面里于是塞满
+        // 三五子的开局局面 —— 两台引擎在那种局面上必然选同一手，实测 40 个题面
+        // **分歧 0**，尺子的功率被我自己掐死。分歧样本是这把尺唯一的信号来源。
+        if (ply >= MIN_PLY && quiet(bd, side)) {
           const k = canonical(bd) + "|" + side;
           if (!seen.has(k)) {
             seen.add(k);
@@ -218,21 +243,21 @@ export function positions(limit) {
   return out;
 }
 
-function loadCache() {
+const loadJson = (f) => {
   try {
-    return JSON.parse(fs.readFileSync(CACHE_PATH, "utf8"));
+    return JSON.parse(fs.readFileSync(f, "utf8"));
   } catch {
     return {};
   }
-}
-function saveCache(cache) {
-  fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true });
-  fs.writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 0) + "\n");
-}
+};
+const saveJson = (f, o) => {
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify(o, null, 0) + "\n");
+};
 
 /** 预言机裁决一个局面，命中缓存就不算。返回 "r,c"。 */
 export function adjudicate(oracle, C1, p, cache) {
-  const k = boardKey(p.board, p.side);
+  const k = hashKey(p.board, p.side);
   if (cache[k]) return cache[k];
   const mv = oracle.Ai2.aiMove({
     board: C1.cloneBoard(p.board), side: p.side,
@@ -264,35 +289,52 @@ export function signTestP(a, b) {
 export function compare(A, B, pos, opts) {
   const nodes = (opts && opts.nodes) || 100000;
   const diff = (opts && opts.difficulty) || "extreme";
-  const cache = loadCache();
+  const cache = loadJson(CACHE_PATH);
+  const emem = loadJson(ENGINE_CACHE_PATH);
   const oracle = makeEngine(ORACLE_PATCH);
   const C1 = A.C1;
   let disc = 0, aOnly = 0, bOnly = 0, neither = 0, misses = 0, done = 0;
   const t0 = Date.now();
+  // 落盘必须是增量的。首版只在结尾写一次，2.6 小时的跑被超时杀掉就全部作废 ——
+  // 实际发生过一次。
+  const flush = () => {
+    saveJson(CACHE_PATH, cache);
+    saveJson(ENGINE_CACHE_PATH, emem);
+  };
   for (const p of pos) {
     // 进度必须打出来。这把尺的每一步都是几十分钟量级，静默的长跑分不清
     // 「还在算」和「卡死了」——首版就因此白等了两轮 900 秒。
-    if (++done % 50 === 0)
+    if (++done % 50 === 0) {
       console.log(
         `  …${done}/${pos.length} · 分歧 ${disc} · 新裁决 ${misses} · ${((Date.now() - t0) / 1000).toFixed(0)}s`
       );
-    const ask = (E) =>
-      E.Ai2.aiMove({
+      flush();
+    }
+    // 引擎答案也缓存。真正让这把尺变便宜的是这里 —— 仓库现状那一侧只算一次，
+    // 以后每次拿新变体来比，它都是免费的。键含配置指纹与节点预算，换配置不会串味。
+    const ask = (E) => {
+      const ck = `${E.__key}|${diff}|${nodes}|${hashKey(p.board, p.side)}`;
+      if (emem[ck] !== undefined) return emem[ck];
+      const mv = E.Ai2.aiMove({
         board: C1.cloneBoard(p.board), side: p.side,
         difficulty: diff, timeMs: 0, nodeBudget: nodes, vary: false,
       });
-    const a = ask(A), b = ask(B);
+      emem[ck] = mv ? `${mv.r},${mv.c}` : null;
+      return emem[ck];
+    };
+    const ka0 = ask(A), kb0 = ask(B);
+    const a = ka0, b = kb0;
     if (!a || !b) continue;
-    const ka = `${a.r},${a.c}`, kb = `${b.r},${b.c}`;
+    const ka = a, kb = b;
     if (ka === kb) continue; // 一致 —— McNemar 用不上，不问预言机
     disc++;
-    if (!cache[boardKey(p.board, p.side)]) misses++;
+    if (!cache[hashKey(p.board, p.side)]) misses++;
     const truth = adjudicate(oracle, C1, p, cache);
     if (ka === truth) aOnly++;
     else if (kb === truth) bOnly++;
     else neither++;
   }
-  saveCache(cache);
+  flush();
   return { n: pos.length, disc, aOnly, bOnly, neither, misses, p: signTestP(aOnly, bOnly) };
 }
 

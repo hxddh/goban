@@ -7,3 +7,4 @@ dist/
 *.log
 _legacy_native/
 src/web/js/worker-src.js
+.oracle-engine-cache.json
