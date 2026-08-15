@@ -1568,8 +1568,9 @@
     if (isPanelOpen()) scrollMoveListToCurrent();
   }
 
-  /** Static text for the first second, then a live count so a 5–8s 极限 think
-   *  reads as progress rather than a hang. */
+  /** Static text for the first second, then a live count so a long 极限 think
+   *  reads as progress rather than a hang. 实测极档中位每手只有 10ms，但预算内
+   *  确实有一成多的手会跑满（39 手里 12 手），所以这条计时不是摆设。 */
   function thinkingText() {
     const ms = thinkStartedAt ? performance.now() - thinkStartedAt : 0;
     if (ms < 1000) return t("status.thinking");
