@@ -934,6 +934,51 @@ const Practice = ctx.GobanPractice;
     assert(Core.wouldWinRule(preFive, 7, 4, "b", true) === false, "已占点不算赢");
   }
 
+  // ⑬ 「平衡开局」那句提示与实际行为对得上(v1.59)。
+  //
+  // 人机模式下 swap2 的选边由 app.js 的 aiSwap2Choose 做:
+  //     const aiTakesWhite = Ai.evaluateBoard(bd, "w") >= Ai.evaluateBoard(bd, "b");
+  // evaluateBoard 带一项「离中心越近、子越多分越高」的材料分,而 swap2 布完
+  // B,W,B 之后黑恒定多一子 —— 实测 **±4 范围内全部 6320 个三子开局,选白 0 次**。
+  // 也就是说人机模式下用户 100% 执白,而那些局面**黑胜 83%**(12 局难档自战)。
+  //
+  // 这不是选错了:黑确实几乎总是更好,「永远选黑」近似正确。真正的问题是用户
+  // 不知道自己被换到了 17% 的那一边,而选项叫「平衡」。v1.59 的处理是如实告知。
+  //
+  // 这条闸门守的是**说法与行为一致**,不是字符串在不在(那会是同义反复):
+  // 一旦有人把选边策略改成有时选白,这里就会红,提示文案必须跟着改。
+  {
+    const crit = (bd) => Ai.evaluateBoard(bd, "w") >= Ai.evaluateBoard(bd, "b"); // true = AI 拿白
+    let n = 0, white = 0;
+    for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++)
+    for (let er = -2; er <= 2; er++) for (let ec = -2; ec <= 2; ec++) {
+      if (!dr && !dc) continue; if (!er && !ec) continue;
+      if (dr === er && dc === ec) continue;
+      const bd = Core.emptyBoard();
+      bd[7][7] = "b"; bd[7 + dr][7 + dc] = "w"; bd[7 + er][7 + ec] = "b";
+      n++; if (crit(bd)) white++;
+    }
+    assert(n > 400, "题面够大(得到 " + n + " 个三子开局)");
+    assert(white / n <= 0.05,
+      "行为与提示一致:电脑几乎总选黑(选白 " + white + "/" + n + ")");
+    // 反证:把判据反过来,这条闸门必须当场红 —— 否则它守不住任何东西
+    let flipped = 0;
+    for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++)
+    for (let er = -2; er <= 2; er++) for (let ec = -2; ec <= 2; ec++) {
+      if (!dr && !dc) continue; if (!er && !ec) continue;
+      if (dr === er && dc === ec) continue;
+      const bd = Core.emptyBoard();
+      bd[7][7] = "b"; bd[7 + dr][7 + dc] = "w"; bd[7 + er][7 + ec] = "b";
+      if (!crit(bd)) flipped++;
+    }
+    assert(flipped / n > 0.05,
+      "反证:判据反过来就不满足「几乎总选黑」(得到 " + flipped + "/" + n + ")");
+    // 两种语言都得把这件事说出来 —— 只改中文等于只对一半用户诚实
+    const i18nSrc = fs.readFileSync(path.join(root, "src/web/js/i18n.js"), "utf8");
+    assert(/toast\.ruleSwap2Ai[\s\S]{0,200}执白/.test(i18nSrc), "中文提示说了「你执白」");
+    assert(/toast\.ruleSwap2Ai[\s\S]{0,240}play white/.test(i18nSrc), "英文提示说了 play white");
+  }
+
   // ⑫ 失着圆点不再借用「胜」色(v1.56)。
   //
   // 弹层文案一直写着「红点为失着」,而 review.js 取的是 --win —— 四套主题下它分别是
