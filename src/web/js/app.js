@@ -1992,7 +1992,9 @@
       reset({ keepSettings: true });
       toast(t(
         val === "renju" ? "toast.ruleRenju"
-          : val === "swap2" ? "toast.ruleSwap2" : "toast.ruleFree"
+          : val === "swap2"
+            ? (mode === "ai" ? "toast.ruleSwap2Ai" : "toast.ruleSwap2")
+            : "toast.ruleFree"
       ));
     };
   }
