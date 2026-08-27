@@ -1591,6 +1591,37 @@
     }
   }
 
+  /**
+   * 模式 / 执子 / 规则只在**开局态**出现;难度常驻。
+   *
+   * 依据不是审美,是这三个控件的既有行为:对局中改它们**本来就会弹确认再
+   * reset() 重开一局**(mode-seg / color-seg / rule-seg 三个 onclick 都是
+   * confirm → reset)。它们是「开新局」动作,只是长得像设置,所以放进开局态
+   * 不损失任何能力。难度是唯一真正的对局中设置 —— 立即生效、不重开 ——
+   * 留下。双人模式下难度本来就隐藏(没有电脑),这里不改那条。
+   */
+  function syncPhaseFields() {
+    // 相位不能按「盘上有没有子」判 —— 人执白时电脑立刻走第一手,history.length
+    // 当场就是 1,执白的用户一开局就再也看不到这三个控件。交叉闸门 AU 抓到了这个。
+    // 正确的判据是「**人**有没有落过子」:人机模式下数人那一色的子,双人模式下
+    // 两边都是人,数总手数。
+    const humanStones =
+      mode === "ai"
+        ? history.filter((_, i) => (i % 2 === 0 ? "b" : "w") === humanColor).length
+        : history.length;
+    const playing = humanStones > 0;
+    for (const id of ["mode-field", "color-field", "rule-field"]) {
+      const el = document.getElementById(id);
+      if (el) el.hidden = playing;
+    }
+    // 对局中这一组只剩难度一行,标题「对局」就文不对题,而且和行标签「难度」
+    // 是同一个东西的两个标签。去掉标题;分组仍由 .side-section 本来就有的
+    // border-bottom 画着。
+    const gameSec = document.getElementById("mode-field")
+      && document.getElementById("mode-field").closest(".side-section");
+    if (gameSec) gameSec.classList.toggle("bare", playing);
+  }
+
   function syncSettingsUI() {
     document.querySelectorAll("#mode-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.mode === mode);
@@ -1639,6 +1670,7 @@
     }
     // swap2 decides the human's color via the opening protocol, so hide 执子 then
     if (colorField) colorField.hidden = !aiOnly || openingRule === "swap2";
+    syncPhaseFields(); // 相位优先:对局中一律不显示开局设置
     const sbOn = document.getElementById("opt-sound");
     if (sbOn) {
       sbOn.classList.toggle("active", soundOn);
@@ -1674,6 +1706,7 @@
 
   function sync() {
     draw();
+    syncPhaseFields();
     syncScrollEdges();
     const status = document.getElementById("status");
     const moves = document.getElementById("moves");

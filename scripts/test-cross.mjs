@@ -149,6 +149,29 @@ const snap = (page) =>
   }));
 
 // "]" is idempotent (setPanelOpen(true)); #toggle-panel flips. Since v1.33
+/**
+ * v1.61 起模式 / 执子 / 规则只在**开局态**出现（对局中改它们本来就会 reset
+ * 重开一局，所以它们是「开新局」动作）。用例里有十几处在对局中点这三个控件，
+ * 那是旧流程；这个辅助把新流程补上，幂等，可以无脑插在每个 seg 点击之前。
+ *
+ * 判「是否在对局中」看的是**手数**，不是元素几何。首版用
+ * `getBoundingClientRect().height === 0`，那会把「侧栏被收起」误判成
+ * 「被相位藏起来」；而想靠先调 openPanel 来消除这个歧义更糟 —— openPanel 按的
+ * 是 `]`，是**开关**，侧栏已开时再调一次就把它关上了（正是下面那段注释警告的坑）。
+ */
+async function ensureSetupPhase(page) {
+  const playing = await page.evaluate(() => {
+    const m = document.getElementById("moves");
+    const parts = ((m && m.textContent) || "").split("/");
+    return parts.length === 2 && Number(parts[1]) > 0;
+  });
+  if (!playing) return;
+  await page.evaluate(() => document.querySelector("#btn-new").click());
+  await page.waitForTimeout(150);
+  await dismissConfirm(page);
+  await page.waitForTimeout(200);
+}
+
 // the panel starts OPEN on a fresh profile — and newPage() clears storage, so
 // every page here is a fresh profile — which turned a "click to open" into a
 // "click to close" and made the controls inside inert.
@@ -244,9 +267,11 @@ const notes = (audio) =>
 
 async function enableSwap2Pvp(page) {
   await openPanel(page);
+  await ensureSetupPhase(page);
   await page.click('button[data-mode="pvp"]');
   await page.waitForTimeout(100);
   await dismissConfirm(page);
+  await ensureSetupPhase(page);
   await page.click('button[data-rule="swap2"]');
   await page.waitForTimeout(120);
   await dismissConfirm(page);
@@ -396,6 +421,7 @@ async function enableSwap2Pvp(page) {
   const click = clicker(page);
   await openPanel(page);
   await page.waitForTimeout(80);
+  await ensureSetupPhase(page);
   await page.click('button[data-mode="pvp"]');
   await page.waitForTimeout(100);
   await dismissConfirm(page);
@@ -404,6 +430,7 @@ async function enableSwap2Pvp(page) {
   await page.click("#sgf-slots"); await page.waitForTimeout(120);
   await page.click("#slot-save-current"); await page.waitForTimeout(120);
   await page.click("#slots-close"); await page.waitForTimeout(80);
+  await ensureSetupPhase(page);
   await page.click('button[data-rule="swap2"]');
   await page.waitForTimeout(120);
   await dismissConfirm(page);
@@ -472,6 +499,7 @@ async function enableSwap2Pvp(page) {
   const click = clicker(page);
   await openPanel(page);
   await page.waitForTimeout(80);
+  await ensureSetupPhase(page);
   await page.click('button[data-rule="swap2"]');
   await page.waitForTimeout(120);
   await dismissConfirm(page);
@@ -1160,9 +1188,10 @@ async function enableSwap2Pvp(page) {
   // 判据本身（该淡出时淡出、到底了就别再压暗）一个字没动。
   await page.setViewportSize({ width: 1024, height: 540 });
   await page.waitForTimeout(250);
-  // 落几手，让棋谱区长出内容，滚动区确实溢出
-  const click = clicker(page);
-  for (const [r, c] of [[7, 7], [6, 8], [8, 6]]) { await click(r, c); await page.waitForTimeout(1300); }
+  // v1.61：模式/执子/规则搬进开局态后，**对局中**的侧栏不再溢出 —— 棋谱是
+  // grow-sec，挤压全被它内部的滚动吸收了，实测 540/500/470/440/420 五档全是 0px。
+  // 所以这条闸门改在**开局态**测：四行设置都在，540 高实测溢出 43px，正是它要的
+  // 处境。和 v1.51 那次一样，动的是把它放回「有溢出」的处境，**判据一个字没动**。
   const read = () => page.evaluate(() => {
     const el = document.getElementById("side-scroll");
     const mask = getComputedStyle(el).maskImage || getComputedStyle(el).webkitMaskImage;
@@ -1488,6 +1517,7 @@ async function enableSwap2Pvp(page) {
   {
     const page = await newAudioPage();
     await openPanel(page);
+    await ensureSetupPhase(page);
     await page.click('button[data-mode="pvp"]');
     await page.waitForTimeout(100);
     await dismissConfirm(page);
@@ -3104,6 +3134,7 @@ async function enableSwap2Pvp(page) {
   await openPanel(page);
   const click = clicker(page);
   const pick = async (rule) => {
+    await ensureSetupPhase(page);
     await page.click('#rule-seg button[data-rule="' + rule + '"]');
     await page.waitForTimeout(200);
   };
@@ -3121,6 +3152,7 @@ async function enableSwap2Pvp(page) {
   seen.afterRenju = await st();
   if (seen.afterRenju.rule !== "renju") bad.push("点了禁手,规则没跟上:" + seen.afterRenju.rule);
   if (seen.afterRenju.mode !== "ai") bad.push("选禁手把模式改掉了:" + seen.afterRenju.mode);
+  await ensureSetupPhase(page);
   await page.click('#mode-seg button[data-mode="ai"]');
   await page.waitForTimeout(200);
   seen.afterAi = await st();
@@ -3140,6 +3172,7 @@ async function enableSwap2Pvp(page) {
     }
   };
   await pick("renju");
+  await ensureSetupPhase(page);
   await page.click('#mode-seg button[data-mode="pvp"]');   // 手工摆局面,别让电脑抢手
   await page.waitForTimeout(200);
   await build();
@@ -3178,6 +3211,7 @@ async function enableSwap2Pvp(page) {
   const page2 = await newPage();
   await openPanel(page2);
   const click2 = clicker(page2);
+  await ensureSetupPhase(page2);
   await page2.click('#rule-seg button[data-rule="renju"]');
   await page2.waitForTimeout(200);
   await click2(8, 6); await page2.waitForTimeout(80);
@@ -3201,6 +3235,7 @@ async function enableSwap2Pvp(page) {
   const page3 = await newPage();
   await openPanel(page3);
   // 双人 —— 默认是人机,那样白的四手会被引擎抢着下,九手根本摆不出来(实测只落 5 子)
+  await ensureSetupPhase(page3);
   await page3.click('#mode-seg button[data-mode="pvp"]');
   await page3.waitForTimeout(200);
   const click3 = clicker(page3);
@@ -3287,14 +3322,17 @@ async function enableSwap2Pvp(page) {
     const page = await newPage();
     await openPanel(page);
     const click = clicker(page);
+    await ensureSetupPhase(page);
     await page.click('#rule-seg button[data-rule="renju"]');
     await page.waitForTimeout(200);
+    await ensureSetupPhase(page);
     await page.click('#mode-seg button[data-mode="pvp"]');
     await page.waitForTimeout(200);
     for (const [r, c] of [[8, 6], [0, 0], [8, 7], [0, 2]]) { await click(r, c); await page.waitForTimeout(60); }
     seen.saved = await state(page);
     await saveSlot(page);
     // v1.55 起规则不再跟着模式走,所以要显式换规则,才造得出「载入时的规则与存档不同」
+    await ensureSetupPhase(page);
     await segClick(page, '#rule-seg button[data-rule="free"]');
     seen.between = await state(page);
     if (seen.between.rule !== "free") bad.push("没能把规则切到自由:" + seen.between.rule);
@@ -3321,6 +3359,7 @@ async function enableSwap2Pvp(page) {
     seen.free = await state(page);
     if (seen.free.mode !== "ai") bad.push("②的前置没摆成人机:" + seen.free.mode);
     if (seen.free.moves !== 2) bad.push("②的前置手数不是 2:" + seen.free.moves);
+    await ensureSetupPhase(page);
     await segClick(page, '#rule-seg button[data-rule="renju"]');
     seen.freeBetween = await state(page);
     if (seen.freeBetween.mode !== "ai") bad.push("切禁手把模式改掉了:" + seen.freeBetween.mode);
@@ -3360,13 +3399,16 @@ async function enableSwap2Pvp(page) {
     await page.waitForTimeout(150);
     await dismissConfirm(page);
     await page.waitForTimeout(200);
+    await ensureSetupPhase(page);
     await page.click('#rule-seg button[data-rule="renju"]'); await page.waitForTimeout(150);
     await dismissConfirm(page); await page.waitForTimeout(150);
+    await ensureSetupPhase(page);
     await page.click('#mode-seg button[data-mode="ai"]'); await page.waitForTimeout(150);
     await dismissConfirm(page); await page.waitForTimeout(150);
     await page.click('#diff-seg button[data-diff="' + diff + '"]'); await page.waitForTimeout(150);
     await dismissConfirm(page); await page.waitForTimeout(150);
     // 人执白 ⇒ 电脑执黑,禁手约束落在电脑身上
+    await ensureSetupPhase(page);
     await page.click('#color-seg button[data-human="w"]'); await page.waitForTimeout(150);
     await dismissConfirm(page); await page.waitForTimeout(400);
   };
@@ -3474,8 +3516,10 @@ async function enableSwap2Pvp(page) {
   };
 
   // ── 禁手档:双人,自己摆几手就够(这条闸门量的是复盘,不是引擎)
+  await ensureSetupPhase(page);
   await page.click('#rule-seg button[data-rule="renju"]'); await page.waitForTimeout(150);
   await dismissConfirm(page); await page.waitForTimeout(150);
+  await ensureSetupPhase(page);
   await page.click('#mode-seg button[data-mode="pvp"]'); await page.waitForTimeout(150);
   await dismissConfirm(page); await page.waitForTimeout(300);
   await playAFew();
@@ -3490,6 +3534,7 @@ async function enableSwap2Pvp(page) {
   await page.evaluate(() => document.querySelector("#btn-new").click());
   await page.waitForTimeout(150);
   await dismissConfirm(page); await page.waitForTimeout(150);
+  await ensureSetupPhase(page);
   await page.click('#rule-seg button[data-rule="free"]'); await page.waitForTimeout(150);
   await dismissConfirm(page); await page.waitForTimeout(300);
   await playAFew();
@@ -3500,6 +3545,76 @@ async function enableSwap2Pvp(page) {
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
   report("AV 禁手档下复盘开得出来，且那条已知偏差写在弹层里（两个方向）",
+    bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
+// AW 开局设置只在开局态出现，且侧栏在最矮支持窗口下仍然不用滚（v1.61）。
+//
+// 模式 / 执子 / 规则三个控件在对局中改，**本来就会弹确认再 reset() 重开一局**
+// （mode-seg / color-seg / rule-seg 三个 onclick 都是 confirm → reset）——
+// 它们是「开新局」动作，只是长得像设置。所以放进开局态不损失任何能力。难度是
+// 唯一真正的对局中设置（立即生效、不重开），必须留下。
+//
+// 这条闸门守两件互相独立的事，缺一不可：
+//
+// ① **相位**：开局态四行都在；落一子之后，只剩难度。
+//    反证在判据里自带 —— 如果有人把 syncPhaseFields 拆掉，「对局中模式仍显示」
+//    立刻报；如果有人连难度一起藏了，「对局中难度不见了」也立刻报。两个方向都堵。
+//
+// ② **溢出**：侧栏卡片是这一版新加的，内边距吃垂直空间。10px 12px 那一版实测
+//    在 1024×600 撑出 6px 溢出，踩了「设置区不许从不用滚变成要滚」。所以这里
+//    把五种高度全量到 0，改内边距的人会被这条拦下。
+{
+  const bad = [], seen = {};
+  const vis = (page) => page.evaluate(() => {
+    const q = (id) => {
+      const e = document.getElementById(id);
+      if (!e) return "缺失";
+      return e.getBoundingClientRect().height > 0 ? "显示" : "隐藏";
+    };
+    const sc = document.getElementById("side-scroll");
+    return {
+      模式: q("mode-field"), 难度: q("diff-field"),
+      执子: q("color-field"), 规则: q("rule-field"),
+      溢出: sc ? Math.max(0, sc.scrollHeight - sc.clientHeight) : -1,
+    };
+  });
+
+  for (const h of [600, 640, 700, 720, 800]) {
+    const page = await newPage();
+    await page.setViewportSize({ width: 1024, height: h });
+    await page.waitForTimeout(250);
+    await openPanel(page);
+
+    const before = await vis(page);
+    if (h === 800) seen.开局态 = before;
+    if (before.模式 !== "显示" || before.执子 !== "显示" || before.规则 !== "显示")
+      bad.push(h + "高 开局态:模式/执子/规则应当都在(得到 " + JSON.stringify(before) + ")");
+    if (before.溢出 !== 0) bad.push(h + "高 开局态:侧栏溢出 " + before.溢出 + "px —— 设置区不许要滚");
+
+    // 落一子进入对局态
+    await page.evaluate(() => {
+      const cv = document.getElementById("board");
+      const b = cv.getBoundingClientRect();
+      const pad = b.width * 0.06, step = (b.width - 2 * pad) / 14;
+      cv.dispatchEvent(new MouseEvent("click", {
+        bubbles: true, clientX: b.left + pad + 7 * step, clientY: b.top + pad + 7 * step,
+      }));
+    });
+    await page.waitForTimeout(700);
+
+    const after = await vis(page);
+    if (h === 800) seen.对局中 = after;
+    if (after.模式 !== "隐藏") bad.push(h + "高 对局中:模式还在 —— 相位切换没生效");
+    if (after.执子 !== "隐藏") bad.push(h + "高 对局中:执子还在(syncSettingsUI 可能覆盖了相位)");
+    if (after.规则 !== "隐藏") bad.push(h + "高 对局中:规则还在");
+    if (after.难度 !== "显示") bad.push(h + "高 对局中:难度不见了 —— 它是唯一该留下的对局中设置");
+    if (after.溢出 !== 0) bad.push(h + "高 对局中:侧栏溢出 " + after.溢出 + "px");
+
+    if (page.__errors.length) bad.push(h + "高 errs " + page.__errors.join("|"));
+    await page.close();
+  }
+  report("AW 开局设置只在开局态出现，且五种高度下侧栏都不用滚",
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
