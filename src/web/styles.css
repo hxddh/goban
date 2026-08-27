@@ -1253,3 +1253,14 @@
   box-shadow: var(--board-shadow), 0 0 0 1px color-mix(in srgb, var(--win) 35%, transparent);
   transition: box-shadow var(--dur-panel) var(--ease);
 }
+
+/* 对局中「对局」这一组只剩难度一行,标题「对局」就文不对题了(而且和行标签
+   「难度」是同一个东西的两个标签)。去掉标题即可 —— 分组仍由 .side-section
+   本来就有的 border-bottom 画出来,不需要再叠一层表面。
+
+   曾经试过把 .side-section 改成卡片(--card 底 + 边框)。**四套主题的分段控件
+   未选中标签对比度全部跌破 AA**(wood 2.41 / night 2.7 / day 3.55 /
+   notebook 3.73,闸门 AJ 报),因为浅色表面抬高了背景亮度。加表面就得还对比度,
+   这条路是死的。 */
+.side-section.bare > .side-h,
+.side-section.bare > .side-h-row { display: none; }
