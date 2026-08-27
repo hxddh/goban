@@ -3618,6 +3618,56 @@ async function enableSwap2Pvp(page) {
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
+// AX 棋盘去掉木边之后，最外圈格线没有被圆角裁掉（v1.62）。
+//
+// v1.62 把 #board-wrap 的 8px 内边距与 var(--board-frame) 边带去掉了，棋盘自己
+// 带圆角。少一层装饰，而且内边距归零让画布每边多 8px —— 1280×800 下 728 → 744。
+//
+// 代价是圆角直接切在画布上：draw.js 把最外圈格线画在画布宽度的 **6%** 处，圆角是
+// var(--radius-lg) = 16px。窗口越小画布越小，6% 也越小，余量跟着缩 —— 所以判据
+// 必须在**最小支持窗口**上也成立，而不是只看默认尺寸。
+//
+// 反证在判据里自带：把 --radius-lg 调到大于 6% 的值，余量当场变负，这条就报。
+{
+  const bad = [], seen = {};
+  const geo = (page) => page.evaluate(() => {
+    const cv = document.getElementById("board");
+    const r = cv.getBoundingClientRect();
+    const radius = parseFloat(getComputedStyle(cv).borderTopLeftRadius) || 0;
+    const inset = r.width * 0.06;           // draw.js 的外圈格线内缩比例
+    return { 画布: Math.round(r.width), 格线内缩: Math.round(inset),
+             圆角: Math.round(radius), 余量: Math.round(inset - radius) };
+  });
+
+  for (const [w, h] of [[1024, 600], [1280, 800]]) {
+    const page = await newPage();
+    await page.setViewportSize({ width: w, height: h });
+    await page.waitForTimeout(300);
+    const g = await geo(page);
+    seen[w + "x" + h] = g;
+    if (g.余量 < 8) bad.push(w + "x" + h + ": 外圈格线离圆角只剩 " + g.余量 + "px —— 会被裁 " + JSON.stringify(g));
+    if (g.圆角 <= 0) bad.push(w + "x" + h + ": 画布没有圆角 —— 去掉木边后它得自己带");
+
+    // 反证：把圆角撑到大于格线内缩，这条判据必须当场翻脸
+    const flipped = await page.evaluate(() => {
+      const cv = document.getElementById("board");
+      const keep = cv.style.borderRadius;
+      cv.style.borderRadius = "200px";
+      const r = cv.getBoundingClientRect();
+      const radius = parseFloat(getComputedStyle(cv).borderTopLeftRadius) || 0;
+      const out = Math.round(r.width * 0.06 - radius);
+      cv.style.borderRadius = keep;
+      return out;
+    });
+    if (flipped >= 8) bad.push(w + "x" + h + ": 反证没生效 —— 圆角撑到 200px 余量仍有 " + flipped + "px");
+
+    if (page.__errors.length) bad.push(w + "x" + h + " errs " + page.__errors.join("|"));
+    await page.close();
+  }
+  report("AX 棋盘自带圆角，最外圈格线在两档窗口下都没被裁",
+    bad.length === 0, JSON.stringify({ bad, seen }));
+}
+
 console.log("---");
 const allOk = results.every((r) => r.ok);
 console.log(allOk ? "CROSS_ALL_OK" : "CROSS_FAIL (" + results.filter((r) => !r.ok).map((r) => r.name).join("; ") + ")");

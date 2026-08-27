@@ -345,7 +345,6 @@
       height: min(var(--free-w), var(--free-h));
       max-width: 100%; max-height: 100%;
       padding: var(--wood-pad); border-radius: var(--radius-lg);
-      background: var(--board-frame);
       box-shadow: var(--board-shadow);
       transition: width var(--dur-panel) var(--ease), height var(--dur-panel) var(--ease), background var(--dur-panel) var(--ease), box-shadow var(--dur-panel) var(--ease);
     }
@@ -1264,3 +1263,14 @@
    这条路是死的。 */
 .side-section.bare > .side-h,
 .side-section.bare > .side-h-row { display: none; }
+
+/* ── 棋盘不再套一圈木边 ──────────────────────────────────────────────────
+   #board-wrap 原本用 8px 内边距 + var(--board-frame) 渐变画出一条边带。去掉它
+   之后棋盘自己带圆角，靠阴影和背景分离 —— 少一层装饰，而且**内边距归零让画布
+   每边多 8px**：1280×800 下 728 → 744，1024×600 下 528 → 544。
+
+   圆角裁切验过:draw.js 把最外圈格线画在画布宽度的 6% 处,而圆角是
+   var(--radius-lg) = 16px。实测余量 —— 1280×800 下 45−16 = 29px,
+   1024×600(最小支持窗口)下 33−16 = 17px,都够。闸门 AX 守这两档。 */
+:root { --wood-pad: 0px; }
+#board { border-radius: var(--radius-lg); }
