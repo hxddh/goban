@@ -1,5 +1,10 @@
 # 对《Goban 下个版本产品评审》的复核与补充
 
+> **实施状态(v1.63.0)**:第三节 1–2、4–9 项与第四节 A / B / C 段已实现并发布,闸门见
+> `scripts/test-game.mjs`(v1.63 段)、`scripts/test-loop.mjs`、`scripts/test-strength.mjs`(难度承诺)。
+> 第 3 项(引擎 2.0 ②③)与第 10 项之外的「变着读入」留到下一版,见 `docs/ROADMAP.md`。
+
+
 复核日期：2026-09-05。基准 main `bef97c0`（v1.62.0）。本文件是对外部评审报告的逐条核对，加上报告没有覆盖、但决定"下一版是否质变"的补充项。方法：读 src/web/js 源码、跑 `node scripts/test-game.mjs`（all passed）；没有跑浏览器流程，没有做棋力实测。
 
 ## 一、对报告的总体判断

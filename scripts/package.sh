@@ -29,6 +29,7 @@ test -f frontend/dist/js/i18n.js
 test -f frontend/dist/js/version.js
 test -f frontend/dist/js/audio.js
 test -f frontend/dist/js/slots.js
+test -f frontend/dist/js/archive.js
 test -f frontend/dist/js/review.js
 test -f frontend/dist/js/stats.js
 test -f frontend/dist/js/practice.js

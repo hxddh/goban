@@ -17,6 +17,7 @@
   const Stats = window.GobanStats;
   const Backup = window.GobanBackup;
   const Practice = window.GobanPractice;
+  const Archive = window.GobanArchive;
   const SIZE = Core.SIZE;
   const WIN = Core.WIN;
   const SAVE_KEY = "goban.v12.save";
@@ -95,6 +96,9 @@
       );
       if (!ok) return false;
     }
+    // 规则随棋谱走(v1.63):RU[Renju] 的棋谱在自由档下也按连珠读,反之亦然。
+    // 没写 RU 的棋谱保持当前规则。切换只影响这一局,设置里的档位不动。
+    const importRule = parsed.ruleSet === "renju" || parsed.ruleSet === "free" ? parsed.ruleSet : ruleSet;
     const applied = GameState.sessionFromHistory(parsed.history, {
       mode: mode,
       difficulty: difficulty,
@@ -102,13 +106,20 @@
       soundOn: soundOn,
       themeId: themeId,
       gameGen: gameGen,
-      ruleSet: ruleSet,
+      ruleSet: importRule,
     });
     if (!applied.ok) {
       toast(applied.error || t("import.fail"));
       return false;
     }
     const s = applied.session;
+    const ruleSwitched = importRule !== ruleSet;
+    if (ruleSwitched) {
+      ruleSet = importRule;
+      if (isRenju()) openingRule = "standard";
+      saveSettings();
+    }
+    endRetry(false);
     history = s.history;
     viewIndex = s.viewIndex;
     board = s.board;
@@ -138,7 +149,8 @@
     const tag = label ? " · " + label : "";
     const end =
       t(result === "b" ? "import.end.b" : result === "w" ? "import.end.w" : result === "draw" ? "import.end.draw" : "import.end.open");
-    const hint = t(importPaused ? "import.hint.continue" : "import.hint.reviewOnly");
+    const hint = t(importPaused ? "import.hint.continue" : "import.hint.reviewOnly")
+      + (ruleSwitched ? t(isRenju() ? "import.hint.ruleRenju" : "import.hint.ruleFree") : "");
     toast(t("import.done", { n: history.length, end: end, tag: tag, hint: hint }));
     return true;
   }
@@ -336,11 +348,11 @@
     if (playedWins) return { grade: "best", text: t("coach.winning") };
     // missed win: a five was available but not taken
     const myWins = winCellsRule(preBoard, sColor);
-    if (myWins.length) return { grade: "blunder", text: t("coach.missedWin"), best: myWins[0] };
+    if (myWins.length) return { grade: "blunder", kind: "missedWin", text: t("coach.missedWin"), best: myWins[0] };
     // allowed opponent win-in-1 the move failed to prevent
     const after = preBoard.map((row) => row.slice());
     after[played.r][played.c] = sColor;
-    if (winCellsRule(after, oppC).length) return { grade: "blunder", text: t("coach.missedBlock") };
+    if (winCellsRule(after, oppC).length) return { grade: "blunder", kind: "missedBlock", text: t("coach.missedBlock") };
     return null;
   }
 
@@ -628,8 +640,13 @@
   function formatDuration(ms) { return Ui.formatDuration(ms); }
   function formatTime(ts) { return Ui.formatTime(ts); }
 
+  /**
+   * 用时从**第一颗子**算起,不从打开应用算起(v1.63)。此前 startedAt 在开局态就
+   * 开始走,盘上一子未落时钟已经在跑,于是「本局用时」里混着发呆的时间。
+   */
   function nowElapsed() {
     if (result !== "play") return elapsedBaseMs;
+    if (!history.length && !swap2) return elapsedBaseMs;
     return elapsedBaseMs + (Date.now() - startedAt);
   }
 
@@ -821,6 +838,9 @@
         result !== "play" && statsRecordedGen === gameGen && lastStatsEndedAt
           ? lastStatsEndedAt
           : null,
+      // 重下关键一手时原局整个存在这里,回来时原样恢复(v1.63)
+      retry: retry ? { ply: retry.ply, gameId: retry.gameId, source: retry.source } : null,
+      archiveId: lastArchiveId,
       savedAt: Date.now(),
     };
   }
@@ -922,6 +942,8 @@
     }
     hoverCell = null;
     clearHint();
+    retry = s.retry && typeof s.retry.ply === "number" && s.retry.source ? { ply: s.retry.ply, gameId: s.retry.gameId || null, source: s.retry.source } : null;
+    lastArchiveId = typeof s.archiveId === "string" ? s.archiveId : null;
     return true;
   }
 
@@ -961,6 +983,10 @@
         !(await confirmNative(t("slot.loadConfirm"), t("slot.loadTitle"), { ok: t("slot.loadOk"), cancel: t("dlg.cancel") }))) {
       return;
     }
+    abortThinking();
+    retry = null;
+    hideEndCard();
+    Review.setSideOpen(false);
     if (!applySnapshot(slot.snap)) { toast(t("slot.corrupt")); return; }
     gameGen += 1;
     if (result !== "play" && lastStatsEndedAt) statsRecordedGen = gameGen;
@@ -985,6 +1011,7 @@
 
   function openSlots() {
     Slots.render();
+    renderGamesList();
     const m = document.getElementById("slots-modal");
     if (m) {
       m.classList.add("show");
@@ -1008,11 +1035,20 @@
     coachFacts,
     evaluateBoard: Ai.evaluateBoard,
     getRenju: isRenju,
+    winCells: winCellsRule,
+    aiMoveAsync: (o) => aiMoveAsync(o),
   });
 
+  /**
+   * 复盘弹层里点一处失着:跳到那一手,关掉弹层 —— 但解释不丢。v1.62 以前跳转后
+   * 只剩棋盘和手数列表,用户失去刚刚的诊断上下文;现在侧栏的复盘面板常驻,
+   * 列着全部失着、说着当前这一手的「威胁 → 落点 → 惩罚 → 替代」,并给重试入口。
+   */
   function reviewJump(i) {
+    Review.setSideOpen(true);
     setViewIndex(i);
     closeReview();
+    if (!isPanelOpen()) setPanelOpen(true);
   }
 
   /**
@@ -1035,6 +1071,7 @@
    */
   function openReview() {
     Review.render();
+    startDeepen();
     const m = document.getElementById("review-modal");
     if (m) {
       m.classList.add("show");
@@ -1052,7 +1089,23 @@
   function buildAnnotatedSgf() {
     const rd = Review.compute();
     const comments = {};
-    for (const b of rd.blunders) comments[b.i - 1] = t("review.cmt.blunder", { reason: b.reason });
+    const variations = {};
+    for (const b of rd.blunders) {
+      comments[b.i - 1] = t("review.cmt.blunder", { reason: b.reason });
+      // 更优点写成兄弟变着;重下关键一手留下的分支也一并写入
+      if (b.best && !(b.best.r === history[b.i - 1].r && b.best.c === history[b.i - 1].c)) {
+        const line = [b.best];
+        line.comment = t("review.cmt.alt", { reason: b.reason });
+        variations[b.i - 1] = [line];
+      }
+    }
+    const g = lastArchiveId ? Archive.get(lastArchiveId) : null;
+    for (const l of (g && g.lines) || []) {
+      if (!l.moves || !l.moves.length) continue;
+      const line = l.moves.slice();
+      line.comment = t("review.cmt.retry");
+      variations[l.ply - 1] = (variations[l.ply - 1] || []).concat([line]);
+    }
     const s = rd.summary;
     const rootComment =
       t("review.cmt.root", {
@@ -1061,7 +1114,7 @@
       });
     return SgfMod.buildSgf({
       history, result, mode, humanColor, originalStartedAt,
-      ruleSet, comments, rootComment,
+      ruleSet, comments, rootComment, variations,
     });
   }
 
@@ -1104,6 +1157,369 @@
     sync();
     toast(pv.length ? t("pv.done", { n: pv.length }) : t("pv.none"));
   }
+
+  // --- v1.63: 复盘第二遍(引擎比较) ---
+  let deepenTimer = null;
+  function startDeepen() {
+    if (deepenTimer) { clearTimeout(deepenTimer); deepenTimer = null; }
+    if (history.length < 2 || aiThinking) return;
+    const gen = gameGen;
+    // 引擎比较用 hard 档;极档预算太大,而这里要的是「同一预算下的首选」而不是最强
+    deepenTimer = setTimeout(() => {
+      deepenTimer = null;
+      if (gen !== gameGen || aiThinking) return;
+      Review.deepen({
+        difficulty: "hard",
+        onProgress: () => { if (gen === gameGen) { Review.render(); sync(); } },
+      }).then(() => { if (gen === gameGen) { Review.render(); sync(); } });
+    }, 50);
+  }
+
+  // --- v1.63: 重下关键一手(retry) ---
+  /**
+   * 重下关键一手:把当前局面回退到失着落下之前,锁成一盘人机练习局(人执失着
+   * 那一方,电脑按原规则应手)。原局整个存在 retry.source 里,随时回去,一手不改。
+   * @type {{ply:number, gameId:string|null, source:object}|null}
+   */
+  let retry = null;
+
+  function startRetry(ply) {
+    if (!history.length || ply < 1 || ply > history.length) return;
+    if (retry) {
+      // 重下之中再重下:以原局为准,不嵌套
+      const src = retry.source;
+      applySnapshot(src);
+    }
+    abortThinking();
+    const source = serialize();
+    source.retry = null;
+    const gameId = lastArchiveId;
+    const color = (ply - 1) % 2 === 0 ? "b" : "w";
+    const base = history.slice(0, ply - 1);
+    retry = { ply: ply, gameId: gameId, source: source };
+    gameGen += 1;
+    history = base;
+    mode = "ai";
+    humanColor = color;
+    if (difficulty === "easy") difficulty = "normal"; // 重下要能被惩罚,简单档不算数
+    board = boardAfter(history.length);
+    turn = history.length % 2 === 0 ? "b" : "w";
+    result = "play";
+    winLine = null;
+    viewIndex = history.length;
+    importPaused = false;
+    swap2 = null;
+    hideSwap2Bar();
+    aiThinking = false;
+    hintBusy = false;
+    statsRecordedGen = -1;
+    lastStatsEndedAt = null;
+    startedAt = Date.now();
+    elapsedBaseMs = 0;
+    hoverCell = null;
+    clearHint();
+    clearAnalysis();
+    clearVariation();
+    hideEndCard();
+    Review.setSideOpen(false);
+    sync();
+    saveGame();
+    toast(t("retry.started", { n: ply }));
+    maybeAiTurn();
+  }
+
+  /** 回到原局。restoreView = 回到重下的那一手,便于对照。 */
+  function endRetry(restoreView) {
+    if (!retry) return false;
+    abortThinking();
+    const src = retry.source;
+    const ply = retry.ply;
+    retry = null;
+    gameGen += 1;
+    if (!applySnapshot(src)) { reset(); return true; }
+    if (result !== "play" && lastStatsEndedAt) statsRecordedGen = gameGen;
+    hideEndCard();
+    clearAnalysis();
+    if (restoreView) {
+      Review.setSideOpen(true);
+      Review.compute();
+      setViewIndex(ply);
+    } else {
+      sync();
+    }
+    saveGame();
+    return true;
+  }
+
+  function syncRetryBar() {
+    const bar = document.getElementById("retry-bar");
+    if (!bar) return;
+    bar.hidden = !retry;
+    if (!retry) return;
+    const msg = document.getElementById("retry-msg");
+    if (msg) msg.textContent = t("retry.bar", { n: retry.ply, who: t(humanColor === "b" ? "side.black" : "side.white") });
+  }
+
+  // --- v1.63: 终局总结卡 ---
+  let endCardOn = false;
+  function showEndCard() {
+    endCardOn = true;
+    Review.compute();
+    startDeepen();
+    if (!isPanelOpen() && window.innerWidth >= 900) setPanelOpen(true);
+    syncEndCard();
+  }
+  function hideEndCard() { endCardOn = false; syncEndCard(); }
+
+  function syncEndCard() {
+    const card = document.getElementById("end-card");
+    if (!card) return;
+    const show = endCardOn && result !== "play" && history.length > 0;
+    card.hidden = !show;
+    if (!show) return;
+    const title = document.getElementById("end-card-title");
+    const body = document.getElementById("end-card-body");
+    const retryBtn = document.getElementById("end-card-retry");
+    const practiceBtn = document.getElementById("end-card-practice");
+    const backBtn = document.getElementById("end-card-back");
+    const reviewBtn = document.getElementById("end-card-review");
+    const againBtn = document.getElementById("end-card-again");
+    // 结果一句
+    let head;
+    if (retry) head = t(result === "draw" ? "endcard.retryDraw" : result === humanColor ? "endcard.retryWin" : "endcard.retryLoss");
+    else if (result === "draw") head = t("result.draw");
+    else if (mode === "ai") head = t(result === humanColor ? "endcard.win" : "endcard.loss");
+    else head = t(result === "b" ? "status.blackWin" : "status.whiteWin");
+    if (title) title.textContent = head;
+    // 本局值得记住的一手:人机看人那一方,双人看输的一方
+    const focusColor = mode === "ai" ? humanColor : (result === "b" ? "w" : result === "w" ? "b" : null);
+    const keys = Review.keyMoves(retry ? null : focusColor);
+    const key = keys[0] || null;
+    if (body) {
+      body.innerHTML = "";
+      const rd = Review.getData();
+      if (retry) {
+        const p = document.createElement("div");
+        p.textContent = t("endcard.retryHint", { n: retry.ply });
+        body.appendChild(p);
+      } else if (!key) {
+        const p = document.createElement("div");
+        p.className = "muted";
+        p.textContent = t(rd && rd.deepening ? "endcard.analysing" : "endcard.clean");
+        body.appendChild(p);
+      } else {
+        const info = Review.explain(key.i);
+        const p = document.createElement("div");
+        p.className = "endcard-key";
+        p.textContent = t("endcard.key", { n: key.i, color: t(key.color === "b" ? "side.black" : "side.white"), reason: key.reason });
+        body.appendChild(p);
+        if (info && info.lines.length) {
+          const q = document.createElement("div");
+          q.className = "muted endcard-line";
+          q.textContent = info.lines[info.lines.length - 1];
+          body.appendChild(q);
+        }
+        if (keys.length > 1) {
+          const more = document.createElement("div");
+          more.className = "muted endcard-more";
+          more.textContent = t("endcard.more", { list: keys.slice(1).map((k) => k.i).join("、") });
+          body.appendChild(more);
+        }
+      }
+    }
+    if (retryBtn) {
+      retryBtn.hidden = !key || !!retry;
+      if (key) { retryBtn.dataset.ply = String(key.i); retryBtn.textContent = t("endcard.retry", { n: key.i }); }
+    }
+    if (practiceBtn) {
+      const canPractice = !!key && !retry && !!lastArchiveId && key.tier === "hard";
+      practiceBtn.hidden = !canPractice;
+      if (canPractice) practiceBtn.dataset.ply = String(key.i);
+    }
+    if (backBtn) backBtn.hidden = !retry;
+    if (reviewBtn) reviewBtn.hidden = !!retry;
+    if (againBtn) againBtn.textContent = t(retry ? "endcard.retryAgain" : "endcard.again");
+  }
+
+  function wireEndCard() {
+    const retryBtn = document.getElementById("end-card-retry");
+    if (retryBtn) retryBtn.onclick = () => { startRetry(Number(retryBtn.dataset.ply)); };
+    const practiceBtn = document.getElementById("end-card-practice");
+    if (practiceBtn) practiceBtn.onclick = () => {
+      if (!Practice.openFor(lastArchiveId, Number(practiceBtn.dataset.ply))) toast(t("practice.noneForMove"));
+    };
+    const backBtn = document.getElementById("end-card-back");
+    if (backBtn) backBtn.onclick = () => { endRetry(true); toast(t("retry.back")); };
+    const reviewBtn = document.getElementById("end-card-review");
+    if (reviewBtn) reviewBtn.onclick = () => { openReview(); };
+    const againBtn = document.getElementById("end-card-again");
+    if (againBtn) againBtn.onclick = () => {
+      if (retry) { const ply = retry.ply; endRetry(false); startRetry(ply); }
+      else { hideEndCard(); requestNewGame(); }
+    };
+    const closeBtn = document.getElementById("end-card-close");
+    if (closeBtn) closeBtn.onclick = () => { hideEndCard(); };
+  }
+
+  // --- v1.63: 侧栏复盘面板 ---
+  function wireReviewSide() {
+    const chips = document.getElementById("review-side-chips");
+    if (chips) chips.addEventListener("click", (ev) => {
+      const b = ev.target.closest("button[data-i]");
+      if (b) setViewIndex(Number(b.dataset.i));
+    });
+    const retryBtn = document.getElementById("review-side-retry");
+    if (retryBtn) retryBtn.onclick = () => { if (Review.explain(viewIndex)) startRetry(viewIndex); };
+    const practiceBtn = document.getElementById("review-side-practice");
+    if (practiceBtn) practiceBtn.onclick = () => {
+      const gid = lastArchiveId;
+      if (!gid || !Practice.openFor(gid, viewIndex)) toast(t("practice.noneForMove"));
+    };
+    const pvBtn = document.getElementById("review-side-pv");
+    if (pvBtn) pvBtn.onclick = () => { runVariation(); };
+    const openBtn = document.getElementById("review-side-open");
+    if (openBtn) openBtn.onclick = () => { openReview(); };
+    const closeBtn = document.getElementById("review-side-close");
+    if (closeBtn) closeBtn.onclick = () => { Review.setSideOpen(false); sync(); };
+    const retryBack = document.getElementById("retry-back");
+    if (retryBack) retryBack.onclick = () => { endRetry(true); toast(t("retry.back")); };
+  }
+
+  // --- v1.63: 对局库 ---
+  /** 打开对局库里的一局(纯复盘),停在第 ply 手,侧栏复盘面板打开。 */
+  async function openArchivedGame(id, ply) {
+    const g = Archive.get(id);
+    if (!g) { toast(t("games.missing")); return; }
+    if (history.length && result === "play" && !retry && lastArchiveId !== id) {
+      const ok = await confirmNative(t("games.openConfirm"), t("games.openTitle"), { ok: t("games.open"), cancel: t("dlg.cancel") });
+      if (!ok) return;
+    }
+    abortThinking();
+    retry = null;
+    gameGen += 1;
+    const snap = {
+      v: 4, history: g.history, mode: g.mode, difficulty: g.difficulty || difficulty,
+      humanColor: g.humanColor || "b", ruleSet: g.ruleSet, elapsedBaseMs: g.durationMs || 0,
+      originalStartedAt: g.startedAt, statsEndedAt: g.endedAt, importPaused: false, archiveId: g.id,
+    };
+    if (!applySnapshot(snap)) { toast(t("games.missing")); return; }
+    lastArchiveId = g.id;
+    if (result !== "play") statsRecordedGen = gameGen; // 已经记过,不再记
+    closeSlots();
+    clearAnalysis();
+    Review.setSideOpen(true);
+    Review.compute();
+    startDeepen();
+    setViewIndex(typeof ply === "number" ? Math.max(0, Math.min(ply, history.length)) : history.length);
+    if (!isPanelOpen()) setPanelOpen(true);
+    saveGame();
+    toast(t("games.opened"));
+  }
+
+  function renderGamesList() {
+    const list = document.getElementById("games-list");
+    const empty = document.getElementById("games-empty");
+    if (!list) return;
+    const arr = Archive.load();
+    if (empty) empty.hidden = arr.length > 0;
+    list.innerHTML = "";
+    for (const g of arr.slice(0, 20)) {
+      const row = document.createElement("div");
+      row.className = "slot-row game-row";
+      row.dataset.id = g.id;
+      const name = document.createElement("div");
+      name.className = "game-name";
+      const d = new Date(g.endedAt || Date.now());
+      const p = (n) => String(n).padStart(2, "0");
+      const when = p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+      const res = g.mode === "ai"
+        ? t(g.result === "draw" ? "result.draw" : g.result === g.humanColor ? "games.win" : "games.loss")
+        : t(g.result === "b" ? "result.blackWin" : g.result === "w" ? "result.whiteWin" : "result.draw");
+      name.textContent = t("games.row", {
+        when: when, result: res, moves: g.history.length,
+        mode: g.mode === "ai" ? t("diff." + (g.difficulty || "normal") + ".full") : t("mode.pvp"),
+        rule: g.ruleSet === "renju" ? t("rule.renju") : t("rule.free"),
+      });
+      const ops = document.createElement("div");
+      ops.className = "slot-ops";
+      for (const spec of [
+        { cls: "text-link game-open", key: "games.review" },
+        { cls: "text-link danger game-del", key: "slots.del" },
+      ]) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = spec.cls;
+        btn.dataset.id = g.id;
+        btn.textContent = t(spec.key);
+        ops.appendChild(btn);
+      }
+      row.appendChild(name);
+      row.appendChild(ops);
+      list.appendChild(row);
+    }
+  }
+
+  function syncDailyBadge() {
+    const el = document.getElementById("open-daily");
+    if (!el) return;
+    let n = 0;
+    try { n = Practice.dueCount(); } catch (_) { n = 0; }
+    el.textContent = n ? t("foot.daily.due", { n: n }) : t("foot.daily");
+  }
+
+  // --- v1.63: 键盘落子 ---
+  /** 键盘游标所在交叉点;canvas 有焦点时方向键移动、Enter 落子。 */
+  let kbCell = null;
+  function announce(text) {
+    const el = document.getElementById("board-announce");
+    if (el) el.textContent = text;
+  }
+  function cellLabel(r, c) { return String.fromCharCode(65 + c) + (SIZE - r); }
+  function describeCell(r, c) {
+    const s = board[r][c];
+    let state;
+    if (s) state = t(s === "b" ? "kb.black" : "kb.white");
+    else {
+      const why = forbiddenReason(board, r, c, turn);
+      state = why ? t("renju.blocked." + why) : t("kb.empty");
+    }
+    return t("kb.at", { cell: cellLabel(r, c), state: state });
+  }
+  function handleBoardKey(ev) {
+    const k = ev.key;
+    if (k === "ArrowLeft" || k === "ArrowRight" || k === "ArrowUp" || k === "ArrowDown") {
+      ev.preventDefault();
+      if (!kbCell) kbCell = { r: 7, c: 7 };
+      else {
+        if (k === "ArrowLeft") kbCell.c = Math.max(0, kbCell.c - 1);
+        if (k === "ArrowRight") kbCell.c = Math.min(SIZE - 1, kbCell.c + 1);
+        if (k === "ArrowUp") kbCell.r = Math.max(0, kbCell.r - 1);
+        if (k === "ArrowDown") kbCell.r = Math.min(SIZE - 1, kbCell.r + 1);
+      }
+      hoverCell = canHoverPlace() && !board[kbCell.r][kbCell.c]
+        ? { r: kbCell.r, c: kbCell.c, color: nextPlaceColor() }
+        : null;
+      kbCursor = { r: kbCell.r, c: kbCell.c };
+      announce(describeCell(kbCell.r, kbCell.c));
+      draw();
+      return true;
+    }
+    if ((k === "Enter" || k === " ") && kbCell) {
+      ev.preventDefault();
+      if (!canHoverPlace()) { announce(t("kb.cannot")); return true; }
+      const r = kbCell.r, c = kbCell.c;
+      place(r, c, false);
+      if (history.length && history[history.length - 1].r === r && history[history.length - 1].c === c) {
+        announce(t("kb.placed", { cell: cellLabel(r, c), who: t((history.length - 1) % 2 === 0 ? "side.black" : "side.white") }));
+      }
+      return true;
+    }
+    if (k === "Escape") { kbCell = null; kbCursor = null; hoverCell = null; draw(); canvas.blur(); return true; }
+    return false;
+  }
+  let kbCursor = null;
+  canvas.addEventListener("blur", () => { kbCursor = null; kbCell = null; if (hoverCell) { hoverCell = null; draw(); } });
+  canvas.addEventListener("focus", () => { announce(t("kb.focus")); });
 
   let panelAnimUntil = 0;
   let panelAnimActive = false;
@@ -1180,6 +1596,7 @@
     analysis: analysisCell,
     variation: variationCells,
     forbidden: forbiddenPoints(),
+    cursor: kbCursor,
     coords: showCoords,
     clearPlaceAnim: () => { placeAnim = null; },
   }));
@@ -1272,6 +1689,7 @@
     board = boardAfter(history.length);
     if (board[r][c]) return;
     const color = history.length % 2 === 0 ? "b" : "w";
+    if (!history.length) startedAt = Date.now();
     board[r][c] = color;
     history.push({ r: r, c: c });
     viewIndex = history.length;
@@ -1348,10 +1766,27 @@
   /** Matches Stats.record endedAt so undo / resume can unrecord precisely. */
   let lastStatsEndedAt = null;
 
+  /** 对局库里本局的 id(终局时写入);重下模式下指向原局。 */
+  let lastArchiveId = null;
+
   function recordGameEnd() {
     if (gameGen === statsRecordedGen) return;
     statsRecordedGen = gameGen;
     lastStatsEndedAt = Date.now();
+    if (retry) {
+      // 重下关键一手的结果不进统计、不进对局库;作为一条分支挂到原局上,
+      // 导出带评注 SGF 时写成变着。
+      if (retry.gameId) Archive.addLine(retry.gameId, retry.ply, history.slice(retry.ply - 1));
+      showEndCard();
+      return;
+    }
+    lastArchiveId = Archive.add({
+      history, ruleSet, mode,
+      difficulty: mode === "ai" ? difficulty : null,
+      humanColor: mode === "ai" ? humanColor : null,
+      result, startedAt: originalStartedAt, endedAt: lastStatsEndedAt,
+      durationMs: nowElapsed(),
+    });
     Stats.record({
       mode,
       difficulty: mode === "ai" ? difficulty : null,
@@ -1361,6 +1796,7 @@
       durationMs: nowElapsed(),
       endedAt: lastStatsEndedAt,
     });
+    showEndCard();
   }
 
   function openStats() {
@@ -1410,6 +1846,7 @@
     // Human/AI place ends import pause
     if (importPaused) importPaused = false;
 
+    if (!history.length) startedAt = Date.now(); // 时钟从第一颗子起走
     board[r][c] = turn;
     history.push({ r, c });
     viewIndex = history.length;
@@ -1517,9 +1954,12 @@
     board = boardAfter(history.length);
     if (wasRecorded) {
       Stats.unrecordByEndedAt(endedAt);
+      Archive.removeByEndedAt(endedAt);
+      lastArchiveId = null;
       statsRecordedGen = -1;
       lastStatsEndedAt = null;
     }
+    hideEndCard();
     // End-game froze elapsedBaseMs and reset startedAt; returning to play
     // without refreshing startedAt would add post-game idle into the clock.
     if (wasOver) startedAt = Date.now();
@@ -1547,6 +1987,10 @@
     hoverCell = null;
     statsRecordedGen = -1;
     lastStatsEndedAt = null;
+    lastArchiveId = null;
+    retry = null;
+    hideEndCard();
+    Review.setSideOpen(false);
     clearHint();
     clearAnalysis();
     clearVariation();
@@ -1819,6 +2263,10 @@
     else status.textContent = t(turn === "b" ? "status.blackTurn" : "status.whiteTurn");
 
     syncSettingsUI();
+    Review.renderSide();
+    syncRetryBar();
+    syncEndCard();
+    syncDailyBadge();
   }
 
   function canvasPoint(ev) {
@@ -1914,10 +2362,25 @@
 
   // Practice pulls puzzle material from the live game + saved slots; it plays
   // entirely inside its own modal/board and never touches game state.
+  // 题材来源(v1.63):当前对局 + 对局库(自动留存)+ 命名存档。每一条都带规则,
+  // 连珠局派生的题按连珠判。
   Practice.init({
-    getHistories: () => [history].concat(
-      Slots.load().map((s) => s.snap && s.snap.history).filter(Boolean)
-    ),
+    getGames: () => {
+      const seen = new Set();
+      const out = [];
+      const push = (g) => {
+        if (!g || !g.history || !g.history.length) return;
+        const sig = g.history.length + ":" + g.history[g.history.length - 1].r + "," + g.history[g.history.length - 1].c + ":" + g.history[0].r + "," + g.history[0].c;
+        if (seen.has(sig)) return;
+        seen.add(sig);
+        out.push(g);
+      };
+      if (!retry) push({ id: lastArchiveId, history: history, renju: isRenju() });
+      for (const g of Archive.load()) push({ id: g.id, history: g.history, renju: g.ruleSet === "renju" });
+      for (const s of Slots.load()) if (s.snap) push({ id: null, history: s.snap.history, renju: s.snap.ruleSet === "renju" });
+      return out;
+    },
+    openSource: (id, ply) => { openArchivedGame(id, ply); },
   });
   Practice.wire();
   const practiceEl = document.getElementById("open-practice");
@@ -1940,6 +2403,8 @@
 
   const reviewEl = document.getElementById("sgf-review");
   if (reviewEl) reviewEl.onclick = () => { openReview(); };
+  wireReviewSide();
+  wireEndCard();
   const reviewCloseEl = document.getElementById("review-close");
   if (reviewCloseEl) reviewCloseEl.onclick = () => { closeReview(); };
   const reviewExportEl = document.getElementById("review-export");
@@ -1980,6 +2445,19 @@
       if (!b) return;
       if (b.classList.contains("slot-load")) loadSlotById(b.dataset.id);
       else if (b.classList.contains("slot-del")) deleteSlotById(b.dataset.id);
+    });
+  }
+  const gamesListEl = document.getElementById("games-list");
+  if (gamesListEl) {
+    gamesListEl.addEventListener("click", async (ev) => {
+      const b = ev.target.closest("button[data-id]");
+      if (!b) return;
+      if (b.classList.contains("game-open")) openArchivedGame(b.dataset.id, null);
+      else if (b.classList.contains("game-del")) {
+        if (!(await confirmNative(t("games.delConfirm"), t("slot.delTitle"), { ok: t("slot.delOk"), cancel: t("dlg.cancel") }))) return;
+        Archive.remove(b.dataset.id);
+        renderGamesList();
+      }
     });
     // rename persists on commit (Enter / blur), not on every keystroke
     const commitRename = (ev) => {
@@ -2224,6 +2702,7 @@
     // them focusable, and no key that could reach any of them — while the
     // dialogs had a full focus trap since v1.25.2. The sidebar already has
     // three other affordances (☰, [ and ], Esc), so Tab goes back to being Tab.
+    if (document.activeElement === canvas && handleBoardKey(ev)) return;
     if (ev.key === "ArrowLeft") { ev.preventDefault(); setViewIndex(viewIndex - 1); return; }
     if (ev.key === "ArrowRight") { ev.preventDefault(); setViewIndex(viewIndex + 1); return; }
     if (ev.key === "Home") { ev.preventDefault(); setViewIndex(0); return; }

@@ -50,7 +50,10 @@
     <div class="scrim" id="scrim"></div>
     <div class="stage">
       <div id="board-wrap">
-        <canvas id="board" width="900" height="900" aria-label="棋盘" data-i18n-aria="aria.board"></canvas>
+        <!-- v1.63:棋盘可聚焦。方向键移动交叉点、Enter 落子、Esc 离开;下面的 live
+             region 播报坐标、占用与禁手原因 —— 此前 AX 树里棋盘只是一张图。 -->
+        <canvas id="board" width="900" height="900" tabindex="0" role="application" aria-label="棋盘" data-i18n-aria="aria.board" aria-describedby="board-announce"></canvas>
+        <div class="sr-only" id="board-announce" role="status" aria-live="polite"></div>
         <div class="think-dot" id="think-dot" hidden aria-hidden="true"></div>
         <div class="swap2-bar" id="swap2-bar" hidden role="group" aria-label="平衡开局选择" data-i18n-aria="aria.swap2">
           <span class="swap2-msg" id="swap2-msg" role="status" aria-live="polite"></span>
@@ -100,6 +103,29 @@
             <span id="save-hint" class="save-hint" data-i18n="side.autosave">自动存档</span>
           </div>
         </section>
+
+        <!-- v1.63:终局总结卡。不弹层、不挡棋盘;一句结果、一个值得记住的地方、
+             最多三个关键手,主行动「重下关键一手」,次行动「再来一局」。 -->
+        <section class="end-card" id="end-card" hidden aria-live="polite">
+          <div class="end-card-head">
+            <strong id="end-card-title"></strong>
+            <button type="button" class="text-link end-card-x" id="end-card-close" aria-label="收起" data-i18n-aria="endcard.close" title="收起" data-i18n-title="endcard.close">×</button>
+          </div>
+          <div id="end-card-body" class="end-card-body"></div>
+          <div class="end-card-actions">
+            <button type="button" class="tool-btn primary" id="end-card-retry" hidden data-i18n="endcard.retryBtn">重下</button>
+            <button type="button" class="tool-btn" id="end-card-back" hidden data-i18n="retry.backBtn">回到原局</button>
+            <button type="button" class="tool-btn" id="end-card-practice" hidden data-i18n="endcard.practice">练这一手</button>
+            <button type="button" class="tool-btn" id="end-card-review" data-i18n="endcard.review">看复盘</button>
+            <button type="button" class="tool-btn" id="end-card-again" data-i18n="endcard.again">再来一局</button>
+          </div>
+        </section>
+
+        <!-- v1.63:重下关键一手进行中。原局一手不改地存着,随时回去。 -->
+        <div class="retry-bar" id="retry-bar" hidden role="status">
+          <span id="retry-msg"></span>
+          <button type="button" class="text-link" id="retry-back" data-i18n="retry.backBtn">回到原局</button>
+        </div>
 
         <section class="side-section">
           <h2 class="side-h" data-i18n="sec.game">对局</h2>
@@ -167,6 +193,24 @@
             <button type="button" id="rep-end" title="终局 (End)" data-i18n-title="rep.end.title" aria-label="终局" data-i18n-aria="aria.repEnd"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-last"/></svg></button>
           </div>
           <div class="coach-verdict" id="coach-verdict" hidden aria-live="polite"></div>
+          <!-- v1.63:常驻复盘面板。弹层负责曲线与总览;这里跟着查看的那一手走,
+               列全部失着(数字即手数),说当前这一手的 威胁 → 落点 → 惩罚 → 替代,
+               并给「重下 / 练这一手 / 推演」。跳转后解释不再消失。 -->
+          <section class="review-side" id="review-side" hidden aria-label="复盘面板" data-i18n-aria="review.side.aria">
+            <div class="review-side-head">
+              <span class="side-h" data-i18n="review.side.title">复盘</span>
+              <span class="spacer"></span>
+              <button type="button" class="text-link" id="review-side-open" data-i18n="review.side.curve">曲线</button>
+              <button type="button" class="text-link" id="review-side-close" data-i18n="dlg.close">关闭</button>
+            </div>
+            <div class="review-chips" id="review-side-chips"></div>
+            <div class="review-explain" id="review-side-explain"></div>
+            <div class="review-side-actions" id="review-side-actions" hidden>
+              <button type="button" class="tool-btn primary" id="review-side-retry" data-i18n="review.side.retry">重下这一手</button>
+              <button type="button" class="tool-btn" id="review-side-practice" data-i18n="review.side.practice">练这一手</button>
+              <button type="button" class="tool-btn" id="review-side-pv" title="从这一手起，引擎推演后续着法（虚影）" data-i18n="review.side.pv" data-i18n-title="review.pv.title">推演</button>
+            </div>
+          </section>
           <div class="link-row">
             <button type="button" class="text-link" id="sgf-copy" data-i18n="sgf.copy">复制</button>
             <button type="button" class="text-link" id="sgf-download" data-i18n="sgf.export">导出</button>
@@ -259,8 +303,8 @@
         <table class="keys-table">
           <tr><td data-i18n="help.click">点击</td><td data-i18n="help.click.d">落子（须在最新一手；悬停有预览）</td></tr>
           <tr><td data-i18n="help.hint">H · 提示</td><td data-i18n="help.hint.d">提示一手（虚线十字，不自动落子）</td></tr>
-          <tr><td data-i18n="help.arrows">← →</td><td data-i18n="help.arrows.d">复盘：上一手 / 下一手</td></tr>
-          <tr><td data-i18n="help.homeEnd">Home / End</td><td data-i18n="help.homeEnd.d">复盘：开局 / 终局</td></tr>
+          <tr><td data-i18n="help.arrows">← → · Home / End</td><td data-i18n="help.arrows.d">复盘：上一手 / 下一手 · 开局 / 终局</td></tr>
+          <tr><td data-i18n="help.kb">棋盘聚焦 · 方向键</td><td data-i18n="help.kb.d">方向键移动交叉点，Enter 落子，Esc 离开；播报坐标与禁手</td></tr>
           <tr><td data-i18n="help.undo">Z / ⌘Z</td><td data-i18n="help.undo.d">悔棋（以本应用为准）</td></tr>
           <tr><td data-i18n="help.new">N / ⌘N</td><td data-i18n="help.new.d">新局</td></tr>
           <tr><td data-i18n="help.panel">☰ · [ ]</td><td data-i18n="help.panel.d">切换 / 收起 / 展开侧栏</td></tr>
@@ -286,6 +330,13 @@
           <span class="muted" id="slots-empty" hidden data-i18n="slots.empty">还没有存档</span>
         </div>
         <div class="slots-list" id="slots-list"></div>
+        <!-- v1.63:对局库。每一局下完自动留存,不用手动存档;这里列最近 20 局,
+             点「复盘」以纯复盘态打开并停在终局。 -->
+        <div class="games-head">
+          <span class="side-h" data-i18n="games.title">最近对局</span>
+          <span class="muted" id="games-empty" hidden data-i18n="games.empty">下完一局会自动留在这里</span>
+        </div>
+        <div class="slots-list games-list" id="games-list"></div>
         <div class="backup-row">
           <span class="muted" data-i18n="backup.label">全部数据</span>
           <button type="button" class="text-link" id="backup-export" title="把存档、统计、每日打卡与练习进度导出为一个文件" data-i18n="backup.export" data-i18n-title="backup.export.title">备份</button>
@@ -301,18 +352,32 @@
     <div class="modal-bg" id="practice-modal" role="dialog" aria-modal="true" aria-label="战术练习" data-i18n-aria="practice.title">
       <div class="modal practice-modal">
         <h3 id="practice-title" data-i18n="practice.title">战术练习</h3>
+        <!-- v1.63:题型筛选 —— 随机题库变成技能训练:成五 / 防守 / VCF / 禁手 -->
+        <div class="pill practice-skill" id="practice-skill" role="group" aria-label="题型" data-i18n-aria="practice.skill.aria">
+          <button type="button" data-skill="all" class="active" data-i18n="practice.skill.all">全部</button>
+          <button type="button" data-skill="win1" data-i18n="practice.skill.win1">成五</button>
+          <button type="button" data-skill="defend" data-i18n="practice.skill.defend">防守</button>
+          <button type="button" data-skill="vcf" data-i18n="practice.skill.vcf">VCF</button>
+          <button type="button" data-skill="forbid" data-i18n="practice.skill.forbid">禁手</button>
+        </div>
         <div class="practice-head">
           <span id="practice-task" class="practice-task"></span>
           <span id="practice-progress" class="muted practice-progress"></span>
         </div>
         <canvas id="practice-board" class="practice-board" title="点击落子作答" data-i18n-title="practice.board.title"></canvas>
         <div class="practice-foot">
-          <span id="practice-source" class="muted practice-source"></span>
+          <div class="practice-source-row">
+            <span id="practice-source" class="muted practice-source"></span>
+            <button type="button" class="text-link" id="practice-source-open" hidden data-i18n="practice.src.open">回到原局</button>
+          </div>
           <div id="practice-feedback" class="practice-feedback"></div>
         </div>
         <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
           <button type="button" class="text-link" id="practice-wrong" title="只做做错过、还没做对的题" data-i18n="practice.wrongBook" data-i18n-title="practice.wrongBook.title">错题本</button>
           <span class="spacer" style="flex:1"></span>
+          <!-- v1.63:分层提示。一级指出威胁,二级缩小候选,看答案是最后一步 -->
+          <button type="button" class="text-link" id="practice-hint" hidden data-i18n="practice.hint">提示</button>
+          <button type="button" class="text-link" id="practice-reveal" hidden data-i18n="practice.reveal">看答案</button>
           <button type="button" class="tool-btn primary" id="practice-next" hidden data-i18n="practice.next">下一题</button>
           <button type="button" class="tool-btn" id="practice-close" data-i18n="dlg.close">关闭</button>
         </div>
@@ -344,6 +409,7 @@
                   aria-label="评分曲线，逐手优劣；具体失着见下方列表" data-i18n-aria="aria.reviewCurve"
                   title="点击跳到对应手" data-i18n-title="review.curve.title"></canvas>
           <div class="review-stat" id="review-stat"></div>
+          <p class="review-hint" id="review-progress" hidden data-i18n="review.deepening">引擎正在逐条比较失着…</p>
           <!-- v1.56：禁手档下复盘开了回来，但曲线仍按无禁手估（实测黑方 3.5% 的手
                偏乐观）。把这条偏差写在它旁边，而不是藏在发布说明里。 -->
           <p class="review-hint" id="review-renju-note" hidden data-i18n="review.renjuNote">禁手档：胜负判定与更优点已按规则算；优劣曲线仍按无禁手估，黑方略偏乐观</p>
@@ -374,6 +440,7 @@
   <script src="js/engine.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/slots.js"></script>
+  <script src="js/archive.js"></script>
   <script src="js/backup.js"></script>
   <script src="js/review.js"></script>
   <script src="js/stats.js"></script>

@@ -35,6 +35,9 @@
    * @param {number} opts.originalStartedAt
    * @param {Object<number,string>} [opts.comments] 0-based move index → C[] note
    * @param {string} [opts.rootComment] C[] note on the game-info (root) node
+   * @param {Object<number,{r:number,c:number}[][]>} [opts.variations]
+   *        0-based move index → 替代着序列列表。写成该手的**兄弟变着**
+   *        `(;B[..]C[..])`,标准 SGF 阅读器都能切换查看;本应用导入时只读主线。
    */
   function buildSgf(opts) {
     const history = opts.history || [];
@@ -77,14 +80,53 @@
       s += "PB[Black]PW[White]";
     }
     if (rootComment) s += "C[" + sgfText(rootComment) + "]";
+    const variations = opts.variations || null;
+    const pendingAlts = [];
+    // 变着要写成兄弟节点:`(;主线…)(;变着…)`。主线自己也得进一对括号,
+    // 而括号从第一处有变着的手开始,一直包到终点 —— 所以先数需要关几层。
+    let open = 0;
     for (let i = 0; i < history.length; i++) {
       const p = history[i];
       const tag = i % 2 === 0 ? "B" : "W";
+      const alts = variations && variations[i] && variations[i].length ? variations[i] : null;
+      if (alts) { s += "("; open++; }
       s += ";" + tag + "[" + sgfCoord(p.r, p.c) + "]";
       if (comments && comments[i] != null) s += "C[" + sgfText(comments[i]) + "]";
+      if (alts) {
+        // 主线的这一手之后的所有节点都属于这一支,所以变着放到最后统一写;
+        // 这里只记下来。
+        pendingAlts.push({ i: i, alts: alts, tag0: tag });
+      }
+    }
+    // 由内向外关闭:最晚开的那一支先关,然后紧跟它的兄弟变着。
+    while (pendingAlts.length) {
+      const v = pendingAlts.pop();
+      s += ")";
+      for (const line of v.alts) {
+        s += "(";
+        for (let k = 0; k < line.length; k++) {
+          const tag = (v.i + k) % 2 === 0 ? "B" : "W";
+          s += ";" + tag + "[" + sgfCoord(line[k].r, line[k].c) + "]";
+          if (k === 0 && line.comment) s += "C[" + sgfText(line.comment) + "]";
+        }
+        s += ")";
+      }
     }
     s += ")";
     return s;
+  }
+  /**
+   * RU[] → 本应用的规则档。SGF 里的规则名没有统一写法,按前缀宽松认:
+   * Renju / RIF / 连珠 → 'renju';Gomoku / Free / Freestyle / 五子 → 'free';
+   * 其他或缺省 → null(调用方保持当前规则)。
+   */
+  function ruleFromSgf(src) {
+    const m = src.match(/RU\s*\[([^\]]*)\]/i);
+    if (!m) return null;
+    const v = m[1].trim().toLowerCase();
+    if (/^(renju|rif|连珠)/.test(v)) return "renju";
+    if (/^(gomoku|free|standard|五子)/.test(v)) return "free";
+    return null;
   }
 
   /**
@@ -163,6 +205,9 @@
     if (sz && Number(sz[1]) !== SIZE) {
       return { history: [], error: t("sgf.err.size", { want: SIZE, got: sz[1] }) };
     }
+    // 规则随棋谱走。此前导出写 RU[] 而导入不读,一份连珠棋谱在自由档下载入,
+    // 黑的六连会被重算成黑胜 —— 往返不能保留规则。
+    const ruleSet = ruleFromSgf(src);
     const history = [];
     const occupied = Core.emptyBoard();
     // Boundary required before B/W so setup props (AB[]/AW[]) and idents
@@ -200,7 +245,7 @@
         error: t(skipped ? "sgf.err.onlyPass" : "sgf.err.noMoves"),
       };
     }
-    return { history: history, skippedPasses: skipped };
+    return { history: history, skippedPasses: skipped, ruleSet: ruleSet };
   }
 
   function fileNameFromDate(ts) {
@@ -220,6 +265,7 @@
     parseSgfCoord,
     buildSgf,
     parseSgf,
+    ruleFromSgf,
     fileNameFromDate,
   };
 })(typeof window !== "undefined" ? window : globalThis);
