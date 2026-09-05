@@ -227,7 +227,8 @@
     if (!s || !s.seen) return "";
     return "<div class='stats-line'>" + t("stats.practiceLine", {
       seen: s.seen, total: s.total, mastered: s.mastered,
-      wrong: s.wrong ? t("stats.practiceWrong", { n: s.wrong }) : "",
+      wrong: (s.wrong ? t("stats.practiceWrong", { n: s.wrong }) : "") +
+        (s.due ? t("stats.practiceDue", { n: s.due }) : ""),
     }) + "</div>";
   }
 

@@ -1,8 +1,15 @@
 /**
  * Whole-game review: per-ply advantage curve + blunder detection + the review
- * modal's curve/list rendering. Pure over deps injected via init() — reads
- * game state through getters, never mutates it. Jump/export glue and the
- * modal open/close remain in app.js.
+ * modal's curve/list rendering + the persistent sidebar panel (v1.63).
+ * Pure over deps injected via init() — reads game state through getters,
+ * never mutates it. Jump/export glue and the modal open/close remain in app.js.
+ *
+ * v1.63 把失着分成三档证据,并且说出来:
+ *   hard    可证明的战术事实:错失一步成五 / 漏防对手成五(coachFacts,按规则算)
+ *   engine  引擎比较:同一局面同一预算,引擎的首选与实际着不同,且静态分差可见
+ *   soft    局势波动:只有静态评估在对手应手后下滑,没有确定性证据
+ * 第一遍(compute)是静态的、立即出;第二遍(deepen)在后台对每条 soft 失着跑一次
+ * 引擎,把它升成 engine、或者撤掉(引擎也这么走)。曲线负责定位,关键手负责解释。
  * @module review
  */
 (function (global) {
@@ -11,13 +18,20 @@
   const DECISIVE = 20000;   // beyond this the position is won — clamp to ±1
   /** Advantage handed to the opponent by one move. */
   const BLUNDER_DROP = 0.45;
+  /** 引擎比较:实际着与引擎首选的静态分差(压缩后)至少这么大才算「引擎更优」。 */
+  const ENGINE_GAP = 0.08;
   /** …and at most this many, worst first: the flag rate scales with game
    *  length, so a loose 70-move game hit fourteen. A wall of red dots says
    *  no more than a blank curve did. */
   const MAX_BLUNDERS = 8;
+  /** 后台引擎比较每次调用的预算(ms)。8 条失着 × 2 次 ≈ 8 秒上限,可取消。 */
+  const DEEPEN_MS = 500;
 
   let deps = null;
   let data = null;
+  /** 后台引擎比较的代际:invalidate() 递增,过期的结果一律丢弃。 */
+  let deepenGen = 0;
+  let deepenPromise = null;
 
   /**
    * @param {object} d
@@ -28,10 +42,12 @@
    * @param {(n:number) => object|null} d.winLineAt
    * @param {(pre:string[][], color:string, played:object) => object|null} d.coachFacts
    * @param {(board:string[][], me:string) => number} d.evaluateBoard
+   * @param {(board:string[][], color:string) => {r,c}[]} [d.winCells] 规则版成五点
+   * @param {(opts:object) => Promise<{r,c}|null>} [d.aiMoveAsync]
    */
   function init(d) { deps = d; }
 
-  function invalidate() { data = null; }
+  function invalidate() { data = null; deepenGen++; deepenPromise = null; }
 
   function getData() { return data; }
 
@@ -59,6 +75,8 @@
     return squash(deps.evaluateBoard(deps.boardAfter(i), "b"));
   }
 
+  function sameCell(a, b) { return !!(a && b && a.r === b.r && a.c === b.c); }
+
   /** Analyze the whole game: per-ply Black-advantage + flagged blunders. */
   function compute() {
     const history = deps.getHistory();
@@ -74,11 +92,26 @@
     let bCount = 0, wCount = 0;
     for (let i = 1; i <= N; i++) {
       const color = (i - 1) % 2 === 0 ? "b" : "w";
-      const hard = deps.coachFacts(deps.boardAfter(i - 1), color, history[i - 1]);
+      const pre = deps.boardAfter(i - 1);
+      const played = history[i - 1];
+      const hard = deps.coachFacts(pre, color, played);
       let reason = null;
       let drop = 0;
-      if (hard && hard.grade === "blunder") reason = hard.text;
-      else {
+      let best = null;
+      let punish = null;
+      let kind = null;
+      if (hard && hard.grade === "blunder") {
+        reason = hard.text;
+        kind = hard.kind || null;
+        best = hard.best || null;
+        // 漏防:对手下一手就能成五的那个点,既是「对手怎样惩罚」,也是「本该挡的点」
+        if (!best && deps.winCells) {
+          const after = pre.map((row) => row.slice());
+          after[played.r][played.c] = color;
+          const w = deps.winCells(after, color === "b" ? "w" : "b");
+          if (w.length) { punish = w[0]; best = w[0]; }
+        }
+      } else {
         // Measured AFTER the opponent has answered, not immediately after the
         // move. Placing your own stone almost never lowers your own eval — the
         // cost of a bad move shows up in what the opponent gets to do next, so
@@ -90,7 +123,14 @@
         drop = before - after;
         if (drop >= BLUNDER_DROP) reason = t("review.blunderReason");
       }
-      if (reason) blunders.push({ i, color, reason, drop, hard: !!(hard && hard.grade === "blunder") });
+      if (reason) {
+        blunders.push({
+          i, color, reason, drop,
+          hard: !!(hard && hard.grade === "blunder"),
+          tier: hard && hard.grade === "blunder" ? "hard" : "soft",
+          kind: kind, best: best, punish: punish, gap: 0,
+        });
+      }
     }
     // Keep the worst, but list them in playing order — a review is read
     // forwards. Hard verdicts (missed win / missed block) always survive:
@@ -101,8 +141,130 @@
       blunders = blunders.filter((x) => keepSet.has(x.i));
     }
     for (const b of blunders) { if (b.color === "b") bCount++; else wCount++; }
-    data = { adv, blunders, summary: { b: bCount, w: wCount }, gen, len: N };
+    data = { adv, blunders, summary: { b: bCount, w: wCount }, gen, len: N, deepened: false, deepening: false };
     return data;
+  }
+
+  /** 某一着之后,从 color 视角的压缩评估。 */
+  function scoreAfter(board, mv, color) {
+    const b = board.map((row) => row.slice());
+    b[mv.r][mv.c] = color;
+    return squash(deps.evaluateBoard(b, color));
+  }
+
+  /**
+   * 第二遍:对每条 soft 失着问一次引擎。返回 Promise,进行中可被 invalidate()
+   * 取消(结果按代际丢弃,不会写进一份已经换掉的数据)。同一份数据只跑一次。
+   */
+  function deepen(opts) {
+    const d = compute();
+    if (!deps.aiMoveAsync || d.deepened || d.deepening) return deepenPromise || Promise.resolve(d);
+    const gen = deepenGen;
+    const difficulty = (opts && opts.difficulty) || "hard";
+    const onProgress = (opts && opts.onProgress) || function () {};
+    d.deepening = true;
+    const history = deps.getHistory();
+    const soft = d.blunders.filter((b) => b.tier === "soft" || (b.tier === "hard" && !b.best));
+    let done = 0;
+    const run = async () => {
+      for (const b of soft) {
+        if (gen !== deepenGen) return d;
+        const pre = deps.boardAfter(b.i - 1);
+        const played = history[b.i - 1];
+        let best = null;
+        try {
+          best = await deps.aiMoveAsync({ board: pre, side: b.color, difficulty: difficulty, timeMs: DEEPEN_MS });
+        } catch (_) { best = null; }
+        if (gen !== deepenGen) return d;
+        if (b.tier === "soft") {
+          if (!best || sameCell(best, played)) {
+            b.tier = "clear"; // 引擎也这么走:不是失着
+          } else {
+            const gap = scoreAfter(pre, best, b.color) - scoreAfter(pre, played, b.color);
+            b.gap = gap;
+            if (gap >= ENGINE_GAP) {
+              b.tier = "engine";
+              b.best = best;
+              b.reason = t("review.engineReason");
+              // 对手怎样惩罚:实际着之后对手的首选
+              const after = pre.map((row) => row.slice());
+              after[played.r][played.c] = b.color;
+              try {
+                const reply = await deps.aiMoveAsync({ board: after, side: b.color === "b" ? "w" : "b", difficulty: difficulty, timeMs: DEEPEN_MS });
+                if (gen !== deepenGen) return d;
+                b.punish = reply || null;
+              } catch (_) { b.punish = null; }
+            }
+          }
+        } else if (best && !sameCell(best, played)) {
+          b.best = best;
+        }
+        done++;
+        onProgress(done, soft.length);
+      }
+      if (gen !== deepenGen) return d;
+      d.blunders = d.blunders.filter((b) => b.tier !== "clear");
+      d.summary = { b: d.blunders.filter((b) => b.color === "b").length, w: d.blunders.filter((b) => b.color === "w").length };
+      d.deepened = true;
+      d.deepening = false;
+      return d;
+    };
+    deepenPromise = run().catch(() => { d.deepening = false; return d; });
+    return deepenPromise;
+  }
+
+  function tierLabel(b) {
+    if (b.tier === "hard") return t("review.tier.hard");
+    if (b.tier === "engine") return t("review.tier.engine");
+    return t(data && (data.deepened || !deps.aiMoveAsync) ? "review.tier.soft" : "review.tier.pending");
+  }
+
+  function coord(p) {
+    return p ? String.fromCharCode(65 + p.c) + (15 - p.r) : "";
+  }
+
+  /**
+   * 一条失着的结构化解释:当时的威胁 → 你的落点 → 对手可以怎样惩罚 → 可行替代。
+   * 每一句都来自可验证的事实(成五点 / 引擎首选),不由自由文本模型编造。
+   */
+  function explain(i) {
+    const d = compute();
+    const b = d.blunders.find((x) => x.i === i);
+    if (!b) return null;
+    const history = deps.getHistory();
+    const played = history[i - 1];
+    const who = t(b.color === "b" ? "side.black" : "side.white");
+    const oppo = t(b.color === "b" ? "side.white" : "side.black");
+    const lines = [];
+    if (b.kind === "missedWin") {
+      lines.push(t("review.ex.threatWin", { who: who, cell: coord(b.best) }));
+      lines.push(t("review.ex.played", { cell: coord(played) }));
+      lines.push(t("review.ex.altWin", { cell: coord(b.best) }));
+    } else if (b.kind === "missedBlock") {
+      lines.push(t("review.ex.threatBlock", { oppo: oppo, cell: coord(b.punish || b.best) }));
+      lines.push(t("review.ex.played", { cell: coord(played) }));
+      lines.push(t("review.ex.punishWin", { oppo: oppo, cell: coord(b.punish || b.best) }));
+      lines.push(t("review.ex.altBlock", { cell: coord(b.best) }));
+    } else if (b.tier === "engine") {
+      lines.push(t("review.ex.played", { cell: coord(played) }));
+      if (b.punish) lines.push(t("review.ex.punishEngine", { oppo: oppo, cell: coord(b.punish) }));
+      lines.push(t("review.ex.altEngine", { cell: coord(b.best) }));
+    } else {
+      lines.push(t("review.ex.played", { cell: coord(played) }));
+      lines.push(t("review.ex.soft"));
+    }
+    return { i: i, color: b.color, tier: b.tier, label: tierLabel(b), reason: b.reason, lines: lines, best: b.best, punish: b.punish };
+  }
+
+  /** 本局「值得记住的一手」:优先可证明战术,其次引擎比较,再次分差最大。 */
+  function keyMoves(color) {
+    const d = compute();
+    const rank = { hard: 0, engine: 1, soft: 2 };
+    return d.blunders
+      .filter((b) => !color || b.color === color)
+      .slice()
+      .sort((a, b) => (rank[a.tier] - rank[b.tier]) || (b.drop - a.drop) || (b.gap - a.gap))
+      .slice(0, 3);
   }
 
   function drawCurve() {
@@ -152,14 +314,19 @@
     for (let i = 1; i < n; i++) g.lineTo(x(i), y(adv[i]));
     g.strokeStyle = line; g.lineWidth = 1.8; g.lineJoin = "round";
     g.stroke();
-    // blunder dots
+    // blunder dots: 可证明的实心,待确认/局势波动的空心 —— 证据强度不只靠列表文字
     for (const b of data.blunders) {
       g.beginPath();
       g.arc(x(b.i), y(adv[b.i]), 3, 0, Math.PI * 2);
       // --bad,不是 --win:弹层文案写着「红点为失着」,而借用 --win 时它在四套主题
       // 里分别是金 / 薄荷绿 / 棕 / 红 —— 只有练习本那一套碰巧对得上。
-      g.fillStyle = css.getPropertyValue("--bad").trim() || "#c0392b";
-      g.fill();
+      if (b.tier === "soft") {
+        g.strokeStyle = css.getPropertyValue("--bad").trim() || "#c0392b";
+        g.lineWidth = 1.5; g.stroke();
+      } else {
+        g.fillStyle = css.getPropertyValue("--bad").trim() || "#c0392b";
+        g.fill();
+      }
     }
     // current view marker
     const viewIndex = deps.getViewIndex();
@@ -168,6 +335,27 @@
       g.beginPath(); g.moveTo(x(viewIndex), pad); g.lineTo(x(viewIndex), pad + h); g.stroke();
       g.globalAlpha = 1;
     }
+  }
+
+  function blunderRow(b) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "review-blunder-row tier-" + b.tier;
+    row.dataset.i = b.i;
+    const who = t(b.color === "b" ? "side.black" : "side.white");
+    const move = document.createElement("span");
+    move.className = "rb-move";
+    move.textContent = t("review.blunderRow", { n: b.i, color: who });
+    const reason = document.createElement("span");
+    reason.className = "rb-reason";
+    reason.textContent = b.reason; // textContent — never HTML-inject reasons
+    const tier = document.createElement("span");
+    tier.className = "rb-tier";
+    tier.textContent = tierLabel(b);
+    row.appendChild(move);
+    row.appendChild(reason);
+    row.appendChild(tier);
+    return row;
   }
 
   /** Fill the review modal (stat line, blunder list, curve). */
@@ -187,6 +375,11 @@
       const s = data.summary;
       stat.textContent = t(s.b + s.w === 0 ? "review.statClean" : "review.stat", { b: s.b, w: s.w });
     }
+    const prog = document.getElementById("review-progress");
+    if (prog) {
+      prog.hidden = !data.deepening;
+      if (data.deepening) prog.textContent = t("review.deepening");
+    }
     // 禁手档下曲线仍按无禁手估 —— 说在它旁边,不藏进发布说明
     const note = document.getElementById("review-renju-note");
     if (note) note.hidden = !(deps.getRenju && deps.getRenju());
@@ -199,26 +392,82 @@
         p.textContent = t("review.none");
         list.appendChild(p);
       }
-      for (const b of data.blunders) {
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "review-blunder-row";
-        row.dataset.i = b.i;
-        const who = t(b.color === "b" ? "side.black" : "side.white");
-        const reason = document.createElement("span");
-        reason.className = "rb-reason";
-        reason.textContent = b.reason; // textContent — never HTML-inject reasons
-        const move = document.createElement("span");
-        move.className = "rb-move";
-        move.textContent = t("review.blunderRow", { n: b.i, color: who });
-        row.appendChild(move);
-        row.appendChild(reason);
-        list.appendChild(row);
-      }
+      for (const b of data.blunders) list.appendChild(blunderRow(b));
     }
     // draw after layout so clientWidth is real
     requestAnimationFrame(drawCurve);
   }
 
-  global.GobanReview = { init, invalidate, getData, compute, render };
+  /**
+   * 侧栏常驻面板:失着列表 + 当前查看那一手的解释。app.js 在 sync() 里调用;
+   * 只在复盘已算过(data 存在)且面板被打开过时显示。
+   */
+  let sideOpen = false;
+  function setSideOpen(v) { sideOpen = !!v; }
+  function isSideOpen() { return sideOpen; }
+
+  function renderSide() {
+    const el = document.getElementById("review-side");
+    if (!el) return;
+    const show = sideOpen && !!data && deps.getHistory().length >= 2;
+    el.hidden = !show;
+    if (!show) return;
+    const chips = document.getElementById("review-side-chips");
+    const viewIndex = deps.getViewIndex();
+    if (chips) {
+      chips.innerHTML = "";
+      if (!data.blunders.length) {
+        const p = document.createElement("span");
+        p.className = "muted";
+        p.textContent = t("review.none");
+        chips.appendChild(p);
+      }
+      for (const b of data.blunders) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "review-chip tier-" + b.tier + (b.i === viewIndex ? " cur" : "");
+        chip.dataset.i = b.i;
+        chip.title = b.reason + " · " + tierLabel(b);
+        chip.textContent = String(b.i);
+        chips.appendChild(chip);
+      }
+    }
+    const ex = document.getElementById("review-side-explain");
+    const actions = document.getElementById("review-side-actions");
+    const info = explain(viewIndex);
+    if (ex) {
+      ex.innerHTML = "";
+      if (!info) {
+        const p = document.createElement("div");
+        p.className = "muted";
+        p.textContent = data.blunders.length ? t("review.side.pick") : t("review.side.clean");
+        ex.appendChild(p);
+      } else {
+        const head = document.createElement("div");
+        head.className = "rs-head";
+        const who = t(info.color === "b" ? "side.black" : "side.white");
+        head.textContent = t("review.blunderRow", { n: info.i, color: who }) + " · " + info.reason;
+        const tier = document.createElement("span");
+        tier.className = "rb-tier";
+        tier.textContent = info.label;
+        head.appendChild(tier);
+        ex.appendChild(head);
+        const ol = document.createElement("ol");
+        ol.className = "rs-lines";
+        for (const line of info.lines) {
+          const li = document.createElement("li");
+          li.textContent = line;
+          ol.appendChild(li);
+        }
+        ex.appendChild(ol);
+      }
+    }
+    if (actions) actions.hidden = !info;
+  }
+
+  global.GobanReview = {
+    init, invalidate, getData, compute, deepen, explain, keyMoves, render,
+    renderSide, setSideOpen, isSideOpen,
+    ENGINE_GAP,
+  };
 })(typeof window !== "undefined" ? window : globalThis);

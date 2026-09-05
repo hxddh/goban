@@ -476,19 +476,42 @@
       sol: [[5,8]] }
   ];
 
-  let deps = { getHistories: () => [] };
+  /**
+   * 禁手题(v1.63):黑先,点出黑**不能**落的点。手工构造、启动时经
+   * Core.renjuForbiddenPoints 验证 —— 与判题用的是同一个函数。
+   * 三条禁手各一道起步,再加一道「看起来像好点」的陷阱;对局库里的连珠棋
+   * 会继续派生这一类题。
+   */
+  const FORBID_BUILTINS = [
+    // 双三:横竖各两子夹着天元
+    { type: "forbid", side: "b", b: [[7,6],[7,8],[6,7],[8,7]], w: [[3,3],[11,11],[3,11]] },
+    // 双四:横竖各三子,各一端被白封住,(7,7) 同时成两个四
+    { type: "forbid", side: "b", b: [[7,4],[7,5],[7,6],[4,7],[5,7],[6,7]], w: [[7,3],[3,7],[9,9],[10,10],[9,5]] },
+    // 长连:(7,6) 补上就是七连
+    { type: "forbid", side: "b", b: [[7,3],[7,4],[7,5],[7,7],[7,8],[7,9]], w: [[6,4],[6,5],[6,6],[8,8],[8,9],[8,10]] },
+    // 陷阱:斜线活三 + 横线活三交于 (8,8),诱人但是双三
+    { type: "forbid", side: "b", b: [[6,6],[7,7],[8,6],[8,7]], w: [[10,3],[4,11],[3,3],[11,11]] },
+  ];
+
+  /** deps: { getGames(): [{id, history, renju}], openSource(id, ply) } */
+  let deps = { getGames: () => [], openSource: null };
   let pool = [];
   let idx = 0;
   let score = 0;
   let answered = false;
-  let cur = null; // { board, side, type, solutions }
-  /** 'free' (练习) or 'daily' (每日挑战) — same flow, different pool + finish. */
+  let cur = null; // { board, side, type, solutions, source, renju, gameId, ply }
+  /** 'free' (练习) / 'daily' (每日挑战) / 'wrong' (错题本) — same flow, different pool + finish. */
   let runMode = "free";
   /** The calendar day a daily run belongs to, frozen at startDaily(). */
   let dailyDate = "";
+  /** 题型筛选(练习模式):'all' | 'win1' | 'defend' | 'vcf' | 'forbid' */
+  let skill = "all";
+  /** 当前题的作答过程:用了几级提示、错了几次、看没看答案。 */
+  let hintLevel = 0;
+  let attempts = 0;
 
   function init(d) {
-    if (d && typeof d.getHistories === "function") deps = d;
+    if (d && typeof d.getGames === "function") deps = Object.assign({ openSource: null }, d);
   }
 
   function boardOf(stones) {
@@ -502,6 +525,20 @@
 
   /** Depth of the forcing chain a vcf puzzle may require (fours after the first). */
   const VCF_DEPTH = 6;
+
+  /**
+   * 成五点,按规则算:连珠下黑的六连不是胜、禁手点上的「五」不存在(成五优先于
+   * 禁手,所以 wouldWinRule 已经把这层算进去)。白方与自由式原样返回。
+   */
+  function winCells(board, color, renju) {
+    const cells = Ai.listWinCells(board, color);
+    if (!renju || color !== "b") return cells;
+    return cells.filter((m) => Core.wouldWinRule(board, m.r, m.c, "b", true));
+  }
+
+  function forbidden(board, r, c, color, renju) {
+    return !!(renju && color === "b" && Core.renjuForbidden(board, r, c));
+  }
 
   /** Empty cells within `dist` of any stone — a forcing move is always one. */
   function nearCells(board, dist) {
@@ -527,24 +564,32 @@
    * reply). Returns [] when `first` does not actually force. Built from the
    * same public engine helpers solutionsFor() judges with, so the line shown
    * can never contradict the verdict given.
+   *
+   * 连珠下黑的序列里不许出现禁手点(双四本身就是禁手!),所以 renju 时黑的
+   * 「双四取胜」不算,且每一手都验一次。
    */
-  function forcedLine(board, side, first) {
+  function forcedLine(board, side, first, renju) {
     const oppo = Core.opp(side);
     const bd = cloneBoard(board);
     const line = [];
     let m = first;
     for (let step = 0; step < 16 && m; step++) {
+      if (forbidden(bd, m.r, m.c, side, renju)) return [];
       bd[m.r][m.c] = side;
       line.push({ r: m.r, c: m.c, color: side, n: line.length + 1 });
-      if (Core.findWin(bd, m.r, m.c, side)) return line;      // five on the board
-      const must = Ai.listWinCells(bd, side);
-      if (must.length >= 2) return line;                      // double four — no reply
+      if (Core.findWinRule(bd, m.r, m.c, side, !!renju)) return line;   // five on the board
+      const must = winCells(bd, side, renju);
+      if (must.length >= 2) {
+        // 双四无解 —— 但连珠下黑的双四是禁手,这条线到不了那里
+        if (renju && side === "b") return [];
+        return line;
+      }
       if (!must.length) return [];                            // not forcing after all
       bd[must[0].r][must[0].c] = oppo;
       line.push({ r: must[0].r, c: must[0].c, color: oppo, n: line.length + 1 });
       m = Ai.findVCF(bd, side, VCF_DEPTH);
     }
-    return line;
+    return [];
   }
 
   /** How many moves of `side`'s own the forced line takes (its difficulty). */
@@ -553,12 +598,16 @@
   }
 
   /** All correct cells for a puzzle; empty array ⇒ not a valid puzzle. */
-  function solutionsFor(board, side, type) {
+  function solutionsFor(board, side, type, renju) {
     const oppo = Core.opp(side);
     const out = [];
+    if (type === "forbid") {
+      if (side !== "b") return [];
+      return Core.renjuForbiddenPoints(board).map((p) => ({ r: p.r, c: p.c }));
+    }
     if (type === "win1") {
       for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
-        if (!board[r][c] && Core.wouldWin(board, r, c, side)) out.push({ r, c });
+        if (!board[r][c] && Core.wouldWinRule(board, r, c, side, !!renju)) out.push({ r, c });
       }
       return out;
     }
@@ -569,31 +618,35 @@
       // Two fours at once need no search — there is no answer to both.
       for (const cell of nearCells(board, 2)) {
         const { r, c } = cell;
-        if (Core.wouldWin(board, r, c, side)) continue; // an outright five is win1, not vcf
+        if (Core.wouldWinRule(board, r, c, side, !!renju)) continue; // an outright five is win1, not vcf
+        if (forbidden(board, r, c, side, renju)) continue;
         board[r][c] = side;
-        const mine = Ai.listWinCells(board, side);
-        const theirs = Ai.listWinCells(board, oppo);
+        const mine = winCells(board, side, renju);
+        const theirs = winCells(board, oppo, renju);
         let ok = false;
         if (!theirs.length && mine.length >= 2) {
-          ok = true;
+          ok = !(renju && side === "b");   // 黑的双四在连珠下是禁手,不是胜
         } else if (!theirs.length && mine.length === 1) {
           board[mine[0].r][mine[0].c] = oppo; // the only defence
           ok = !!Ai.findVCF(board, side, VCF_DEPTH);
           board[mine[0].r][mine[0].c] = "";
         }
         board[r][c] = "";
+        // 连珠下整条线还要逐手验禁手;forcedLine 会在踩线时返回空
+        if (ok && renju && side === "b") ok = forcedLine(board, side, { r, c }, renju).length > 0;
         if (ok) out.push({ r, c });
       }
       return out;
     }
     // defend: valid only when the opponent actually threatens a five
-    if (!Ai.listWinCells(board, oppo).length) return [];
+    if (!winCells(board, oppo, renju).length) return [];
     for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
       if (board[r][c]) continue;
-      if (Core.wouldWin(board, r, c, side)) { out.push({ r, c }); continue; }
+      if (forbidden(board, r, c, side, renju)) continue;
+      if (Core.wouldWinRule(board, r, c, side, !!renju)) { out.push({ r, c }); continue; }
       const after = cloneBoard(board);
       after[r][c] = side;
-      if (!Ai.listWinCells(after, oppo).length) out.push({ r, c });
+      if (!winCells(after, oppo, renju).length) out.push({ r, c });
     }
     return out;
   }
@@ -606,62 +659,91 @@
    * still checked for being empty here, and scripts/test-game.mjs re-derives
    * them from scratch and demands an exact match — the proof lives in CI,
    * not in the player's click.
+   *
+   * `meta` carries provenance: {renju, gameId, ply}. 规则是题目的一部分:同一个
+   * 局面在自由式与连珠下的正解不同,所以 renju 也进 puzzleKey。
    */
-  function makePuzzle(board, side, type, source, presolved) {
+  function makePuzzle(board, side, type, source, presolved, meta) {
+    const renju = !!(meta && meta.renju);
     let solutions;
     if (presolved && presolved.length) {
       solutions = presolved
         .map((s) => (Array.isArray(s) ? { r: s[0], c: s[1] } : s))
         .filter((s) => s && board[s.r] && !board[s.r][s.c]);
     } else {
-      solutions = solutionsFor(board, side, type);
+      solutions = solutionsFor(board, side, type, renju);
     }
     if (!solutions.length) return null;
-    return { board, side, type, solutions, source };
+    return {
+      board, side, type, solutions, source,
+      renju: renju,
+      gameId: (meta && meta.gameId) || null,
+      ply: (meta && typeof meta.ply === "number") ? meta.ply : null,
+    };
   }
 
   /** Cheap fingerprint of the game shelf: changes whenever any game does. */
-  function historiesSig(histories) {
-    return histories.map((h) => {
+  function gamesSig(games) {
+    return games.map((g) => {
+      const h = g && g.history;
       if (!Array.isArray(h) || !h.length) return "0";
       const last = h[h.length - 1];
-      return h.length + "." + last.r + "." + last.c;
+      return (g.id || "") + ":" + h.length + "." + last.r + "." + last.c + (g.renju ? "R" : "");
     }).join("|");
   }
 
-  /** Scanning a full 30-slot shelf costs ~180ms and usually finds nothing new. */
+  /** Scanning a full shelf costs ~180ms and usually finds nothing new. */
   let gamePuzzleCache = { sig: null, out: [] };
+  const FROM_GAMES_MAX = 24;
 
-  /** Derive puzzles from played games: missed wins + recoverable missed defenses. */
+  /**
+   * Derive puzzles from played games: missed wins + recoverable missed
+   * defenses, and (连珠局)禁手陷阱. 每道题带着原局 id 与手数,练完能回去。
+   */
   function fromGames() {
-    const histories = deps.getHistories();
-    const sig = historiesSig(histories);
+    const games = deps.getGames();
+    const sig = gamesSig(games);
     if (gamePuzzleCache.sig === sig) return gamePuzzleCache.out;
     const out = [];
     const seen = new Set();
-    for (const history of histories) {
+    const push = (p) => {
+      if (!p) return false;
+      const key = puzzleKey(p);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      out.push(p);
+      return out.length >= FROM_GAMES_MAX;
+    };
+    for (const g of games) {
+      const history = g && g.history;
       if (!Array.isArray(history) || history.length < 2) continue;
+      const renju = !!g.renju;
       for (let i = 1; i <= history.length; i++) {
         const side = (i - 1) % 2 === 0 ? "b" : "w";
         const pre = Core.boardAfter(history, i - 1);
         const played = history[i - 1];
-        if (Core.wouldWin(pre, played.r, played.c, side)) continue; // played the win
+        const meta = { renju: renju, gameId: g.id || null, ply: i };
+        if (Core.wouldWinRule(pre, played.r, played.c, side, renju)) continue; // played the win
         let p = null;
-        if (Ai.listWinCells(pre, side).length) {
-          p = makePuzzle(pre, side, "win1", SRC_GAME);
+        if (winCells(pre, side, renju).length) {
+          p = makePuzzle(pre, side, "win1", SRC_GAME, null, meta);
         } else {
           const after = cloneBoard(pre);
           after[played.r][played.c] = side;
-          if (Ai.listWinCells(after, Core.opp(side)).length) {
-            p = makePuzzle(pre, side, "defend", SRC_GAME); // null when hopeless
+          if (winCells(after, Core.opp(side), renju).length) {
+            p = makePuzzle(pre, side, "defend", SRC_GAME, null, meta); // null when hopeless
           }
         }
-        if (p) {
-          const key = p.type + ":" + p.side + ":" + p.board.map((row) => row.map((s) => s || ".").join("")).join("");
-          if (!seen.has(key)) { seen.add(key); out.push(p); }
+        if (push(p)) break;
+        // 连珠:黑到手且盘上有 1–3 个禁手点 → 「找禁手点」
+        if (renju && side === "b" && i > 6) {
+          const fp = Core.renjuForbiddenPoints(pre);
+          if (fp.length >= 1 && fp.length <= 3) {
+            if (push(makePuzzle(pre, "b", "forbid", SRC_GAME, null, meta))) break;
+          }
         }
-        if (out.length >= 12) { gamePuzzleCache = { sig: sig, out: out }; return out; }
       }
+      if (out.length >= FROM_GAMES_MAX) break;
     }
     gamePuzzleCache = { sig: sig, out: out };
     return out;
@@ -670,44 +752,117 @@
   /** Built once: BUILTINS is a literal, so re-deriving it per open is pure
    *  waste — and that waste scales with the bank. At 130 puzzles rebuilding
    *  cost ~140ms of every 打开练习; the game-derived half still rebuilds when
-   *  the histories change (fromGames has its own signature cache). */
+   *  the games change (fromGames has its own signature cache). */
   let bankCache = null;
 
   function buildCandidates() {
     if (!bankCache) {
       bankCache = [];
-      for (const def of BUILTINS) {
-        const p = makePuzzle(boardOf(def), def.side, def.type, SRC_BANK, def.sol);
+      for (const def of BUILTINS.concat(FORBID_BUILTINS)) {
+        const p = makePuzzle(boardOf(def), def.side, def.type, SRC_BANK, def.sol, { renju: def.type === "forbid" });
         if (p) bankCache.push(p);
       }
     }
     // Boards are copied out: nothing writes to a puzzle board today, but a
     // cached one is shared across every open, so a future "place the answer
     // on the board" would silently corrupt the bank for the rest of the
-    // session. Copying 130 boards costs well under a millisecond.
+    // session. Copying 134 boards costs well under a millisecond.
     return bankCache
-      .map((p) => ({ board: p.board.map((row) => row.slice()), side: p.side, type: p.type, solutions: p.solutions, source: p.source }))
+      .map((p) => {
+        const q = Object.assign({}, p, { board: p.board.map((row) => row.slice()) });
+        // 键随副本走(非枚举属性 Object.assign 不带),否则每次 sync() 都重算 134 × 8 个对称
+        try { Object.defineProperty(q, "_key", { value: puzzleKey(p), enumerable: false, writable: true }); } catch (_) {}
+        return q;
+      })
       .concat(fromGames());
   }
 
-  function buildPool() {
-    // never-seen → still unmastered → the rest (shuffled within each band)
-    return orderPool(buildCandidates(), loadProgress());
+  function bySkill(cands) {
+    if (skill === "all") return cands;
+    return cands.filter((p) => p.type === skill);
   }
 
-  // --- 练习进度 / 错题本 (per-puzzle memory) --------------------------------
+  function buildPool() {
+    // never-seen → 错题 → 到期复习 → the rest (shuffled within each band)
+    const cands = buildCandidates();
+    return orderPool(bySkill(cands), progressFor(cands), null, todayStr());
+  }
+
+  // --- 练习进度 / 错题本 / 间隔复习 (per-puzzle memory) ----------------------
   // Before v1.27 practice remembered nothing: every open reshuffled all
   // puzzles, so you re-did the ones you already knew and could never find the
   // ones you got wrong. Stored separately from 每日 and from 对局统计.
+  //
+  // v1.63 把「一次答对」和「掌握」分开:
+  //   streak  连续**独立**(无提示、首次点击)答对的次数;错、用提示、看答案都归零
+  //   due     下次到期复习的日期;独立答对后按 1 → 3 → 7 → 14 → 30 天拉开
+  //   掌握   = streak ≥ 2,也就是至少隔了一次到期复习再独立做对
+  //   错题本 = 错过、且之后没做对(与 v1.27 同一条定义,测试与每日都靠它)
   const PROGRESS_KEY = "goban.v12.practice";
+  const INTERVALS = [1, 3, 7, 14, 30];
 
-  /** Short stable id for a position (full signature is ~225 chars/puzzle). */
-  function puzzleKey(p) {
-    const s = p.type + ":" + p.side + ":" +
-      p.board.map((row) => row.map((x) => x || ".").join("")).join("");
+  /** 八个对称变换下的最小棋盘串 —— 镜像/旋转同题共用一条进度。 */
+  function canonicalBoardStr(board) {
+    const S = SIZE - 1;
+    const syms = [
+      (r, c) => [r, c], (r, c) => [c, S - r], (r, c) => [S - r, S - c], (r, c) => [S - c, r],
+      (r, c) => [r, S - c], (r, c) => [S - r, c], (r, c) => [c, r], (r, c) => [S - c, S - r],
+    ];
+    let best = null;
+    for (const f of syms) {
+      const rows = [];
+      for (let r = 0; r < SIZE; r++) {
+        let row = "";
+        for (let c = 0; c < SIZE; c++) {
+          const [rr, cc] = f(r, c);
+          row += board[rr][cc] || ".";
+        }
+        rows.push(row);
+      }
+      const s = rows.join("");
+      if (best === null || s < best) best = s;
+    }
+    return best;
+  }
+
+  function fnv(s) {
     let h = 2166136261 >>> 0;
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
     return (h >>> 0).toString(36);
+  }
+
+  /** Short stable id for a position, symmetry-normalised; renju is part of it. */
+  function puzzleKey(p) {
+    // 记在题目对象上:sync() 每次都会数一遍到期题,134 道题 × 8 个对称不该每次重算。
+    // 题库副本是 Object.assign 出来的,所以缓存跟着副本走;棋盘从不被改写(见 buildCandidates)。
+    if (p._key) return p._key;
+    const k = fnv(p.type + ":" + p.side + ":" + (p.renju ? "r:" : "") + canonicalBoardStr(p.board));
+    try { Object.defineProperty(p, "_key", { value: k, enumerable: false, writable: true }); } catch (_) {}
+    return k;
+  }
+
+  /** v1.27–v1.62 的键:未做对称归一。只用于把旧进度搬到新键上。 */
+  function legacyKey(p) {
+    return fnv(p.type + ":" + p.side + ":" +
+      p.board.map((row) => row.map((x) => x || ".").join("")).join(""));
+  }
+
+  /**
+   * 把旧键上的进度搬到新键(pure)。同一题的旧键与新键都有记录时保留新键那份
+   * (它更新)。返回 {st, moved}。
+   */
+  function migrateProgress(cands, prev) {
+    const st = prev && prev.items ? { items: Object.assign({}, prev.items) } : { items: {} };
+    let moved = 0;
+    for (const p of cands) {
+      const lk = legacyKey(p);
+      const nk = puzzleKey(p);
+      if (lk === nk || !st.items[lk]) continue;
+      if (!st.items[nk]) st.items[nk] = st.items[lk];
+      delete st.items[lk];
+      moved++;
+    }
+    return { st: st, moved: moved };
   }
 
   function loadProgress() {
@@ -719,9 +874,19 @@
     } catch (_) { return {}; }
   }
 
+  /** 读进度,顺手把旧键搬到新键(只在真有旧键时才写回)。 */
+  function progressFor(cands) {
+    const st = loadProgress();
+    if (st.v === 2) return st;              // 已经搬过(v1.63 起写入的进度)
+    const m = migrateProgress(cands, st);
+    m.st.v = 2;
+    saveProgress(m.st);
+    return m.st;
+  }
+
   /** Entries kept. 对局统计 caps at 200 and 存档 at 30; this store was the one
    *  with no ceiling, growing by one key per distinct position ever answered
-   *  (puzzles derived from your own games are unbounded). ~57 bytes each, so
+   *  (puzzles derived from your own games are unbounded). ~80 bytes each, so
    *  2000 is well under any quota while being far more than a player reaches. */
   const PROGRESS_MAX = 2000;
 
@@ -744,7 +909,7 @@
     const kept = keys
       .sort((a, b) => rank(b) - rank(a) || String(items[b].last || "").localeCompare(String(items[a].last || "")))
       .slice(0, max);
-    const out = { items: {} };
+    const out = { items: {}, v: st.v };
     for (const k of kept) out.items[k] = items[k];
     return out;
   }
@@ -754,23 +919,54 @@
     return h ? !!h.storageSet(PROGRESS_KEY, JSON.stringify(capProgress(st, PROGRESS_MAX))) : false;
   }
 
+  /** dateStr + n days, local calendar (noon-anchored so DST can't skip a day). */
+  function addDays(dateStr, n) {
+    const parts = String(dateStr).split("-").map(Number);
+    const t = new Date(parts[0], parts[1] - 1, parts[2], 12);
+    t.setDate(t.getDate() + n);
+    const p = (x) => (x < 10 ? "0" + x : "" + x);
+    return t.getFullYear() + "-" + p(t.getMonth() + 1) + "-" + p(t.getDate());
+  }
+
   /**
-   * Fold one answer into the progress state (pure). `wrong` counts mistakes
-   * ever made; `ok` records whether the LAST answer was right, which is what
-   * decides whether a puzzle still belongs in the 错题本.
+   * Fold one answer into the progress state (pure).
+   *   `wrong`  counts mistakes ever made
+   *   `ok`     whether the LAST answer was right (decides 错题本 membership)
+   *   `how`    'solo' | 'hinted' | 'revealed' — 独立 / 用了提示或错过再对 / 看了答案
+   *   `streak` consecutive solo solves, each on or after the previous due date
+   *   `due`    next review date
    */
-  function recordAnswer(prev, key, correct, dateStr) {
+  function recordAnswer(prev, key, correct, dateStr, how) {
     const st = prev && prev.items ? { items: Object.assign({}, prev.items) } : { items: {} };
-    const it = Object.assign({ n: 0, wrong: 0, ok: false }, st.items[key]);
+    const it = Object.assign({ n: 0, wrong: 0, ok: false, streak: 0, hinted: 0, revealed: 0 }, st.items[key]);
     it.n += 1;
-    if (!correct) it.wrong += 1;
-    it.ok = !!correct;
     it.last = dateStr;
+    if (!correct) {
+      it.wrong += 1;
+      it.ok = false;
+      it.streak = 0;
+      if (how === "revealed") it.revealed += 1;
+      it.due = addDays(dateStr, 1);
+    } else {
+      it.ok = true;
+      if (how === "hinted" || how === "revealed") {
+        it.hinted += 1;
+        it.streak = 0;
+        it.due = addDays(dateStr, 1);
+      } else {
+        // 同一天再做一遍不算第二次:间隔是掌握的一部分
+        if (it.streak === 0 || !it.due || dateStr >= it.due) it.streak += 1;
+        it.due = addDays(dateStr, INTERVALS[Math.min(it.streak - 1, INTERVALS.length - 1)]);
+      }
+    }
     st.items[key] = it;
     return st;
   }
 
-  /** Puzzles still to be mastered: answered wrong at some point, not yet right. */
+  function isMastered(it) { return !!(it && it.ok && (it.streak || 0) >= 2); }
+  function isDue(it, today) { return !!(it && it.n > 0 && it.due && it.due <= today); }
+
+  /** Puzzles still to be fixed: answered wrong at some point, not yet right. */
   function unmastered(cands, st) {
     const items = (st && st.items) || {};
     return cands.filter((p) => {
@@ -779,34 +975,43 @@
     });
   }
 
-  /** Counts for the stats panel (pure). */
-  function progressSummary(cands, st) {
+  /** Puzzles whose review date has come (pure). */
+  function dueItems(cands, st, today) {
     const items = (st && st.items) || {};
-    let seen = 0, mastered = 0, wrong = 0;
+    return cands.filter((p) => isDue(items[puzzleKey(p)], today));
+  }
+
+  /** Counts for the stats panel (pure). */
+  function progressSummary(cands, st, today) {
+    const items = (st && st.items) || {};
+    let seen = 0, mastered = 0, learning = 0, wrong = 0, due = 0;
     for (const p of cands) {
       const it = items[puzzleKey(p)];
       if (!it) continue;
       seen += 1;
-      if (it.ok) mastered += 1;
+      if (isMastered(it)) mastered += 1;
+      else if (it.ok) learning += 1;
       if (it.wrong > 0 && !it.ok) wrong += 1;
+      if (today && isDue(it, today)) due += 1;
     }
-    return { total: cands.length, seen: seen, mastered: mastered, wrong: wrong };
+    return { total: cands.length, seen: seen, mastered: mastered, learning: learning, wrong: wrong, due: due };
   }
 
   /**
    * Free-practice order (pure given `rand`): never-seen first, then the ones
-   * still unmastered, then the rest — shuffled inside each band so repeat
-   * sessions are not identical.
+   * still in the 错题本, then the ones due for review, then the rest —
+   * shuffled inside each band so repeat sessions are not identical.
    */
-  function orderPool(cands, st, rand) {
+  function orderPool(cands, st, rand, today) {
     const items = (st && st.items) || {};
     const band = (p) => {
       const it = items[puzzleKey(p)];
       if (!it) return 0;
       if (it.wrong > 0 && !it.ok) return 1;
-      return 2;
+      if (today && isDue(it, today)) return 2;
+      return 3;
     };
-    const bands = [[], [], []];
+    const bands = [[], [], [], []];
     for (const p of cands) bands[band(p)].push(p);
     const r = rand || Math.random;
     for (const b of bands) {
@@ -815,7 +1020,7 @@
         [b[i], b[j]] = [b[j], b[i]];
       }
     }
-    return bands[0].concat(bands[1], bands[2]);
+    return bands[0].concat(bands[1], bands[2], bands[3]);
   }
 
   // --- 每日挑战 (daily challenge) ------------------------------------------
@@ -847,14 +1052,8 @@
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
   }
 
-  /** Calendar day before dateStr (noon-anchored so DST can't skip a day). */
-  function prevDayStr(dateStr) {
-    const parts = dateStr.split("-").map(Number);
-    const t = new Date(parts[0], parts[1] - 1, parts[2], 12);
-    t.setDate(t.getDate() - 1);
-    const p = (n) => (n < 10 ? "0" + n : "" + n);
-    return t.getFullYear() + "-" + p(t.getMonth() + 1) + "-" + p(t.getDate());
-  }
+  /** Calendar day before dateStr. */
+  function prevDayStr(dateStr) { return addDays(dateStr, -1); }
 
   /** mulberry32 seeded by FNV-1a of the date — same day, same sequence. */
   function seededRng(dateStr) {
@@ -880,6 +1079,19 @@
       [list[i], list[j]] = [list[j], list[i]];
     }
     return list.slice(0, n);
+  }
+
+  /**
+   * 每日的选题(pure):到期复习的题先进,不够再从其余题里按日期种子补。
+   * 「每日」因此从随机 5 题变成真正的复习队列。
+   */
+  function pickDaily(candidates, st, dateStr, n) {
+    const due = dueItems(candidates, st, dateStr);
+    const dueSet = new Set(due.map(puzzleKey));
+    const rest = candidates.filter((p) => !dueSet.has(puzzleKey(p)));
+    const picked = pickForDate(due, dateStr, n);
+    if (picked.length < n) return picked.concat(pickForDate(rest, dateStr, n - picked.length));
+    return picked;
   }
 
   /**
@@ -909,18 +1121,23 @@
 
   /**
    * Today's puzzle set: rebuilt from the stored snapshot, or picked fresh
-   * (date-seeded) and snapshotted on the first open of the day.
+   * (due-first, date-seeded) and snapshotted on the first open of the day.
+   * 禁手题只在到期时进每日 —— 新题一律是三种战术题。
    */
   function dailyPoolFor(date) {
     let st = loadDaily() || {};
     if (st.date !== date || !Array.isArray(st.puzzles) || !st.puzzles.length) {
-      const picked = pickForDate(buildCandidates(), date, DAILY_COUNT);
+      const cands = buildCandidates();
+      const prog = progressFor(cands);
+      const fresh = cands.filter((p) => p.type !== "forbid" || isDue(prog.items && prog.items[puzzleKey(p)], date));
+      const picked = pickDaily(fresh, prog, date, DAILY_COUNT);
       st.date = date;
       st.puzzles = picked.map((p) => {
         const stones = stonesOf(p.board);
         return {
           side: p.side, type: p.type, source: p.source, b: stones.b, w: stones.w,
           sol: p.solutions.map((s) => [s.r, s.c]),
+          renju: !!p.renju, gameId: p.gameId || null, ply: p.ply,
         };
       });
       saveDaily(st);
@@ -928,7 +1145,8 @@
     const pool = [];
     for (const def of st.puzzles) {
       // re-validate through the same predicates as every other puzzle
-      const p = makePuzzle(boardOf(def), def.side, def.type, def.source || SRC_BANK, def.sol);
+      const p = makePuzzle(boardOf(def), def.side, def.type, def.source || SRC_BANK, def.sol,
+        { renju: !!def.renju, gameId: def.gameId, ply: def.ply });
       if (p) pool.push(p);
     }
     return { state: st, pool: pool };
@@ -953,8 +1171,9 @@
   // --- mini-board rendering (isolated canvas, theme-neutral) ---
   /**
    * marks: plain dots {r,c,color} — or, for a played-out sequence, numbered
-   * ghost stones {r,c,n,stone,key}. `dots` draws the verdict dots on top of a
-   * sequence so the answer given is still visible.
+   * ghost stones {r,c,n,stone,key} — or hollow rings {r,c,ring} (提示:候选点
+   * 与威胁棋子). `dots` draws the verdict dots on top of a sequence so the
+   * answer given is still visible.
    */
   function drawBoard(marks, dots) {
     const cv = document.getElementById("practice-board");
@@ -1005,17 +1224,43 @@
         g.fillText(String(m.n), x, y + step * 0.02);
         continue;
       }
+      if (m.ring) {
+        // 空心环:提示用。围在棋子外(威胁)或落在空点上(候选)—— 与圆点不同形,
+        // 色弱也分得出「这是提示」而不是「这是答案」。
+        g.save();
+        g.beginPath();
+        g.arc(x, y, step * (cur.board[m.r][m.c] ? D.STONE_R + 0.08 : 0.3), 0, Math.PI * 2);
+        g.strokeStyle = m.ring;
+        g.lineWidth = Math.max(1.5, dpr * 1.6);
+        g.setLineDash(cur.board[m.r][m.c] ? [] : [Math.max(2, dpr * 2), Math.max(2, dpr * 2)]);
+        g.stroke();
+        g.restore();
+        continue;
+      }
       g.beginPath();
       g.arc(x, y, step * 0.2, 0, Math.PI * 2);
       g.fillStyle = m.color;
       g.fill();
+      // 答案点带坐标标号,不只靠颜色(红/绿)分辨
+      if (m.label) {
+        g.fillStyle = "#fff";
+        g.font = "700 " + Math.round(step * 0.34) + "px -apple-system, system-ui, sans-serif";
+        g.textAlign = "center";
+        g.textBaseline = "middle";
+        g.fillText(m.label, x, y + step * 0.01);
+      }
     }
+  }
+
+  function coordLabel(r, c) {
+    return String.fromCharCode(65 + c) + (SIZE - r);
   }
 
   function taskText() {
     const who = t(cur.side === "b" ? "side.black" : "side.white");
     if (cur.type === "win1") return t("practice.task.win1", { who: who });
     if (cur.type === "vcf") return t("practice.task.vcf", { who: who });
+    if (cur.type === "forbid") return t("practice.task.forbid", { who: who });
     return t("practice.task.defend", { who: who });
   }
 
@@ -1036,7 +1281,17 @@
       }
     }
     const src = document.getElementById("practice-source");
-    if (src) src.textContent = cur ? t(isFromGame(cur.source) ? "practice.src.fromGame" : "practice.src.fromBank") : "";
+    if (src) {
+      let text = "";
+      if (cur) {
+        text = t(isFromGame(cur.source) ? "practice.src.fromGame" : "practice.src.fromBank");
+        if (cur && cur.renju) text += t("practice.src.renju");
+        if (cur && isFromGame(cur.source) && cur.ply) text += t("practice.src.ply", { n: cur.ply });
+      }
+      src.textContent = text;
+    }
+    const back = document.getElementById("practice-source-open");
+    if (back) back.hidden = !(cur && cur.gameId && deps.openSource);
   }
 
   function setTitle(text) {
@@ -1054,15 +1309,30 @@
     if (closeBtn) setTimeout(() => closeBtn.focus(), 0);
   }
 
+  function syncHintButtons() {
+    const hintBtn = document.getElementById("practice-hint");
+    const revealBtn = document.getElementById("practice-reveal");
+    const live = !!cur && !answered;
+    if (hintBtn) {
+      hintBtn.hidden = !live;
+      hintBtn.disabled = !live || hintLevel >= 2;
+      hintBtn.textContent = hintLevel >= 2 ? t("practice.hint.used") : hintLevel === 1 ? t("practice.hint.more") : t("practice.hint");
+    }
+    if (revealBtn) revealBtn.hidden = !live;
+  }
+
   function showPuzzle() {
     cur = pool[idx];
     answered = false;
+    hintLevel = 0;
+    attempts = 0;
     const task = document.getElementById("practice-task");
     if (task) task.textContent = taskText();
     setFeedback("", "");
     const next = document.getElementById("practice-next");
     if (next) next.hidden = true;
     setProgress();
+    syncHintButtons();
     requestAnimationFrame(() => drawBoard(null));
   }
 
@@ -1098,12 +1368,140 @@
       }
     } else {
       if (task) task.textContent = t("practice.roundDone");
-      setFeedback(t("practice.roundScore", { score: score, total: pool.length }), "good");
+      // 一轮结束给一句具体的下一步:到期复习还有几题、错题本还有几题
+      const cands = buildCandidates();
+      const prog = progressFor(cands);
+      const due = dueItems(cands, prog, todayStr()).length;
+      const wrong = unmastered(cands, prog).length;
+      let tail = "";
+      if (wrong) tail = t("practice.round.nextWrong", { n: wrong });
+      else if (due) tail = t("practice.round.nextDue", { n: due });
+      else tail = t("practice.round.nextTomorrow");
+      setFeedback(t("practice.roundScore", { score: score, total: pool.length }) + " " + tail, "good");
       if (next) { next.hidden = false; next.textContent = t("practice.again"); }
     }
     syncWrongButton();
+    syncHintButtons();
     setProgress(); // reflects score with cur=null ("共 N 题 · 答对 X")
     clearMiniBoard();
+  }
+
+  /** The stones that make the threat / the line the answer completes. */
+  function threatMarks(p) {
+    const out = [];
+    const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
+    const lineStones = (r, c, color) => {
+      // 从 (r,c) 出发,找含最多 color 子的方向,返回那条线上的己方子
+      let best = [];
+      for (const [dr, dc] of DIRS) {
+        const cells = [];
+        for (const sgn of [1, -1]) {
+          let rr = r + dr * sgn, cc = c + dc * sgn;
+          while (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && p.board[rr][cc] === color) {
+            cells.push({ r: rr, c: cc });
+            rr += dr * sgn; cc += dc * sgn;
+          }
+        }
+        if (cells.length > best.length) best = cells;
+      }
+      return best;
+    };
+    const s0 = p.solutions[0];
+    if (p.type === "win1") {
+      for (const q of lineStones(s0.r, s0.c, p.side)) out.push({ r: q.r, c: q.c, ring: "rgba(47,158,94,0.9)" });
+    } else if (p.type === "defend") {
+      const oppo = Core.opp(p.side);
+      for (const w of winCells(p.board, oppo, p.renju)) {
+        for (const q of lineStones(w.r, w.c, oppo)) out.push({ r: q.r, c: q.c, ring: "rgba(192,57,43,0.9)" });
+      }
+    } else if (p.type === "vcf") {
+      for (const q of lineStones(s0.r, s0.c, p.side)) out.push({ r: q.r, c: q.c, ring: "rgba(47,158,94,0.9)" });
+    } else if (p.type === "forbid") {
+      for (const s of p.solutions) {
+        for (const q of lineStones(s.r, s.c, "b")) out.push({ r: q.r, c: q.c, ring: "rgba(192,57,43,0.9)" });
+      }
+    }
+    return out;
+  }
+
+  /** 候选点:全部正解 + 邻近的空点,凑到 3 个,顺序打乱后不泄露哪个是答案。 */
+  function candidateMarks(p) {
+    const cells = p.solutions.slice(0, 3).map((s) => ({ r: s.r, c: s.c }));
+    const has = (r, c) => cells.some((x) => x.r === r && x.c === c);
+    const s0 = p.solutions[0];
+    for (let d = 1; d <= 3 && cells.length < 3; d++) {
+      for (const [dr, dc] of [[0, d], [d, 0], [0, -d], [-d, 0], [d, d], [-d, -d], [d, -d], [-d, d]]) {
+        const r = s0.r + dr, c = s0.c + dc;
+        if (r < 0 || r >= SIZE || c < 0 || c >= SIZE || p.board[r][c] || has(r, c)) continue;
+        cells.push({ r, c });
+        if (cells.length >= 3) break;
+      }
+    }
+    // 固定顺序会泄露答案(正解总在第一个),按坐标排序即可 —— 与答案无关
+    cells.sort((a, b) => a.r - b.r || a.c - b.c);
+    return cells.map((q) => ({ r: q.r, c: q.c, ring: "rgba(201,145,30,0.95)" }));
+  }
+
+  function hintText(level) {
+    const key = "practice.hint." + cur.type + "." + level;
+    return t(key);
+  }
+
+  function applyHint() {
+    if (!cur || answered || hintLevel >= 2) return;
+    hintLevel++;
+    const marks = hintLevel === 1 ? threatMarks(cur) : threatMarks(cur).concat(candidateMarks(cur));
+    drawBoard(marks, null);
+    setFeedback(hintText(hintLevel), "hint");
+    syncHintButtons();
+  }
+
+  /** 摆出答案:正解点带坐标标号;VCF 摆整条序列。 */
+  function showAnswer(clicked, good) {
+    const marks = [];
+    if (clicked) marks.push({ r: clicked.r, c: clicked.c, color: good ? "rgba(47,158,94,0.95)" : "rgba(192,57,43,0.95)", label: good ? "✓" : "✗" });
+    if (!good) {
+      for (const s of cur.solutions) marks.push({ r: s.r, c: s.c, color: "rgba(47,158,94,0.8)", label: coordLabel(s.r, s.c).length > 3 ? "" : coordLabel(s.r, s.c) });
+    }
+    // vcf: the answer is a whole forced sequence — a single dot teaches nothing,
+    // so play the line out (my four → their only reply → … → five).
+    let line = [];
+    if (cur.type === "vcf") {
+      const from = good ? clicked : cur.solutions[0];
+      line = forcedLine(cur.board, cur.side, from, cur.renju).map((m) => ({
+        r: m.r, c: m.c, n: m.n, stone: m.color, key: m.color === cur.side,
+      }));
+    }
+    drawBoard(line.length ? line : marks, line.length ? marks : null);
+  }
+
+  function answerCoords() {
+    return cur.solutions.slice(0, 3).map((s) => coordLabel(s.r, s.c)).join(" / ");
+  }
+
+  function wrongText() {
+    return t("practice.wrong." + cur.type, { cells: answerCoords() });
+  }
+
+  function endPuzzle() {
+    answered = true;
+    syncWrongButton();
+    syncHintButtons();
+    setProgress(); // reflect the score immediately, not only on the next puzzle
+    const next = document.getElementById("practice-next");
+    if (next) { next.hidden = false; next.textContent = t(idx + 1 < pool.length ? "practice.next" : "practice.seeResult"); }
+  }
+
+  function reveal() {
+    if (!cur || answered) return;
+    const A = global.GobanAudio;
+    if (A) A.playAnswer(false);
+    // 看答案记为一次「看过」:不算错题本里的又一次错(attempts 为 0 时才计),
+    // 但 streak 归零、明天到期 —— 看过答案的题不会被当成会了。
+    saveProgress(recordAnswer(loadProgress(), puzzleKey(cur), false, todayStr(), "revealed"));
+    showAnswer(null, false);
+    setFeedback(t("practice.revealed", { cells: answerCoords() }) + " " + wrongText(), "bad");
+    endPuzzle();
   }
 
   function onBoardClick(ev) {
@@ -1121,7 +1519,6 @@
     const c = Math.round((ev.clientX - rect.left - bs - pad) / step);
     const r = Math.round((ev.clientY - rect.top - bs - pad) / step);
     if (r < 0 || r >= SIZE || c < 0 || c >= SIZE || cur.board[r][c]) return;
-    answered = true;
     const good = cur.solutions.some((s) => s.r === r && s.c === c);
     // 声音。练习(130 题)+ 每日是一整个模式,而它此前对 GobanAudio 的引用数是 0:
     // 主棋盘落一子排 4 个音频节点,这里排 0 个。和 v1.39 那次「练习自带一块棋盘」
@@ -1129,35 +1526,31 @@
     // 走同一个 GobanAudio,所以「声音」开关仍然是一处真源。
     const A = global.GobanAudio;
     if (A) { A.playMove(cur.side); A.playAnswer(good); }
-    if (good) score++;
-    saveProgress(recordAnswer(loadProgress(), puzzleKey(cur), good, todayStr()));
-    syncWrongButton();
-    setProgress(); // reflect the score immediately, not only on the next puzzle
-    const marks = [{ r, c, color: good ? "rgba(47,158,94,0.95)" : "rgba(192,57,43,0.95)" }];
     if (!good) {
-      for (const s of cur.solutions) marks.push({ r: s.r, c: s.c, color: "rgba(47,158,94,0.8)" });
+      attempts++;
+      // 第一次错就进错题本(与 v1.27 同一条定义);再错一次才摆答案。
+      if (attempts === 1) saveProgress(recordAnswer(loadProgress(), puzzleKey(cur), false, todayStr(), "solo"));
+      if (attempts >= 2) {
+        showAnswer({ r, c }, false);
+        setFeedback(wrongText(), "bad");
+        endPuzzle();
+        return;
+      }
+      // 第一次错:标出错点,自动给一级提示,再试一次
+      if (hintLevel < 1) hintLevel = 1;
+      const marks = threatMarks(cur).concat([{ r, c, color: "rgba(192,57,43,0.95)", label: "✗" }]);
+      drawBoard(marks, null);
+      setFeedback(t("practice.retry") + " " + hintText(1), "bad");
+      syncWrongButton();
+      syncHintButtons();
+      return;
     }
-    // vcf: the answer is a whole forced sequence — a single dot teaches nothing,
-    // so play the line out (my four → their only reply → … → five).
-    let line = [];
-    if (cur.type === "vcf") {
-      const from = good ? { r, c } : cur.solutions[0];
-      line = forcedLine(cur.board, cur.side, from).map((m) => ({
-        r: m.r, c: m.c, n: m.n, stone: m.color, key: m.color === cur.side,
-      }));
-    }
-    drawBoard(line.length ? line : marks, line.length ? marks : null);
-    if (good) {
-      setFeedback(t("practice.correct"), "good");
-    } else {
-      setFeedback(
-        t(cur.type === "win1" ? "practice.wrong.win1"
-          : cur.type === "vcf" ? "practice.wrong.vcf"
-          : "practice.wrong.defend"),
-        "bad");
-    }
-    const next = document.getElementById("practice-next");
-    if (next) { next.hidden = false; next.textContent = t(idx + 1 < pool.length ? "practice.next" : "practice.seeResult"); }
+    const how = hintLevel > 0 || attempts > 0 ? "hinted" : "solo";
+    if (how === "solo") score++;
+    saveProgress(recordAnswer(loadProgress(), puzzleKey(cur), true, todayStr(), how));
+    showAnswer({ r, c }, true);
+    setFeedback(t(how === "solo" ? "practice.correct" : "practice.correct.hinted"), "good");
+    endPuzzle();
   }
 
   function onNext() {
@@ -1177,9 +1570,17 @@
     pool = buildPool();
     idx = 0;
     score = 0;
+    syncSkillButtons();
     if (!pool.length) {
+      cur = null;
       const task = document.getElementById("practice-task");
       if (task) task.textContent = t("practice.empty");
+      setFeedback(skill === "forbid" ? t("practice.empty.forbid") : "", "");
+      clearMiniBoard();
+      setProgress();
+      syncHintButtons();
+      const next = document.getElementById("practice-next");
+      if (next) next.hidden = true;
       return;
     }
     showPuzzle();
@@ -1188,7 +1589,8 @@
   /** 错题本: only the puzzles answered wrong and not since gotten right. */
   function startWrong() {
     runMode = "wrong";
-    pool = unmastered(buildCandidates(), loadProgress());
+    const cands = buildCandidates();
+    pool = unmastered(cands, progressFor(cands));
     idx = 0;
     score = 0;
     setTitle(t("practice.wrongBook"));
@@ -1200,6 +1602,7 @@
       setFeedback(t("practice.book.emptyHint"), "");
       clearMiniBoard();
       setProgress();
+      syncHintButtons();
       const next = document.getElementById("practice-next");
       if (next) next.hidden = true;
       syncWrongButton();
@@ -1217,11 +1620,21 @@
     btn.disabled = runMode === "wrong" && !n;
   }
 
+  function syncSkillButtons() {
+    const seg = document.getElementById("practice-skill");
+    if (!seg) return;
+    seg.hidden = runMode !== "free";
+    seg.querySelectorAll("button[data-skill]").forEach((b) => {
+      b.classList.toggle("active", b.dataset.skill === skill);
+    });
+  }
+
   /** Practice progress for the stats panel; null before anything was answered. */
   function practiceSummary() {
-    const st = loadProgress();
+    const cands = buildCandidates();
+    const st = progressFor(cands);
     if (!st || !st.items || !Object.keys(st.items).length) return null;
-    return progressSummary(buildCandidates(), st);
+    return progressSummary(cands, st, todayStr());
   }
 
   /** Re-run today's set (after finishing); completion stays counted once. */
@@ -1238,6 +1651,7 @@
     pool = r.pool;
     idx = 0;
     score = 0;
+    syncSkillButtons();
     if (!pool.length) {
       const task = document.getElementById("practice-task");
       if (task) task.textContent = t("practice.empty");
@@ -1259,22 +1673,49 @@
       const next = document.getElementById("practice-next");
       if (next) { next.hidden = false; next.textContent = t("daily.replay"); }
       setProgress();
+      syncHintButtons();
       clearMiniBoard();
       return;
     }
     showPuzzle();
   }
 
-  function open() {
+  function open(opts) {
     const m = document.getElementById("practice-modal");
     if (m) m.classList.add("show");
     setTitle(t("practice.title"));
     setModalLabel(t("practice.title"));
     const wrongBtn = document.getElementById("practice-wrong");
     if (wrongBtn) wrongBtn.hidden = false;
+    if (opts && opts.skill) skill = opts.skill;
     start();
     syncWrongButton();
     focusPracticeClose();
+  }
+
+  /**
+   * 从某一局某一手直接进练习(终局卡 / 复盘侧栏的「练这一手」)。找不到对应题
+   * (那一手没有可证明的战术)时退回普通练习,并返回 false。
+   */
+  function openFor(gameId, ply) {
+    const cands = buildCandidates();
+    const hit = cands.filter((p) => p.gameId === gameId && p.ply === ply);
+    if (!hit.length) { open(); return false; }
+    const m = document.getElementById("practice-modal");
+    if (m) m.classList.add("show");
+    setTitle(t("practice.title"));
+    setModalLabel(t("practice.title"));
+    const wrongBtn = document.getElementById("practice-wrong");
+    if (wrongBtn) wrongBtn.hidden = false;
+    runMode = "free";
+    pool = hit.concat(orderPool(cands.filter((p) => hit.indexOf(p) < 0), progressFor(cands), null, todayStr()).slice(0, 4));
+    idx = 0;
+    score = 0;
+    syncSkillButtons();
+    showPuzzle();
+    syncWrongButton();
+    focusPracticeClose();
+    return true;
   }
 
   function openDaily() {
@@ -1299,6 +1740,12 @@
     return !!(m && m.classList.contains("show"));
   }
 
+  /** 到期复习的题数(侧栏「每日」入口上的角标用)。 */
+  function dueCount() {
+    const cands = buildCandidates();
+    return dueItems(cands, progressFor(cands), todayStr()).length;
+  }
+
   function wire() {
     const cv = document.getElementById("practice-board");
     if (cv) cv.addEventListener("click", onBoardClick);
@@ -1306,6 +1753,25 @@
     if (next) next.addEventListener("click", onNext);
     const closeBtn = document.getElementById("practice-close");
     if (closeBtn) closeBtn.addEventListener("click", close);
+    const hintBtn = document.getElementById("practice-hint");
+    if (hintBtn) hintBtn.addEventListener("click", applyHint);
+    const revealBtn = document.getElementById("practice-reveal");
+    if (revealBtn) revealBtn.addEventListener("click", reveal);
+    const backBtn = document.getElementById("practice-source-open");
+    if (backBtn) backBtn.addEventListener("click", () => {
+      if (cur && cur.gameId && deps.openSource) {
+        const id = cur.gameId, ply = cur.ply;
+        close();
+        deps.openSource(id, ply);
+      }
+    });
+    const skillSeg = document.getElementById("practice-skill");
+    if (skillSeg) skillSeg.addEventListener("click", (ev) => {
+      const b = ev.target.closest("button[data-skill]");
+      if (!b || b.dataset.skill === skill) return;
+      skill = b.dataset.skill;
+      start();
+    });
     const wrongBtn = document.getElementById("practice-wrong");
     if (wrongBtn) wrongBtn.addEventListener("click", () => {
       if (runMode === "wrong") { setTitle(t("practice.title")); setModalLabel(t("practice.title")); start(); }
@@ -1317,13 +1783,13 @@
   }
 
   global.GobanPractice = {
-    init, wire, open, openDaily, close, isOpen, dailySummary, practiceSummary,
+    init, wire, open, openFor, openDaily, close, isOpen, dailySummary, practiceSummary, dueCount,
     // pure daily helpers, exposed for unit tests
-    daily: { pickForDate, advanceDaily, prevDayStr, seededRng },
+    daily: { pickForDate, pickDaily, advanceDaily, prevDayStr, seededRng },
     // pure puzzle predicates + the curated bank, exposed for unit tests
     // and for scripts/gen-puzzles.mjs (which validates through this very code)
-    puzzles: { BUILTINS, boardOf, solutionsFor, makePuzzle, buildCandidates, forcedLine, lineDepth },
+    puzzles: { BUILTINS, FORBID_BUILTINS, boardOf, solutionsFor, makePuzzle, buildCandidates, forcedLine, lineDepth, winCells, canonicalBoardStr },
     // pure progress helpers, exposed for unit tests
-    progress: { puzzleKey, recordAnswer, unmastered, progressSummary, orderPool, capProgress, PROGRESS_MAX },
+    progress: { puzzleKey, legacyKey, migrateProgress, recordAnswer, unmastered, dueItems, progressSummary, orderPool, capProgress, addDays, isMastered, PROGRESS_MAX, INTERVALS },
   };
 })(typeof window !== "undefined" ? window : globalThis);

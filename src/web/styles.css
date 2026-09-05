@@ -133,9 +133,10 @@
          棋盘是方的,只按宽度给就会在矮窗口里把弹层撑到要滚。
          --modal-board-chrome 是弹层里除棋盘之外的高度(标题 + 题面行 + 反馈行 +
          按钮行),实测 181,留 3px 余量写 184。它是个量出来的常数,所以配了闸门:
-         有人往弹层里加内容而不调这个数,闸门会报,而不是让弹层悄悄开始滚。 */
+         有人往弹层里加内容而不调这个数,闸门会报,而不是让弹层悄悄开始滚。
+         v1.63 加了题型筛选一行与来源/回原局一行:实测 221,写 224。 */
       --modal-w-board: 640px;
-      --modal-board-chrome: 184px;
+      --modal-board-chrome: 224px;
       --icon-size: 18px;
       --icon-stroke: 2;
       --font-num: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
@@ -1274,3 +1275,105 @@
    1024×600(最小支持窗口)下 33−16 = 17px,都够。闸门 AX 守这两档。 */
 :root { --wood-pad: 0px; }
 #board { border-radius: var(--radius-lg); }
+
+    /* ===== v1.63:学习闭环 ===== */
+    /* 只给读屏的文本:视觉上零尺寸,AX 树里仍是一段话 */
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+    #board:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* —— 终局总结卡:侧栏顶部,棋盘保持可见 —— */
+    .end-card {
+      margin: 8px 0 4px; padding: 10px 12px;
+      border: 1px solid var(--card-border);
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--card-border));
+      border-radius: var(--radius-md);
+      background: var(--btn-ghost);
+      background: color-mix(in srgb, var(--accent) 8%, transparent);
+      font-size: var(--fs-body); line-height: var(--lh-text);
+    }
+    .end-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .end-card-head strong { font-size: var(--fs-body); font-weight: 700; color: var(--fg); }
+    .end-card-x { padding: 2px 8px; font-size: var(--fs-icon); line-height: 1; color: var(--muted); }
+    .end-card-body { margin: 6px 0 8px; color: var(--text); }
+    .endcard-key { font-weight: 600; }
+    .endcard-line, .endcard-more { font-size: var(--fs-ui); margin-top: 2px; }
+    .end-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .end-card-actions .tool-btn { flex: 1 1 auto; }
+
+    /* —— 重下关键一手:进行中的横条 —— */
+    .retry-bar {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      margin: 6px 0 2px; padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      background: var(--btn-ghost);
+      background: color-mix(in srgb, #c9911e 14%, transparent);
+      border: 1px solid var(--card-border);
+      border: 1px solid color-mix(in srgb, #c9911e 45%, var(--card-border));
+      font-size: var(--fs-ui); color: var(--text);
+    }
+    .retry-bar[hidden] { display: none; }
+
+    /* —— 常驻复盘面板 —— */
+    .review-side {
+      margin-top: 8px; padding: 8px 10px 10px;
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-md);
+      background: var(--btn-ghost);
+    }
+    .review-side[hidden] { display: none; }
+    .review-side-head { display: flex; align-items: center; gap: 4px; }
+    .review-side-head .side-h { margin: 0; }
+    .review-side-head .spacer { flex: 1; }
+    .review-side-head .text-link { padding: 4px 6px; }
+    .review-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 8px; }
+    .review-chip {
+      -webkit-appearance: none; appearance: none; cursor: pointer;
+      min-width: 28px; height: 24px; padding: 0 6px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--card-border);
+      background: transparent; color: var(--text);
+      font: inherit; font-size: var(--fs-ui); font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    /* 证据强度也画在形状上:可证明 = 实心边;引擎比较 = 实线;局势波动 = 虚线 */
+    .review-chip.tier-hard { border-color: var(--bad); border-width: 2px; }
+    .review-chip.tier-engine { border-color: var(--bad); }
+    .review-chip.tier-soft { border-style: dashed; color: var(--muted); }
+    .review-chip.cur {
+      background: var(--btn-hover);
+      background: color-mix(in srgb, var(--accent) 32%, transparent);
+    }
+    .review-explain { font-size: var(--fs-ui); line-height: var(--lh-text); color: var(--text); }
+    .rs-head { font-weight: 600; font-size: var(--fs-body); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+    .rs-lines { margin: 6px 0 0; padding-left: 18px; }
+    .rs-lines li { margin: 2px 0; }
+    .rb-tier {
+      font-size: var(--fs-micro); font-weight: 600; color: var(--muted);
+      padding: 1px 6px; border-radius: 999px;
+      border: 1px solid var(--card-border);
+      white-space: nowrap;
+    }
+    .tier-hard .rb-tier { color: var(--bad); border-color: var(--bad); }
+    .review-side-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .review-side-actions .tool-btn { flex: 1 1 auto; }
+    .review-blunder-row { flex-wrap: wrap; }
+    .review-blunder-row.tier-soft .rb-move { color: var(--muted); }
+
+    /* —— 对局库 —— */
+    .games-head { display: flex; align-items: baseline; gap: 8px; margin: 12px 0 8px; }
+    .games-head .side-h { margin: 0; }
+    .games-head .muted { font-size: var(--fs-ui); }
+    .games-list { max-height: 30vh; }
+    .games-list:empty { display: none; }
+    .game-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .game-name { font-size: var(--fs-ui); color: var(--text); min-width: 0; }
+
+    /* —— 练习:题型筛选、提示、来源 —— */
+    .practice-skill { margin: 0 0 8px; width: 100%; }
+    .practice-skill[hidden] { display: none; }
+    .practice-source-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+    .practice-source-row .text-link { padding: 2px 6px; }
+    .practice-feedback.hint { color: #c9911e; color: color-mix(in srgb, #c9911e 85%, var(--fg)); }

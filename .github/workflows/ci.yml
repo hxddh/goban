@@ -71,6 +71,12 @@ jobs:
           PLAYWRIGHT_MODULE: ${{ github.workspace }}/node_modules/playwright/index.mjs
           PLAYWRIGHT_CHROMIUM: ${{ steps.pw.outputs.chromium }}
         run: node scripts/test-daily.mjs
+      - name: 学习闭环 regression (v1.63)
+        env:
+          REQUIRE_PLAYWRIGHT: "1"
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/node_modules/playwright/index.mjs
+          PLAYWRIGHT_CHROMIUM: ${{ steps.pw.outputs.chromium }}
+        run: node scripts/test-loop.mjs
 
   strength:
     # Self-play regression is slower and only meaningful for engine-touching

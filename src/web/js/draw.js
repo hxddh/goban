@@ -711,6 +711,21 @@
       ctx.stroke();
     }
 
+    // 键盘游标(v1.63):棋盘有焦点时方向键移动的那个交叉点。方角框比禁手的小方框
+    // 大一圈、实线、用提示色 —— 四套主题里这个尺寸的方框没人用,与禁手不混。
+    const cursor = m.cursor;
+    if (cursor && cursor.r >= 0 && cursor.c >= 0) {
+      const x = pad + cursor.c * step;
+      const y = pad + cursor.r * step;
+      const s2 = Math.max(6, step * 0.38);
+      ctx.save();
+      ctx.strokeStyle = th.hint || "rgba(40,110,180,0.75)";
+      ctx.lineWidth = Math.max(2, step * 0.08);
+      ctx.lineJoin = "round";
+      ctx.strokeRect(x - s2, y - s2, s2 * 2, s2 * 2);
+      ctx.restore();
+    }
+
     // Hint marker (suggested move, not placed)
     const hint = m.hint;
     if (hint && hint.r >= 0 && hint.c >= 0 && !board[hint.r][hint.c]) {

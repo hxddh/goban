@@ -1346,23 +1346,67 @@ const Practice = ctx.GobanPractice;
   assert(Pr.unmastered(cands, st).length === 1, "missing it again re-enters 错题本");
 
   st = Pr.recordAnswer(st, keys[1], true, "2026-07-25");
-  const sum = Pr.progressSummary(cands, st);
-  assert(sum.total === cands.length && sum.seen === 2 && sum.mastered === 1 && sum.wrong === 1,
-    "progress summary counts " + JSON.stringify(sum));
+  // v1.63:一次答对不是掌握。独立答对一次 = 在学(learning),到期后再独立答对才算掌握。
+  let sum = Pr.progressSummary(cands, st, "2026-07-25");
+  assert(sum.total === cands.length && sum.seen === 2 && sum.mastered === 0 && sum.learning === 1 && sum.wrong === 1,
+    "progress summary counts (one solve is learning, not mastered) " + JSON.stringify(sum));
+  assert(st.items[keys[1]].streak === 1 && st.items[keys[1]].due === "2026-07-26",
+    "first unaided solve schedules a review for tomorrow");
+  // 同一天再做对一遍不算第二次
+  st = Pr.recordAnswer(st, keys[1], true, "2026-07-25");
+  assert(st.items[keys[1]].streak === 1, "a same-day repeat does not advance the streak");
+  assert(Pr.dueItems(cands, st, "2026-07-25").length === 0 && Pr.dueItems(cands, st, "2026-07-26").length >= 1,
+    "the puzzle is due tomorrow, not today");
+  // 到期后独立做对 → 掌握,间隔拉到 3 天
+  st = Pr.recordAnswer(st, keys[1], true, "2026-07-26");
+  sum = Pr.progressSummary(cands, st, "2026-07-26");
+  assert(sum.mastered === 1 && st.items[keys[1]].due === "2026-07-29",
+    "an unaided solve after the due date counts as mastered and spaces the next review to 3 days");
+  // 看过答案 / 用了提示的答对不算:streak 归零,明天再来
+  st = Pr.recordAnswer(st, keys[1], true, "2026-07-29", "hinted");
+  assert(st.items[keys[1]].streak === 0 && st.items[keys[1]].ok === true && st.items[keys[1]].due === "2026-07-30",
+    "a hinted solve keeps it out of 错题本 but resets mastery");
+  assert(Pr.progressSummary(cands, st, "2026-07-29").mastered === 0, "hinted solve is not mastery");
+  st = Pr.recordAnswer(st, keys[2], false, "2026-07-29", "revealed");
+  assert(st.items[keys[2]].revealed === 1 && st.items[keys[2]].wrong === 1 && !st.items[keys[2]].ok,
+    "看答案 is recorded as revealed and enters 错题本");
+  // 反证:INTERVALS 必须递增,否则「间隔」是假的
+  assert(Pr.INTERVALS.every((v, i) => i === 0 || v > Pr.INTERVALS[i - 1]), "review intervals grow");
 
-  // ordering: never-seen first, unmastered next, mastered last
+  // ordering: never-seen first, 错题 next, due next, the rest last
   const seq = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
   let i = 0;
   const rand = () => seq[i++ % seq.length];
-  const ordered = Pr.orderPool(cands, st, rand);
+  const today = "2026-07-30";
+  const ordered = Pr.orderPool(cands, st, rand, today);
   assert(ordered.length === cands.length, "orderPool keeps every puzzle");
   const bandOf = (p) => {
     const it = st.items[Pr.puzzleKey(p)];
     if (!it) return 0;
-    return it.wrong > 0 && !it.ok ? 1 : 2;
+    if (it.wrong > 0 && !it.ok) return 1;
+    return it.due && it.due <= today ? 2 : 3;
   };
   const bands = ordered.map(bandOf);
-  assert(bands.join("") === bands.slice().sort().join(""), "orderPool bands: 未做 → 错题 → 已掌握");
+  assert(bands.join("") === bands.slice().sort().join(""), "orderPool bands: 未做 → 错题 → 到期 → 其余");
+
+  // 对称去重(v1.63):旋转/镜像后的同一题共用一条进度,旧键上的进度搬到新键
+  {
+    const p0 = cands[0];
+    const rot = Core.emptyBoard();
+    for (let r = 0; r < 15; r++) for (let c = 0; c < 15; c++) rot[c][14 - r] = p0.board[r][c];
+    const p1 = Object.assign({}, p0, { board: rot });
+    assert(Pr.puzzleKey(p0) === Pr.puzzleKey(p1), "puzzleKey is the same for a rotated position");
+    assert(Pr.legacyKey(p0) !== Pr.legacyKey(p1), "…and the v1.27 key was not (反证)");
+    const renjuTwin = Object.assign({}, p0, { renju: true });
+    assert(Pr.puzzleKey(renjuTwin) !== Pr.puzzleKey(p0), "the rule is part of the puzzle identity");
+    const old = { items: {} };
+    old.items[Pr.legacyKey(p0)] = { n: 3, wrong: 1, ok: false, last: "2026-07-01" };
+    const mig = Pr.migrateProgress([p0], old);
+    assert(mig.moved === 1 && mig.st.items[Pr.puzzleKey(p0)] && !mig.st.items[Pr.legacyKey(p0)],
+      "legacy progress migrates to the canonical key");
+    assert(Pr.migrateProgress([p0], mig.st).moved === 0, "migration is idempotent");
+    assert(Pr.unmastered([p0], mig.st).length === 1, "migrated 错题 is still in the book");
+  }
 
   // progress store had no ceiling while 统计 caps at 200 and 存档 at 30
   {
@@ -1919,13 +1963,27 @@ const Practice = ctx.GobanPractice;
   // renju.blocked.* is assembled from the reason renjuForbidden returns; the
   // 禁手 gate below asserts every reason it can return has a string in **both**
   // dictionaries, which is the coverage this allowlist would otherwise drop.
-  const DYNAMIC = /^(diff|think|coach|status|result|practice\.kind|renju\.blocked)\./;
+  // practice.wrong.<type> / practice.hint.<type>.<level> are assembled from the
+  // puzzle type (v1.63); the 题型 gate right below asserts every type has all
+  // three strings in both dictionaries.
+  const DYNAMIC = /^(diff|think|coach|status|result|practice\.kind|practice\.wrong|practice\.hint|renju\.blocked)\./;
   const deadKeys = dictKeys.filter((k) => !DYNAMIC.test(k) && !uses.includes('"' + k + '"'));
   const KNOWN_ORPHANS = ["slots.saved", "practice.src.game", "practice.src.builtin"];
   const fresh = deadKeys.filter((k) => !KNOWN_ORPHANS.includes(k));
   assert(fresh.length === 0, "no unreachable i18n strings (" + fresh.join(", ") + ")");
   assert(deadKeys.length <= KNOWN_ORPHANS.length,
     "the known-orphan list does not grow silently (" + deadKeys.join(", ") + ")");
+  {
+    const I18n = ctx.GobanI18n;
+    const missing = [];
+    for (const type of ["win1", "defend", "vcf", "forbid"]) {
+      for (const k of ["practice.wrong." + type, "practice.hint." + type + ".1", "practice.hint." + type + ".2", "practice.task." + type]) {
+        if (!I18n.DICT.zh[k]) missing.push("zh:" + k);
+        if (!I18n.DICT.en[k]) missing.push("en:" + k);
+      }
+    }
+    assert(missing.length === 0, "每种题型的题面 / 答错 / 两级提示中英都有 (" + missing.join(", ") + ")");
+  }
 
   // ---- Engine-floor gates -------------------------------------------------
   // The browser regression runs in Chromium. The app runs in WKWebView (macOS)
@@ -2400,6 +2458,215 @@ const Practice = ctx.GobanPractice;
 
   // 反证四:名单里的三条确实是被「放过」而不是「没扫到」
   assert(frameworksImported(HOST).has("dispatch"), "dispatch 确实被扫到了,只是被放过");
+}
+
+// ==== v1.63:学习闭环 ==========================================================
+
+// --- 对局库:每一局下完自动留存(archive.js) ---
+{
+  const store = {};
+  ctx.GobanHost.storageGet = (k) => (k in store ? store[k] : null);
+  ctx.GobanHost.storageSet = (k, v) => { store[k] = String(v); return true; };
+  ctx.GobanHost.storageRemove = (k) => { delete store[k]; };
+  load("src/web/js/archive.js");
+  const Ar = ctx.GobanArchive;
+  assert(Ar.load().length === 0, "archive starts empty");
+  const h = [{ r: 7, c: 7 }, { r: 7, c: 8 }, { r: 8, c: 8 }];
+  const id = Ar.add({ history: h, ruleSet: "renju", mode: "ai", difficulty: "hard", humanColor: "b", result: "b", endedAt: 1000, durationMs: 5000 });
+  assert(typeof id === "string" && Ar.get(id).history.length === 3 && Ar.get(id).ruleSet === "renju",
+    "a finished game is kept with its rule");
+  assert(Ar.load()[0].id === id, "newest first");
+  assert(Ar.addLine(id, 2, [{ r: 0, c: 0 }, { r: 0, c: 1 }]) && Ar.get(id).lines.length === 1 && Ar.get(id).lines[0].ply === 2,
+    "a retry line attaches to its game");
+  Ar.addLine(id, 2, [{ r: 1, c: 1 }]);
+  assert(Ar.get(id).lines.length === 1 && Ar.get(id).lines[0].moves[0].r === 1, "one line per ply — the newest wins");
+  assert(Ar.removeByEndedAt(1000) && Ar.load().length === 0, "undo-after-win removes it by endedAt (same key as 统计)");
+  for (let i = 0; i < Ar.MAX + 5; i++) Ar.add({ history: h, result: "w", endedAt: 2000 + i });
+  assert(Ar.load().length === Ar.MAX, "rolls over at MAX (" + Ar.load().length + ")");
+  assert(Ar.load()[0].endedAt === 2000 + Ar.MAX + 4, "…keeping the newest");
+  // 备份带上它
+  load("src/web/js/backup.js");
+  assert(ctx.GobanBackup.KEYS.includes(Ar.KEY), "backup carries the game archive");
+  // 反证:坏记录不进列表
+  store[Ar.KEY] = JSON.stringify([{ id: "x" }, { id: "y", history: [] }, { id: "z", history: [{ r: 1, c: 1 }] }]);
+  assert(Ar.load().length === 1 && Ar.load()[0].id === "z", "records without moves are dropped on load");
+  Ar.clear();
+}
+
+// --- SGF:RU[] 往返保留规则;变着写成兄弟节点,主线读回不变 ---
+{
+  const hist = [{ r: 7, c: 7 }, { r: 7, c: 8 }, { r: 8, c: 8 }, { r: 6, c: 6 }];
+  const renju = Sgf.buildSgf({ history: hist, result: "play", mode: "pvp", humanColor: "b", ruleSet: "renju", originalStartedAt: 0 });
+  const free = Sgf.buildSgf({ history: hist, result: "play", mode: "pvp", humanColor: "b", ruleSet: "free", originalStartedAt: 0 });
+  assert(Sgf.parseSgf(renju).ruleSet === "renju", "RU[Renju] round-trips as renju");
+  assert(Sgf.parseSgf(free).ruleSet === "free", "RU[Gomoku] round-trips as free");
+  assert(Sgf.parseSgf("(;SZ[15];B[hh];W[ih])").ruleSet === null, "no RU[] → null (caller keeps its rule)");
+  assert(Sgf.ruleFromSgf("RU[RIF]") === "renju" && Sgf.ruleFromSgf("RU[Freestyle]") === "free" && Sgf.ruleFromSgf("RU[Chinese]") === null,
+    "rule names are recognised loosely, unknown ones ignored");
+  // 反证:同两手、不同 RU,解析结果**必须**不同 —— 这正是评审报告里的 P0
+  assert(JSON.stringify(Sgf.parseSgf(renju)) !== JSON.stringify(Sgf.parseSgf(free)), "反证:same moves, different RU, different parse");
+  const line = [{ r: 14, c: 14 }, { r: 0, c: 14 }];
+  line.comment = "alt ]x";
+  const withVar = Sgf.buildSgf({
+    history: hist, result: "play", mode: "pvp", humanColor: "b", ruleSet: "free", originalStartedAt: 0,
+    variations: { 1: [[{ r: 0, c: 0 }]], 2: [line] },
+  });
+  assert(/\(;W\[ih\]\(;B\[ii\];W\[gg\]\)\(;B\[oo\]C\[alt \\\]x\];W\[oa\]\)\)\(;W\[aa\]\)/.test(withVar),
+    "variations nest as siblings after the main line: " + withVar.slice(withVar.indexOf(";B[hh]")));
+  const back = Sgf.parseSgf(withVar);
+  assert(!back.error && back.history.length === 4 && back.history.every((p, i) => p.r === hist[i].r && p.c === hist[i].c),
+    "the main line reads back unchanged with variations present");
+  // 括号要配平
+  const opens = (withVar.match(/\(/g) || []).length, closes = (withVar.match(/\)/g) || []).length;
+  assert(opens === closes, "parentheses balance (" + opens + "/" + closes + ")");
+}
+
+// --- 练习继承规则:连珠局面下的题按连珠判 ---
+{
+  const Pz = Practice.puzzles;
+  // 黑有 (7,3)…(7,6) 四子,(7,7) 成五、(7,2) 也成五;但若 (7,8) 已是黑子,(7,2) 成六 → 连珠下不是解
+  const bd = Core.emptyBoard();
+  for (const c of [3, 4, 5, 6, 8]) bd[7][c] = "b";
+  for (const [r, c] of [[0, 0], [0, 1], [0, 2], [0, 3], [1, 0]]) bd[r][c] = "w";
+  const freeSol = Pz.solutionsFor(bd.map((r) => r.slice()), "b", "win1", false).map((s) => s.r + "," + s.c).sort();
+  const renjuSol = Pz.solutionsFor(bd.map((r) => r.slice()), "b", "win1", true).map((s) => s.r + "," + s.c).sort();
+  assert(freeSol.includes("7,2") && freeSol.includes("7,7"), "free-style: both the five and the six count (" + freeSol + ")");
+  // (7,7) joins 3..6 with 8 → six = 长连;(7,2) makes exactly 2..6 = five
+  assert(!renjuSol.includes("7,7") && renjuSol.includes("7,2"),
+    "renju: the overline point is not a solution, the exact five still is (" + renjuSol + ")");
+  // 防守题:黑到手时禁手点不能作为防守点
+  const bd2 = Core.emptyBoard();
+  // 白 (0,3)(0,4)(0,5)(0,6) 威胁 (0,2)/(0,7);黑在 (0,7) 若形成双四则连珠下不可走
+  for (const c of [3, 4, 5, 6]) bd2[0][c] = "w";
+  for (const [r, c] of [[1, 7], [2, 7], [3, 7], [0, 8], [0, 9], [0, 10]]) bd2[r][c] = "b"; // (0,7) → 竖四 + 横四(8,9,10) = 双四
+  bd2[5][7] = "w"; bd2[0][12] = "w"; // 一端各留一个空点:是四,不是五
+  bd2[0][2] = "b";                     // 白的另一端已封,唯一成五点是 (0,7)
+  const fSol = Pz.solutionsFor(bd2.map((r) => r.slice()), "b", "defend", false).map((s) => s.r + "," + s.c);
+  const rSol = Pz.solutionsFor(bd2.map((r) => r.slice()), "b", "defend", true).map((s) => s.r + "," + s.c);
+  assert(Core.renjuForbidden(bd2, 0, 7) === "double4", "fixture: (0,7) is a double four for black");
+  assert(fSol.length === 1 && fSol[0] === "0,7", "free-style: blocking on the double-four point is the (only) defence");
+  assert(rSol.length === 0, "renju: the forbidden point is not offered as a defence — the position is lost (" + rSol + ")");
+  assert(Pz.makePuzzle(bd2.map((r) => r.slice()), "b", "defend", "game", null, { renju: true }) === null,
+    "…so no renju puzzle is built from it: a forbidden answer is never rewarded");
+  assert(Pz.makePuzzle(bd2.map((r) => r.slice()), "b", "defend", "game", null, { renju: false }) !== null,
+    "反证:the same position is a valid free-style puzzle");
+  // 禁手题:内置题每一道都有解,且解就是 renjuForbiddenPoints
+  for (const def of Pz.FORBID_BUILTINS) {
+    const b = Pz.boardOf(def);
+    const p = Pz.makePuzzle(b, "b", "forbid", "builtin", null, { renju: true });
+    const want = Core.renjuForbiddenPoints(b).map((x) => x.r + "," + x.c).sort().join("|");
+    assert(p && p.solutions.map((x) => x.r + "," + x.c).sort().join("|") === want && p.solutions.length <= 3,
+      "forbid builtin solvable and exact (" + want + ")");
+  }
+  assert(Pz.FORBID_BUILTINS.length >= 4, "at least one puzzle per forbidden kind plus a trap");
+  const kinds = new Set(Pz.FORBID_BUILTINS.map((def) => Core.renjuForbidden(Pz.boardOf(def), Pz.makePuzzle(Pz.boardOf(def), "b", "forbid", "builtin", null, { renju: true }).solutions[0].r, Pz.makePuzzle(Pz.boardOf(def), "b", "forbid", "builtin", null, { renju: true }).solutions[0].c)));
+  assert(kinds.has("double3") && kinds.has("double4") && kinds.has("overline"), "the three forbidden kinds are all covered (" + [...kinds] + ")");
+  // 对局派生题带原局 id 与手数;连珠局按连珠出题
+  const game = { id: "g1", renju: true, history: [] };
+  // 构造:黑 (7,3)(7,4)(7,5)(7,6) 四连,白乱走;第 9 手黑不成五(错失)
+  const hist = [[7, 3], [0, 0], [7, 4], [2, 0], [7, 5], [4, 0], [7, 6], [6, 0], [14, 14], [8, 0]].map(([r, c]) => ({ r, c }));
+  game.history = hist;
+  Practice.init({ getGames: () => [game] });
+  const cands = Pz.buildCandidates();
+  const fromGame = cands.filter((p) => p.gameId === "g1");
+  assert(fromGame.length >= 1 && fromGame[0].ply === 9 && fromGame[0].renju === true && fromGame[0].type === "win1",
+    "a missed win in a renju game becomes a renju win1 puzzle tagged with game id and ply (" + JSON.stringify(fromGame.map((p) => [p.type, p.ply, p.renju])) + ")");
+  Practice.init({ getGames: () => [] });
+}
+
+// --- 每日 = 到期复习队列 ---
+{
+  const Pr = Practice.progress, Pz = Practice.puzzles, D = Practice.daily;
+  const cands = Pz.buildCandidates().filter((p) => p.type !== "forbid").slice(0, 20);
+  let st = {};
+  st = Pr.recordAnswer(st, Pr.puzzleKey(cands[3]), true, "2026-08-01", "solo"); // due 08-02
+  st = Pr.recordAnswer(st, Pr.puzzleKey(cands[9]), false, "2026-08-01", "solo"); // due 08-02
+  const picked = D.pickDaily(cands, st, "2026-08-02", 5);
+  const keys = picked.map(Pr.puzzleKey);
+  assert(picked.length === 5, "daily still has 5");
+  assert(keys.includes(Pr.puzzleKey(cands[3])) && keys.includes(Pr.puzzleKey(cands[9])), "due puzzles come first");
+  assert(new Set(keys).size === 5, "no duplicates");
+  const again = D.pickDaily(cands, st, "2026-08-02", 5).map(Pr.puzzleKey);
+  assert(again.join() === keys.join(), "same day, same set");
+  const none = D.pickDaily(cands, {}, "2026-08-02", 5);
+  assert(none.length === 5 && none.map(Pr.puzzleKey).join() === D.pickForDate(cands, "2026-08-02", 5).map(Pr.puzzleKey).join(),
+    "with nothing due, the pick is the plain date-seeded one (fresh profiles unchanged)");
+}
+
+// --- 复盘:证据分层 + 引擎反事实 + 解释 ---
+{
+  const Review = ctx.GobanReview;
+  const kindFacts = (pre, color, played) => {
+    if (Core.wouldWin(pre, played.r, played.c, color)) return { grade: "best", text: "胜着" };
+    const w = Ai.listWinCells(pre, color);
+    if (w.length) return { grade: "blunder", kind: "missedWin", text: "错失胜着", best: w[0] };
+    const a = pre.map((r) => r.slice());
+    a[played.r][played.c] = color;
+    if (Ai.listWinCells(a, Core.opp(color)).length) return { grade: "blunder", kind: "missedBlock", text: "漏防" };
+    return null;
+  };
+  let gen = 0;
+  let engineCalls = 0;
+  const setup = (hist, engine) => {
+    gen++;
+    Review.init({
+      getHistory: () => hist,
+      getGameGen: () => gen,
+      getViewIndex: () => 0,
+      boardAfter: (n) => Core.boardAfter(hist, n),
+      winLineAt: (n) => Core.winLineAt(hist, n, false),
+      coachFacts: kindFacts,
+      evaluateBoard: (b, me) => Ai.evaluateBoard(b, me),
+      winCells: (b, color) => Ai.listWinCells(b, color),
+      aiMoveAsync: engine,
+    });
+    Review.invalidate();
+  };
+  // 第 9 手黑放着 (7,7) 的五不下 → hard / missedWin;第 10 手白没挡 → hard / missedBlock
+  const hist = [[7, 3], [0, 0], [7, 4], [2, 0], [7, 5], [4, 0], [7, 6], [6, 0], [14, 14], [8, 0]].map(([r, c]) => ({ r, c }));
+  setup(hist, async (o) => { engineCalls++; return Ai.aiMove({ board: o.board, side: o.side, difficulty: "normal", nodeBudget: 3000, vary: false }); });
+  const d = Review.compute();
+  const b9 = d.blunders.find((b) => b.i === 9), b10 = d.blunders.find((b) => b.i === 10);
+  assert(b9 && b9.tier === "hard" && b9.kind === "missedWin" && b9.best && b9.best.r === 7, "move 9 is a proven missed win with the winning cell");
+  assert(b10 && b10.tier === "hard" && b10.kind === "missedBlock" && b10.best && b10.punish, "move 10 is a proven missed block, with the block point as both alternative and punishment");
+  const ex9 = Review.explain(9);
+  assert(ex9 && ex9.tier === "hard" && ex9.lines.length === 3 && /C8|H8/.test(ex9.lines[0]) && /O1/.test(ex9.lines[1]),
+    "explanation names the threat cell and the played cell (" + JSON.stringify(ex9 && ex9.lines) + ")");
+  const ex10 = Review.explain(10);
+  assert(ex10 && ex10.lines.length === 4 && /C8|H8/.test(ex10.lines[2]), "missed-block explanation says where the opponent then wins");
+  assert(Review.explain(3) === null, "a normal move has no explanation");
+  const km = Review.keyMoves("b");
+  assert(km.length >= 1 && km[0].i === 9, "key move for black is the missed win");
+
+  // 软失着:一局黑方乱走、白方成型 —— 第二遍引擎比较把它升级或撤掉
+  const loose = [];
+  for (let k = 0; k < 8; k++) { loose.push({ r: 0, c: k }); if (k < 7) loose.push({ r: 7, c: 4 + k }); }
+  setup(loose, async (o) => { engineCalls++; return Ai.aiMove({ board: o.board, side: o.side, difficulty: "normal", nodeBudget: 3000, vary: false }); });
+  const dl = Review.compute();
+  const softBefore = dl.blunders.filter((b) => b.tier === "soft").length;
+  assert(softBefore >= 1, "a loose game has soft (score-swing) flags before the engine pass (" + softBefore + ")");
+  engineCalls = 0;
+  await Review.deepen({ difficulty: "normal" });
+  const dl2 = Review.getData();
+  assert(dl2.deepened && !dl2.deepening, "deepen finishes");
+  assert(engineCalls >= softBefore, "every soft flag was put to the engine (" + engineCalls + " calls)");
+  const tiersAfter = dl2.blunders.map((b) => b.tier);
+  assert(tiersAfter.every((t) => t === "hard" || t === "engine" || t === "soft"), "after deepen every flag is hard / engine / soft, never 'clear'");
+  const engineOnes = dl2.blunders.filter((b) => b.tier === "engine");
+  assert(engineOnes.every((b) => b.best && b.gap >= Review.ENGINE_GAP), "engine-tier flags carry the engine's move and a gap ≥ ENGINE_GAP");
+  assert(dl2.summary.b + dl2.summary.w === dl2.blunders.length, "summary re-counted after deepen");
+  // 取消:invalidate 之后旧代际的结果不得写回
+  setup(loose, async (o) => { await new Promise((r) => setTimeout(r, 5)); return { r: 14, c: 0 }; });
+  const pr = Review.deepen({ difficulty: "normal" });
+  Review.invalidate();
+  await pr;
+  assert(Review.getData() === null, "a deepen cancelled by invalidate() leaves nothing behind");
+  // 反证:引擎同意实际着 → 撤掉
+  setup(loose, async (o) => loose[o.board.flat().filter(Boolean).length]);
+  const before = Review.compute().blunders.filter((b) => b.tier === "soft").length;
+  await Review.deepen({ difficulty: "normal" });
+  assert(before >= 1 && Review.getData().blunders.filter((b) => b.tier === "soft").length === 0,
+    "反证:when the engine would have played the same move, the soft flag is withdrawn");
 }
 
 if (failed) {

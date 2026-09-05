@@ -20,6 +20,7 @@
     "goban.v12.daily",
     "goban.v12.practice",
     "goban.v12.lang",
+    "goban.v12.games",
   ];
 
   const FORMAT = "goban-backup";
