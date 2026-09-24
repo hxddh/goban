@@ -707,9 +707,24 @@
     return toRC(res.cell);
   }
 
+  /** 交货前验一次:落点必须在盘内且为空。v1.65 基准里 48 局中出过一次占用点,按局面重放
+   *  复现不了(取决于时限在哪一刻截断),所以在出口兜底,而不是赌它不再发生。 */
+  function sane(board2d, mv) {
+    if (mv && mv.r >= 0 && mv.r < SZ && mv.c >= 0 && mv.c < SZ && !board2d[mv.r][mv.c]) return mv;
+    lastStage = "fallback";
+    let best = null, bestSc = -1;
+    for (let r = 0; r < SZ; r++) for (let c = 0; c < SZ; c++) {
+      if (board2d[r][c]) continue;
+      const cell = r * SZ + c;
+      const sc = score[cell] + score[N + cell];
+      if (sc > bestSc) { bestSc = sc; best = { r, c }; }
+    }
+    return best;
+  }
+
   function aiMove(opts) {
     // 出口闸与 C1 / C2 共用:对称变化只在最外层做一次,禁手合法性在最后验
-    return C1.legalizeRenju(opts, C1.varyBySymmetry(opts.board, aiMoveCore(opts), opts));
+    return C1.legalizeRenju(opts, C1.varyBySymmetry(opts.board, sane(opts.board, aiMoveCore(opts)), opts));
   }
 
   global.GobanAi3 = {
@@ -717,7 +732,7 @@
     lastStage: () => lastStage,
     lastInfo: () => lastInfo,
     profileFor,
-    _debug: { PAT, P4OF, resetFrom, make, unmake, p4, pat, cnt, vcf, evaluate, bd, codes: { DEAD, B1, F1, B2, F2, B3, F3, B4, F4, FIVE }, combos: { P_NONE, P_F2, P_B3, P_22, P_B3P, P_F3, P_F3P, P_33, P_B4, P_B4P, P_43, P_F4, P_FIVE } },
+    _debug: { sane, PAT, P4OF, resetFrom, make, unmake, p4, pat, cnt, vcf, evaluate, bd, codes: { DEAD, B1, F1, B2, F2, B3, F3, B4, F4, FIVE }, combos: { P_NONE, P_F2, P_B3, P_22, P_B3P, P_F3, P_F3P, P_33, P_B4, P_B4P, P_43, P_F4, P_FIVE } },
   };
 })(typeof window !== "undefined" ? window : globalThis);
 

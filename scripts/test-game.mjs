@@ -2762,6 +2762,11 @@ const Practice = ctx.GobanPractice;
     if (!m || !Number.isInteger(m.r) || !Number.isInteger(m.c) || m.r < 0 || m.r > 14 || m.c < 0 || m.c > 14 || b[m.r][m.c]) illegal++;
   }
   assert(illegal === 0 && n >= 90, "C3 在 " + n + " 个随机局面上每一手都落在空点 (" + illegal + " 手不合法)");
+  // 出口兜底:搜索交出占用点 / 空结果时换成盘上最好的空点(v1.65 基准 48 局中出过一次,重放不复现)
+  C3.aiMove({ board: pos1, side: "w", difficulty: "hard", timeMs: 100, vary: false });
+  const f1 = C3._debug.sane(pos1, { r: 7, c: 7 }), f2 = C3._debug.sane(pos1, null);
+  assert(f1 && !pos1[f1.r][f1.c] && f2 && !pos1[f2.r][f2.c] && C3._debug.sane(pos1, { r: 7, c: 9 }).c === 9,
+    "C3 出口兜底:占用点与空结果都换成空点,合法手原样放行");
 }
 
 // --- v1.64 index.html 结构:弹层之间互不嵌套,div 开合配平 ---
