@@ -278,6 +278,50 @@ async function newGame(page) {
   await page.close();
 }
 
+// ---- S6. 精修的两条闸门(v1.65)----
+// 一、侧栏里任何一组(.side-section)只要显示着,就得有看得见的内容 —— v1.64 双人对局中
+//     「难度」行藏了,组没藏,留下一条上下两道分隔线夹着的空带。
+// 二、每套主题的主按钮与主题强调色同一色相(±35°)—— 日间曾是冷蓝、夜盘曾是杏色。
+{
+  const page = await newPage();
+  await toPvp(page);
+  const click = clicker(page);
+  await click(7, 7); await page.waitForTimeout(120);
+  await click(7, 8); await page.waitForTimeout(150);
+  const empties = await page.evaluate(() => [...document.querySelectorAll("#side .side-section")]
+    .filter((sec) => sec.offsetParent !== null && getComputedStyle(sec).display !== "none")
+    .filter((sec) => ![...sec.querySelectorAll("*")].some((el) => el.offsetParent !== null && el.getBoundingClientRect().height > 4
+      && !el.classList.contains("side-h") && (el.textContent || "").trim()))
+    .map((sec) => sec.className));
+  const hues = {};
+  for (const th of ["wood", "night", "day", "notebook"]) {
+    hues[th] = await page.evaluate((t) => {
+      document.documentElement.setAttribute("data-theme", t);
+      const hue = (r, g, b) => {
+        r /= 255; g /= 255; b /= 255;
+        const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+        if (!d) return 0;
+        let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+        return (h * 60 + 360) % 360;
+      };
+      const acc = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+      const a = acc.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
+      const bg = getComputedStyle(document.getElementById("btn-new")).backgroundImage;
+      const m = bg.match(/rgb\((\d+), (\d+), (\d+)\)/);
+      if (!a || !m) return null;
+      const ha = hue(parseInt(a[1], 16), parseInt(a[2], 16), parseInt(a[3], 16));
+      const hb = hue(+m[1], +m[2], +m[3]);
+      const diff = Math.min(Math.abs(ha - hb), 360 - Math.abs(ha - hb));
+      return { accent: Math.round(ha), button: Math.round(hb), diff: Math.round(diff) };
+    }, th);
+  }
+  const badHue = Object.entries(hues).filter(([, v]) => !v || v.diff > 35).map(([k]) => k);
+  report("S6 侧栏没有空组;四套主题的主按钮都与强调色同一色相",
+    empties.length === 0 && badHue.length === 0,
+    JSON.stringify({ empties, hues, errs: page.__errors }));
+  await page.close();
+}
+
 await browser.close();
 server.close();
 fs.rmSync(WORKER_SRC_DIR, { recursive: true, force: true });

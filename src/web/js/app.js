@@ -55,13 +55,13 @@
   function budgetForDiff(diff) {
     if (diff === "extreme") return extremeTimeMs();
     if (diff === "hard") return hardTimeMs();
-    if (diff === "normal") return 250;
+    if (diff === "normal") return 400; // v1.65:普档换成 C3,预算 250 → 400ms
     return 30;
   }
 
-  /** hard/extreme run the C2 engine; normal/easy keep C1. */
+  /** 档位 → 引擎只有一张表:GobanTier(ai3.js)。v1.65 起普 / 难 / 极走 C3,简仍是 C1。 */
   function engineFor(diff) {
-    return (diff === "hard" || diff === "extreme") && window.GobanAi2 ? window.GobanAi2 : Ai;
+    return window.GobanTier ? window.GobanTier.engineFor(diff) : Ai;
   }
 
   // Worker lifecycle + degraded fallback live in GobanEngine (v1.28 split).
@@ -2103,7 +2103,12 @@
     // border-bottom 画着。
     const gameSec = document.getElementById("mode-field")
       && document.getElementById("mode-field").closest(".side-section");
-    if (gameSec) gameSec.classList.toggle("bare", playing);
+    if (gameSec) {
+      gameSec.classList.toggle("bare", playing);
+      // 双人对局中连「难度」也没有:整组一行不剩时,连同它的分隔线一起收起。
+      // 此前留着一条上下两道线夹着的空带(v1.64 评估 §4.1)。
+      gameSec.hidden = [...gameSec.querySelectorAll(".setting-row")].every((r) => r.hidden);
+    }
   }
 
   function syncSettingsUI() {
@@ -2267,6 +2272,14 @@
     const showTurn = live && result === "play" && !swap2;
     blackTurn.hidden = !(showTurn && turn === "b");
     whiteTurn.hidden = !(showTurn && turn === "w");
+    // v1.65:轮到谁,由那一方的棋子自己说(一圈强调色,另一方退后),不再靠「行」字徽章;
+    // 徽章留给读屏
+    const vsSides = document.querySelectorAll(".vs .vs-side");
+    if (vsSides.length === 2) {
+      vsSides[0].classList.toggle("is-turn", showTurn && turn === "b");
+      vsSides[1].classList.toggle("is-turn", showTurn && turn === "w");
+      vsSides[0].parentElement.classList.toggle("has-turn", showTurn);
+    }
 
     const thinkDot = document.getElementById("think-dot");
     if (thinkDot) thinkDot.hidden = !(aiThinking && result === "play");

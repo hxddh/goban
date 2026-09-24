@@ -36,6 +36,7 @@ test -f frontend/dist/js/stats.js
 test -f frontend/dist/js/practice.js
 test -f frontend/dist/js/ai.js
 test -f frontend/dist/js/ai2.js
+test -f frontend/dist/js/ai3.js
 test -f frontend/dist/js/ai-worker.js
 test -f frontend/dist/js/worker-src.js
 

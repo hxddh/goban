@@ -98,8 +98,9 @@ src/web/
   index.html · styles.css
   js/core.js       # 规则（纯）
   js/sgf.js        # SGF
-  js/ai.js         # C1 引擎：棋型 / VCF·VCT / 迭代 α-β（简/普）
-  js/ai2.js        # C2 引擎：增量窗口表 + 深搜索（难/极）
+  js/ai.js         # C1 引擎：棋型 / VCF·VCT / 迭代 α-β（入门 · 开局库 · 禁手出口）
+  js/ai2.js        # C2 引擎：增量窗口表 + 深搜索（v1.64 的难/极，现作对照）
+  js/ai3.js        # C3 引擎：棋型表 + 增量 + PVS/TT + 威胁剪枝（普/难/极，v1.65）
   js/ai-worker.js  # 普通·困难后台计算
   js/host.js       # Native / localStorage 门面
   js/state.js      # 对局状态 / 导入快照
