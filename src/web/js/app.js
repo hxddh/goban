@@ -18,6 +18,7 @@
   const Backup = window.GobanBackup;
   const Practice = window.GobanPractice;
   const Archive = window.GobanArchive;
+  const Session = window.GobanSession;
   const SIZE = Core.SIZE;
   const WIN = Core.WIN;
   const SAVE_KEY = "goban.v12.save";
@@ -540,6 +541,8 @@
     clearVariation();
     scheduleAnalysis();
     sync();
+    // 复盘面板打开时棋谱只剩几行高;跳到哪一手,棋谱就得跟到哪一手
+    scrollMoveListToCurrent();
   }
 
   function goLive() {
@@ -650,17 +653,15 @@
     return elapsedBaseMs + (Date.now() - startedAt);
   }
 
+  /** 设置存储里从来没有东西 = 第一次启动(启动末尾会写一次,所以第二次就不是了) */
+  let firstRun = false;
+
   function loadSettings() {
     try {
       const raw = Host.storageGet(SETTINGS_KEY);
-      if (!raw) return;
+      if (!raw) { firstRun = true; return; }
       const s = JSON.parse(raw);
-      if (s.mode === "ai" || s.mode === "pvp") mode = s.mode;
-      if (
-        s.difficulty === "easy" || s.difficulty === "normal" ||
-        s.difficulty === "hard" || s.difficulty === "extreme"
-      ) difficulty = s.difficulty;
-      if (s.humanColor === "b" || s.humanColor === "w") humanColor = s.humanColor;
+      prefs = Session.readPrefs(s);
       if (typeof s.soundOn === "boolean") soundOn = s.soundOn;
       if (s.themeId && THEMES[s.themeId]) themeId = s.themeId;
       if (s.thinkLevel === "fast" || s.thinkLevel === "normal" || s.thinkLevel === "deep") {
@@ -668,23 +669,22 @@
       }
       if (typeof s.showCoords === "boolean") showCoords = s.showCoords;
       if (typeof s.analysisOn === "boolean") analysisOn = s.analysisOn;
-      if (s.openingRule === "standard" || s.openingRule === "swap2") openingRule = s.openingRule;
-      if (s.ruleSet === "free" || s.ruleSet === "renju") ruleSet = s.ruleSet;
-      // 侧栏那一格是三选一,所以把选不出来的组合收回去:禁手不叠 swap2
-      // (两者都是平衡手段)。v1.55 起禁手不再蕴含双人 —— 引擎交货口已保证合法。
-      if (ruleSet === "renju") openingRule = "standard";
     } catch (_) {}
-    prefRule = ruleChoice();
+    gameFromPrefs();
   }
 
   function saveSettings() {
-    // 规则存的是**偏好**,不是这一局:导入的连珠棋谱、库里打开的旧局会临时改掉
-    // 这一局的 ruleSet,但不该顺手改掉玩家在侧栏选的那一格(v1.63.1)。
-    const pref = { ruleSet: prefRule === "renju" ? "renju" : "free", openingRule: prefRule === "swap2" ? "swap2" : "standard" };
+    // 存的是**偏好**,不是这一局(见 session.js):导入的棋谱、库里的旧局、重下都会
+    // 临时改掉这一局的模式 / 执子 / 规则,但不该顺手改掉玩家在侧栏选的那几格。
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel, showCoords, analysisOn, openingRule: pref.openingRule, ruleSet: pref.ruleSet })
+      JSON.stringify(Object.assign(Session.prefsToStore(prefs), { soundOn, themeId, thinkLevel, showCoords, analysisOn }))
     );
+  }
+
+  /** 新局从偏好开:这一局的五个字段整份抄自偏好。 */
+  function gameFromPrefs() {
+    ({ mode, difficulty, humanColor, ruleSet, openingRule } = Session.gameFromPrefs(prefs));
   }
 
   function isRenju() { return ruleSet === "renju"; }
@@ -695,7 +695,7 @@
    * v1.54 时这里还要把规则一并带回自由 —— 那时禁手只开双人。v1.55 起引擎交货口
    * 已保证合法,禁手与人机是一个正常组合,这层联动连同它的返回值一起没了。
    */
-  function applyMode(next) { mode = next; }
+  function applyMode(next) { mode = next; prefs.mode = next; }
 
   /**
    * 侧栏那一格三选一映射到的两个内部字段。swap2 与禁手都是「黑先手占优,拿
@@ -703,22 +703,14 @@
    * swap2 的协议和禁手的判定是两套互不相干的代码。
    * @returns {'free'|'swap2'|'renju'}
    */
-  function ruleChoice() {
-    if (isRenju()) return "renju";
-    return openingRule === "swap2" ? "swap2" : "free";
-  }
-
-  function applyRuleChoice(val) {
-    ruleSet = val === "renju" ? "renju" : "free";
-    openingRule = val === "swap2" ? "swap2" : "standard";
-  }
+  function ruleChoice() { return Session.ruleOf(ruleSet, openingRule); }
 
   /**
-   * 侧栏那一格的选择(偏好)。ruleSet / openingRule 是**这一局**的规则,可以被棋谱
-   * 或旧局临时改掉;新局一律回到这里。
-   * @type {'free'|'swap2'|'renju'}
+   * 侧栏四格(模式 / 难度 / 执子 / 规则)的选择。mode / difficulty / humanColor /
+   * ruleSet / openingRule 是**这一局**的,可以被棋谱、旧局、重下、swap2 临时改掉;
+   * 新局一律从这里开,设置存储里也只存这一份。
    */
-  let prefRule = "free";
+  let prefs = Object.assign({}, Session.DEFAULT_PREFS);
 
   /**
    * 黑在 (r,c) 落子的禁手原因,没有则 null。白方与自由式一律 null。
@@ -1055,12 +1047,6 @@
    * 只剩棋盘和手数列表,用户失去刚刚的诊断上下文;现在侧栏的复盘面板常驻,
    * 列着全部失着、说着当前这一手的「威胁 → 落点 → 惩罚 → 替代」,并给重试入口。
    */
-  function reviewJump(i) {
-    Review.setSideOpen(true);
-    setViewIndex(i);
-    closeReview();
-    if (!isPanelOpen()) setPanelOpen(true);
-  }
 
   /**
    * v1.54–v1.55 期间禁手档下这里只弹一句 toast,弹层根本不开。当时给了两条理由,
@@ -1081,19 +1067,14 @@
    * 而不是藏进发布说明。
    */
   function openReview() {
-    Review.render();
+    if (history.length < 2) { toast(t("review.empty")); return; }
+    // v1.64:复盘只有侧栏这一个面。终局卡是它的摘要,复盘一开,摘要让位。
+    hideEndCard();
+    Review.setSideOpen(true);
+    Review.compute();
     startDeepen();
-    const m = document.getElementById("review-modal");
-    if (m) {
-      m.classList.add("show");
-      const focusEl = document.getElementById("review-close");
-      if (focusEl) setTimeout(() => focusEl.focus(), 0);
-    }
-  }
-
-  function closeReview() {
-    const m = document.getElementById("review-modal");
-    if (m) m.classList.remove("show");
+    if (!isPanelOpen()) setPanelOpen(true);
+    sync();
   }
 
   /** SGF with per-move 失着 comments + a summary root comment (复盘评注导出). */
@@ -1164,7 +1145,6 @@
   function runVariation() {
     const pv = computePV(viewIndex);
     variationCells = pv.length ? pv : null;
-    closeReview();
     sync();
     toast(pv.length ? t("pv.done", { n: pv.length }) : t("pv.none"));
   }
@@ -1181,8 +1161,8 @@
       if (gen !== gameGen || aiThinking) return;
       Review.deepen({
         difficulty: "hard",
-        onProgress: () => { if (gen === gameGen) { Review.render(); sync(); } },
-      }).then(() => { if (gen === gameGen) { Review.render(); sync(); } });
+        onProgress: () => { if (gen === gameGen) sync(); },
+      }).then(() => { if (gen === gameGen) sync(); });
     }, 50);
   }
 
@@ -1368,6 +1348,22 @@
     if (show) el.textContent = t("endcard.nudge", { head: document.getElementById("end-card-title").textContent });
   }
 
+  // --- v1.64: 初见一句话 ---
+  let welcomeOn = false;
+  function syncWelcome() {
+    const el = document.getElementById("welcome-bar");
+    if (!el) return;
+    if (welcomeOn && (history.length > 0 || swap2 || retry || importPaused)) welcomeOn = false;
+    el.hidden = !welcomeOn;
+  }
+  function wireWelcome() {
+    const close = () => { welcomeOn = false; syncWelcome(); };
+    const d = document.getElementById("welcome-daily");
+    if (d) d.onclick = () => { close(); Practice.openDaily(); };
+    const x = document.getElementById("welcome-close");
+    if (x) x.onclick = close;
+  }
+
   function wireEndCard() {
     const nudge = document.getElementById("end-nudge");
     if (nudge) nudge.onclick = () => { setPanelOpen(true); };
@@ -1394,6 +1390,7 @@
   function wireReviewSide() {
     const chips = document.getElementById("review-side-chips");
     if (chips) chips.addEventListener("click", (ev) => {
+      if (ev.target.closest("button[data-more]")) { Review.toggleSoft(); sync(); return; }
       const b = ev.target.closest("button[data-i]");
       if (b) setViewIndex(Number(b.dataset.i));
     });
@@ -1406,8 +1403,6 @@
     };
     const pvBtn = document.getElementById("review-side-pv");
     if (pvBtn) pvBtn.onclick = () => { runVariation(); };
-    const openBtn = document.getElementById("review-side-open");
-    if (openBtn) openBtn.onclick = () => { openReview(); };
     const closeBtn = document.getElementById("review-side-close");
     if (closeBtn) closeBtn.onclick = () => { Review.setSideOpen(false); sync(); };
     const retryBack = document.getElementById("retry-back");
@@ -1492,11 +1487,13 @@
   }
 
   function syncDailyBadge() {
-    const el = document.getElementById("open-daily");
-    if (!el) return;
+    const badge = document.getElementById("daily-badge");
+    if (!badge) return;
     let n = 0;
     try { n = Practice.dueCount(); } catch (_) { n = 0; }
-    el.textContent = n ? t("foot.daily.due", { n: n }) : t("foot.daily");
+    badge.hidden = !n;
+    badge.textContent = n ? String(n) : "";
+    badge.setAttribute("aria-label", n ? t("foot.daily.due", { n: n }) : "");
   }
 
   // --- v1.63: 键盘落子 ---
@@ -1645,7 +1642,7 @@
   }
 
   function maybeAiTurn() {
-    if (importPaused || swap2) return;
+    if (!Session.policy(sessionState()).autoAi || swap2) return;
     if (mode !== "ai" || result !== "play" || isHumanTurn() || aiThinking) return;
     aiThinking = true;
     thinkStartedAt = performance.now();
@@ -1806,7 +1803,7 @@
     if (gameGen === statsRecordedGen) return;
     statsRecordedGen = gameGen;
     lastStatsEndedAt = Date.now();
-    if (retry) {
+    if (Session.policy(sessionState()).onFinish === "branch") {
       // 重下关键一手的结果不进统计、不进对局库;作为一条分支挂到原局上,
       // 导出带评注 SGF 时写成变着。
       if (retry.gameId) Archive.addLine(retry.gameId, retry.ply, history.slice(retry.ply - 1));
@@ -2008,11 +2005,14 @@
    * 悔棋最多退到哪一手。重下关键一手时,失着之前的那段是原局,不属于这盘练习 ——
    * 退过去,结束时存下的分支就会从错的局面长出来(v1.63.1)。
    */
-  function undoFloor() { return retry ? retry.ply - 1 : 0; }
+  function undoFloor() { return Session.undoFloor(sessionState()); }
+
+  /** kind 不存,每次从这两个字段推出来(见 session.js)。 */
+  function sessionState() { return { retry: retry, importPaused: importPaused }; }
 
   function reset(opts) {
     gameGen += 1;
-    applyRuleChoice(prefRule); // 新局回到偏好;上一局若是导入的连珠棋谱,规则只属于它
+    gameFromPrefs(); // 新局从偏好开;上一局是导入的、旧局、重下还是 swap2 定的执子,都只属于上一局
     board = emptyBoard();
     turn = "b";
     result = "play";
@@ -2066,9 +2066,7 @@
   function updateClock() {
     const el = formatDuration(nowElapsed());
     const c1 = document.getElementById("clock");
-    const c2 = document.getElementById("info-time");
     if (c1) c1.textContent = el;
-    if (c2) c2.textContent = el;
     // The same 500ms tick advances the think counter; sync() only runs at the
     // start and end of a think, so without this the seconds would never move.
     if (aiThinking) {
@@ -2202,8 +2200,6 @@
     const live = isLive();
 
     moves.textContent = viewIndex + "/" + history.length;
-    document.getElementById("info-moves").textContent =
-      history.length + (live ? "" : t("info.viewing", { n: viewIndex }));
     const modeEl = document.getElementById("info-mode");
     if (modeEl) {
       modeEl.textContent = mode === "pvp"
@@ -2315,6 +2311,7 @@
     }
     syncRetryBar();
     syncEndCard();
+    syncWelcome();
     syncDailyBadge();
   }
 
@@ -2455,21 +2452,9 @@
   if (reviewEl) reviewEl.onclick = () => { openReview(); };
   wireReviewSide();
   wireEndCard();
-  const reviewCloseEl = document.getElementById("review-close");
-  if (reviewCloseEl) reviewCloseEl.onclick = () => { closeReview(); };
+  wireWelcome();
   const reviewExportEl = document.getElementById("review-export");
   if (reviewExportEl) reviewExportEl.onclick = () => { exportReviewSgf(); };
-  const reviewPvEl = document.getElementById("review-pv");
-  if (reviewPvEl) reviewPvEl.onclick = () => { runVariation(); };
-  const reviewModalEl = document.getElementById("review-modal");
-  if (reviewModalEl) reviewModalEl.onclick = (ev) => { if (ev.target === reviewModalEl) closeReview(); };
-  const reviewBlundersEl = document.getElementById("review-blunders");
-  if (reviewBlundersEl) {
-    reviewBlundersEl.addEventListener("click", (ev) => {
-      const b = ev.target.closest("[data-i]");
-      if (b) reviewJump(Number(b.dataset.i));
-    });
-  }
   const reviewCurveEl = document.getElementById("review-curve");
   if (reviewCurveEl) {
     reviewCurveEl.addEventListener("click", (ev) => {
@@ -2479,7 +2464,7 @@
       const pad = 6;
       const frac = (ev.clientX - rect.left - pad) / Math.max(1, rect.width - pad * 2);
       const i = Math.round(Math.min(1, Math.max(0, frac)) * (rd.adv.length - 1));
-      reviewJump(i);
+      setViewIndex(i);
     });
   }
   const slotSaveEl = document.getElementById("slot-save-current");
@@ -2546,10 +2531,9 @@
       if (!b) return;
       const val = b.dataset.rule;
       if (val !== "free" && val !== "swap2" && val !== "renju") return;
-      if (val === ruleChoice() && val === prefRule) return;
+      if (val === ruleChoice() && val === prefs.rule) return;
       if (history.length && !(await confirmNative(t("confirm.switchRule"), t("confirm.switchRuleTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
-      prefRule = val;
-      applyRuleChoice(val);
+      prefs.rule = val;
       saveSettings();
       reset({ keepSettings: true });
       toast(t(
@@ -2563,7 +2547,8 @@
   document.getElementById("diff-seg").onclick = (ev) => {
     const b = ev.target.closest("button[data-diff]");
     if (!b) return;
-    difficulty = b.dataset.diff;
+    // 难度是唯一在对局中立即生效的一格:这一局与偏好一起改
+    difficulty = prefs.difficulty = b.dataset.diff;
     saveSettings();
     syncSettingsUI();
     toast(t("toast.difficulty", { name: t("diff." + difficulty + ".full") }));
@@ -2643,7 +2628,7 @@
     if (!b) return;
     if (b.dataset.human === humanColor) return;
     if (mode === "ai" && history.length && !(await confirmNative(t("confirm.changeColor"), t("confirm.changeColorTitle"), { ok: t("confirm.changeColorOk"), cancel: t("dlg.cancel") }))) return;
-    humanColor = b.dataset.human;
+    humanColor = prefs.humanColor = b.dataset.human;
     saveSettings();
     if (mode === "ai") {
       reset({ keepSettings: true });
@@ -2696,13 +2681,11 @@
   window.addEventListener("keydown", (ev) => {
     const k = ev.key.toLowerCase();
     const slotsModal = document.getElementById("slots-modal");
-    const reviewModal = document.getElementById("review-modal");
     const statsModal = document.getElementById("stats-modal");
     const practiceModal = document.getElementById("practice-modal");
     if (ev.key === "Escape") {
       if (confirmModal.classList.contains("show")) { finishConfirm(false); return; }
       if (slotsModal && slotsModal.classList.contains("show")) { closeSlots(); return; }
-      if (reviewModal && reviewModal.classList.contains("show")) { closeReview(); return; }
       if (statsModal && statsModal.classList.contains("show")) { closeStats(); return; }
       if (Practice.isOpen()) { Practice.close(); return; }
       if (settingsModal.classList.contains("show")) { closeSettings(); return; }
@@ -2726,10 +2709,6 @@
     // Tab stays inside whichever modal is open; other game shortcuts are blocked
     if (slotsModal && slotsModal.classList.contains("show")) {
       trapModalTab(ev, slotsModal);
-      return;
-    }
-    if (reviewModal && reviewModal.classList.contains("show")) {
-      trapModalTab(ev, reviewModal);
       return;
     }
     if (statsModal && statsModal.classList.contains("show")) {
@@ -2858,6 +2837,7 @@
   setPanelOpen(savedPanel == null ? window.innerWidth >= 900 : savedPanel === "1");
 
   const resumed = tryLoadSave();
+  welcomeOn = firstRun && !resumed;
   if (resumed) {
     gameGen += 1;
     if (result !== "play" && lastStatsEndedAt) statsRecordedGen = gameGen;

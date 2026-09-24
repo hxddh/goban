@@ -77,6 +77,12 @@ jobs:
           PLAYWRIGHT_MODULE: ${{ github.workspace }}/node_modules/playwright/index.mjs
           PLAYWRIGHT_CHROMIUM: ${{ steps.pw.outputs.chromium }}
         run: node scripts/test-loop.mjs
+      - name: 收口 regression (v1.64)
+        env:
+          REQUIRE_PLAYWRIGHT: "1"
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/node_modules/playwright/index.mjs
+          PLAYWRIGHT_CHROMIUM: ${{ steps.pw.outputs.chromium }}
+        run: node scripts/test-surface.mjs
 
   strength:
     # Self-play regression is slower and only meaningful for engine-touching

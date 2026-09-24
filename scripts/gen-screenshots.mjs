@@ -156,20 +156,22 @@ async function play(page, r, c) {
   const sloppy = [[7, 7], [2, 2], [12, 12], [2, 12], [12, 2], [0, 7], [14, 7], [7, 0], [7, 14], [0, 0]];
   for (const [r, c] of sloppy) if ((await play(page, r, c)) === "over") break;
   await page.evaluate(() => document.getElementById("sgf-review").click());
+  // v1.64:复盘是侧栏面板。等引擎比较跑完(进度那一行消失)再拍
   let txt = "";
   for (let i = 0; i < 100; i++) {
     await page.waitForTimeout(250);
     const o = await page.evaluate(() => {
-      const m = document.getElementById("review-modal");
-      return m && m.classList.contains("show") ? m.textContent : "";
+      const m = document.getElementById("review-side");
+      const prog = document.getElementById("review-progress");
+      return m && !m.hidden && prog && prog.hidden ? m.textContent : "";
     });
-    if (o && !/分析中|Analyzing/.test(o)) { txt = o; break; }
+    if (o) { txt = o; break; }
   }
-  await page.waitForTimeout(1200);
-  const blunders = /失着 · 黑 (\d+)/.exec(txt.replace(/\s+/g, " "));
+  await page.waitForTimeout(800);
+  const blunders = /黑 (\d+)/.exec(txt.replace(/\s+/g, " "));
   if (!blunders || blunders[1] === "0")
     console.warn("⚠ 这一局没判出失着，复盘图证明不了什么 —— 换个更散的走法重跑");
-  await page.locator("#review-modal .modal").screenshot({ path: path.join(OUT, "review.png") });
+  await page.screenshot({ path: path.join(OUT, "review.png") });
   console.log("✓ review.png（黑失着 " + (blunders ? blunders[1] : "?") + "）");
   await page.close();
 }

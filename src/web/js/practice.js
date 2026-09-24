@@ -883,6 +883,24 @@
     return { st: st, moved: moved };
   }
 
+  /**
+   * v1.62 及更早的进度只有 {n, wrong, ok}(v1.64)。v1.63 起「掌握」要求隔一次到期复习
+   * 再独立答对,旧记录里没有这一段,于是升级后「已掌握」整体归零、旧题也永远不到期。
+   * 折算:没有 due 的记录,答对的算一次独立答对(streak 1),答错的保持 0;两者都
+   * **今天到期** —— 进复习队列,再独立做对一次才算掌握,而不是凭空变成掌握(pure)。
+   */
+  function foldLegacyMastery(prev, today) {
+    const items = Object.assign({}, (prev && prev.items) || {});
+    let folded = 0;
+    for (const k of Object.keys(items)) {
+      const it = items[k];
+      if (!it || typeof it !== "object" || it.due) continue;
+      items[k] = Object.assign({}, it, { streak: it.ok && !it.wrong ? 1 : 0, due: today });
+      folded++;
+    }
+    return { st: Object.assign({}, prev, { items: items }), folded: folded };
+  }
+
   function loadProgress() {
     const h = hostStorage();
     if (!h) return {};
@@ -896,7 +914,7 @@
   function progressFor(cands) {
     const st = loadProgress();
     if (st.v === 2) return st;              // 已经搬过(v1.63 起写入的进度)
-    const m = migrateProgress(cands, st);
+    const m = migrateProgress(cands, foldLegacyMastery(st, todayStr()).st);
     m.st.v = 2;
     saveProgress(m.st);
     return m.st;
@@ -1816,6 +1834,6 @@
     // and for scripts/gen-puzzles.mjs (which validates through this very code)
     puzzles: { BUILTINS, FORBID_BUILTINS, boardOf, solutionsFor, makePuzzle, buildCandidates, forcedLine, lineDepth, winCells, canonicalBoardStr },
     // pure progress helpers, exposed for unit tests
-    progress: { puzzleKey, legacyKey, migrateProgress, recordAnswer, unmastered, dueItems, progressSummary, orderPool, capProgress, addDays, isMastered, PROGRESS_MAX, INTERVALS },
+    progress: { puzzleKey, legacyKey, migrateProgress, foldLegacyMastery, recordAnswer, unmastered, dueItems, progressSummary, orderPool, capProgress, addDays, isMastered, PROGRESS_MAX, INTERVALS },
   };
 })(typeof window !== "undefined" ? window : globalThis);

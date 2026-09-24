@@ -266,10 +266,11 @@
   /** 本局「值得记住的一手」:优先可证明战术,其次引擎比较,再次分差最大。 */
   function keyMoves(color) {
     const d = compute();
-    const rank = { hard: 0, engine: 1, soft: 2 };
+    // 只从站得住的两档里挑(v1.64):「局势波动」只有静态分差,自己都不算结论,
+    // 不该被终局卡说成「本局值得记住的一手」
+    const rank = { hard: 0, engine: 1 };
     return d.blunders
-      .filter((b) => !color || b.color === color)
-      .slice()
+      .filter((b) => (!color || b.color === color) && b.tier in rank)
       .sort((a, b) => (rank[a.tier] - rank[b.tier]) || (b.drop - a.drop) || (b.gap - a.gap))
       .slice(0, 3);
   }
@@ -335,6 +336,13 @@
         g.fill();
       }
     }
+    // 零线两侧各是谁占优 —— v1.63 时这句只写在弹层标题里,曲线本身读不出方向
+    g.fillStyle = css.getPropertyValue("--muted").trim() || "#888";
+    g.font = "10px " + (getComputedStyle(document.body).fontFamily || "sans-serif");
+    g.textBaseline = "top";
+    g.fillText(t("review.curve.black"), pad + 2, pad);
+    g.textBaseline = "bottom";
+    g.fillText(t("review.curve.white"), pad + 2, pad + h);
     // current view marker
     const viewIndex = deps.getViewIndex();
     if (viewIndex >= 0 && viewIndex < n) {
@@ -344,74 +352,26 @@
     }
   }
 
-  function blunderRow(b) {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "review-blunder-row tier-" + b.tier;
-    row.dataset.i = b.i;
-    const who = t(b.color === "b" ? "side.black" : "side.white");
-    const move = document.createElement("span");
-    move.className = "rb-move";
-    move.textContent = t("review.blunderRow", { n: b.i, color: who });
-    const reason = document.createElement("span");
-    reason.className = "rb-reason";
-    reason.textContent = b.reason; // textContent — never HTML-inject reasons
-    const tier = document.createElement("span");
-    tier.className = "rb-tier";
-    tier.textContent = tierLabel(b);
-    row.appendChild(move);
-    row.appendChild(reason);
-    row.appendChild(tier);
-    return row;
-  }
-
-  /** Fill the review modal (stat line, blunder list, curve). */
-  function render() {
-    const empty = document.getElementById("review-empty");
-    const body = document.getElementById("review-body");
-    if (deps.getHistory().length < 2) {
-      if (empty) empty.hidden = false;
-      if (body) body.hidden = true;
-      return;
-    }
-    compute();
-    if (empty) empty.hidden = true;
-    if (body) body.hidden = false;
-    const stat = document.getElementById("review-stat");
-    if (stat) {
-      const s = data.summary;
-      stat.textContent = t(s.b + s.w === 0 ? "review.statClean" : "review.stat", { b: s.b, w: s.w });
-    }
-    const prog = document.getElementById("review-progress");
-    if (prog) {
-      prog.hidden = !data.deepening;
-      if (data.deepening) prog.textContent = t("review.deepening");
-    }
-    // 禁手档下曲线仍按无禁手估 —— 说在它旁边,不藏进发布说明
-    const note = document.getElementById("review-renju-note");
-    if (note) note.hidden = !(deps.getRenju && deps.getRenju());
-    const list = document.getElementById("review-blunders");
-    if (list) {
-      list.innerHTML = "";
-      if (!data.blunders.length) {
-        const p = document.createElement("div");
-        p.className = "muted review-none";
-        p.textContent = t("review.none");
-        list.appendChild(p);
-      }
-      for (const b of data.blunders) list.appendChild(blunderRow(b));
-    }
-    // draw after layout so clientWidth is real
-    requestAnimationFrame(drawCurve);
-  }
-
   /**
-   * 侧栏常驻面板:失着列表 + 当前查看那一手的解释。app.js 在 sync() 里调用;
-   * 只在复盘已算过(data 存在)且面板被打开过时显示。
+   * 复盘面板(v1.64 起是唯一的复盘面):曲线、失着、当前查看那一手的解释。
+   * app.js 在 sync() 里调用;只在复盘已算过且面板被打开时显示。
    */
   let sideOpen = false;
-  function setSideOpen(v) { sideOpen = !!v; }
+  /** 「局势波动」一档默认折叠;展开是这一次复盘里的临时状态 */
+  let softOpen = false;
+  function setSideOpen(v) { sideOpen = !!v; if (!sideOpen) softOpen = false; }
   function isSideOpen() { return sideOpen; }
+  function toggleSoft() { softOpen = !softOpen; }
+
+  function chip(b, viewIndex) {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "review-chip tier-" + b.tier + (b.i === viewIndex ? " cur" : "");
+    el.dataset.i = b.i;
+    el.title = b.reason + " · " + tierLabel(b);
+    el.textContent = String(b.i);
+    return el;
+  }
 
   function renderSide() {
     const el = document.getElementById("review-side");
@@ -419,24 +379,39 @@
     const show = sideOpen && !!data && deps.getHistory().length >= 2;
     el.hidden = !show;
     if (!show) return;
+    const stat = document.getElementById("review-stat");
+    // 头上的数只数站得住的两档;折叠着的「局势波动」由它自己那枚芯片说
+    const firmOf = (c) => data.blunders.filter((b) => b.color === c && b.tier !== "soft").length;
+    if (stat) stat.textContent = t("review.side.stat", { b: firmOf("b"), w: firmOf("w") });
+    const prog = document.getElementById("review-progress");
+    if (prog) prog.hidden = !data.deepening;
+    const note = document.getElementById("review-renju-note");
+    if (note) note.hidden = !(deps.getRenju && deps.getRenju());
     const chips = document.getElementById("review-side-chips");
     const viewIndex = deps.getViewIndex();
     if (chips) {
       chips.innerHTML = "";
-      if (!data.blunders.length) {
+      const firm = data.blunders.filter((b) => b.tier !== "soft");
+      const soft = data.blunders.filter((b) => b.tier === "soft");
+      for (const b of firm) chips.appendChild(chip(b, viewIndex));
+      // 正在看的那一手若是软失着,不折叠它 —— 否则解释在,芯片却不见了
+      const showSoft = softOpen || soft.some((b) => b.i === viewIndex);
+      if (showSoft) for (const b of soft) chips.appendChild(chip(b, viewIndex));
+      if (soft.length && !soft.some((b) => b.i === viewIndex)) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "review-chip more";
+        more.dataset.more = "1";
+        more.textContent = softOpen
+          ? t("review.side.softLess")
+          : t(data.deepened || !deps.aiMoveAsync ? "review.side.softMore" : "review.side.pendingMore", { n: soft.length });
+        chips.appendChild(more);
+      }
+      if (!firm.length && !showSoft && !soft.length) {
         const p = document.createElement("span");
         p.className = "muted";
         p.textContent = t("review.none");
         chips.appendChild(p);
-      }
-      for (const b of data.blunders) {
-        const chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "review-chip tier-" + b.tier + (b.i === viewIndex ? " cur" : "");
-        chip.dataset.i = b.i;
-        chip.title = b.reason + " · " + tierLabel(b);
-        chip.textContent = String(b.i);
-        chips.appendChild(chip);
       }
     }
     const ex = document.getElementById("review-side-explain");
@@ -470,11 +445,13 @@
       }
     }
     if (actions) actions.hidden = !info;
+    // draw after layout so clientWidth is real
+    requestAnimationFrame(drawCurve);
   }
 
   global.GobanReview = {
-    init, invalidate, getData, compute, deepen, explain, keyMoves, render,
-    renderSide, setSideOpen, isSideOpen,
+    init, invalidate, getData, compute, deepen, explain, keyMoves,
+    render: renderSide, renderSide, setSideOpen, isSideOpen, toggleSoft,
     ENGINE_GAP,
   };
 })(typeof window !== "undefined" ? window : globalThis);
