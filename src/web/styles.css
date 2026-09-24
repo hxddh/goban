@@ -848,6 +848,24 @@
       -webkit-backdrop-filter: blur(6px);
       z-index: 6;
     }
+    /* 终局卡的门:与 swap2 条同一位置、同一层,但只有一行 */
+    .end-nudge {
+      position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+      max-width: min(90%, 420px);
+      padding: 8px 16px;
+      font: inherit; font-size: var(--fs-ui); font-weight: 600;
+      color: var(--text);
+      background: var(--panel);
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      border: 1px solid var(--card-border);
+      border-radius: 999px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.22);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      cursor: pointer;
+      z-index: 6;
+    }
     .swap2-msg {
       font-size: var(--fs-body); font-weight: 600; color: var(--fg); text-align: center;
     }

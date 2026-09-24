@@ -121,7 +121,8 @@
    * 其他或缺省 → null(调用方保持当前规则)。
    */
   function ruleFromSgf(src) {
-    const m = src.match(/RU\s*\[([^\]]*)\]/i);
+    // 属性名前不能再有字母:否则 GRU[..]、XRU[..] 这类别的属性也会被当成规则
+    const m = src.match(/(?:^|[^A-Za-z])RU\s*\[([^\]]*)\]/i);
     if (!m) return null;
     const v = m[1].trim().toLowerCase();
     if (/^(renju|rif|连珠)/.test(v)) return "renju";

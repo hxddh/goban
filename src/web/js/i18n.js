@@ -463,6 +463,7 @@
       "endcard.clean": "本局没有检出明显失着",
       "endcard.key": "值得记住：第 {n} 手 {color} · {reason}",
       "endcard.more": "其他关键手：第 {list} 手",
+      "list.sep": "、",
       "endcard.retry": "重下第 {n} 手",
       "endcard.retryBtn": "重下",
       "endcard.retryAgain": "再试一次",
@@ -470,6 +471,7 @@
       "endcard.practice": "练这一手",
       "endcard.review": "看复盘",
       "endcard.close": "收起",
+      "endcard.nudge": "{head} · 看本局总结",
       "practice.noneForMove": "这一手没有可练的战术题",
       "games.title": "最近对局",
       "games.empty": "下完一局会自动留在这里",
@@ -991,9 +993,11 @@
       "endcard.clean": "No clear blunders in this game",
       "endcard.key": "Remember: move {n} {color} · {reason}",
       "endcard.more": "Other key moves: {list}",
+      "list.sep": ", ",
       "endcard.retry": "Replay move {n}",
       "endcard.retryBtn": "Replay",
       "endcard.retryAgain": "Try again",
+      "endcard.nudge": "{head} · See the summary",
       "endcard.again": "New game",
       "endcard.practice": "Drill it",
       "endcard.review": "Review",
@@ -1098,6 +1102,28 @@
     },
   };
 
+  // Windows 上没有 ⌘,也没有绿键和 View 菜单。快捷键本身两边都认(metaKey || ctrlKey),
+  // 错的只是说明文字 —— 按平台换掉这几条,其余照常查字典。
+  const IS_WIN = typeof navigator !== "undefined" && /^Win/i.test(navigator.platform || "");
+  const WIN = {
+    zh: {
+      "help.undo": "Z / Ctrl+Z",
+      "help.new": "N / Ctrl+N",
+      "help.modes": "Ctrl+1 / Ctrl+2",
+      "help.fullscreen": "F",
+      "help.fullscreen.d": "按 F 看怎样放大窗口",
+      "fs.tip": "放大：双击标题栏，或点窗口右上角的最大化按钮",
+    },
+    en: {
+      "help.undo": "Z / Ctrl+Z",
+      "help.new": "N / Ctrl+N",
+      "help.modes": "Ctrl+1 / Ctrl+2",
+      "help.fullscreen": "F",
+      "help.fullscreen.d": "Press F for how to enlarge the window",
+      "fs.tip": "Enlarge: double-click the title bar, or use the window’s maximize button",
+    },
+  };
+
   let lang = "zh";
 
   function storage() { return global.GobanHost || null; }
@@ -1125,7 +1151,7 @@
   /** Look up `key`, filling {placeholders} from `params`; falls back to 中文. */
   function t(key, params) {
     const table = DICT[lang] || DICT.zh;
-    let s = table[key];
+    let s = (IS_WIN && WIN[lang] && WIN[lang][key]) || table[key];
     if (s == null) s = DICT.zh[key];
     if (s == null) return key;
     if (params) {
