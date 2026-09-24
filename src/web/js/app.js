@@ -117,9 +117,9 @@
     if (ruleSwitched) {
       ruleSet = importRule;
       if (isRenju()) openingRule = "standard";
-      saveSettings();
     }
     endRetry(false);
+    hideEndCard();
     history = s.history;
     viewIndex = s.viewIndex;
     board = s.board;
@@ -345,14 +345,14 @@
   function coachFacts(preBoard, sColor, played) {
     const oppC = opp(sColor);
     const playedWins = Core.wouldWinRule(preBoard, played.r, played.c, sColor, isRenju());
-    if (playedWins) return { grade: "best", text: t("coach.winning") };
+    if (playedWins) return { grade: "best", key: "coach.winning" };
     // missed win: a five was available but not taken
     const myWins = winCellsRule(preBoard, sColor);
-    if (myWins.length) return { grade: "blunder", kind: "missedWin", text: t("coach.missedWin"), best: myWins[0] };
+    if (myWins.length) return { grade: "blunder", kind: "missedWin", key: "coach.missedWin", best: myWins[0] };
     // allowed opponent win-in-1 the move failed to prevent
     const after = preBoard.map((row) => row.slice());
     after[played.r][played.c] = sColor;
-    if (winCellsRule(after, oppC).length) return { grade: "blunder", kind: "missedBlock", text: t("coach.missedBlock") };
+    if (winCellsRule(after, oppC).length) return { grade: "blunder", kind: "missedBlock", key: "coach.missedBlock" };
     return null;
   }
 
@@ -390,7 +390,7 @@
     const preBoard = boardAfter(i - 1);
     const hard = coachFacts(preBoard, sColor, played);
     // show the instant verdict right away; the better-move marker fills in async
-    analysisVerdict = hard || { grade: "pending", text: t("coach.pending") };
+    analysisVerdict = hard || { grade: "pending", key: "coach.pending" };
     analysisCell = hard && hard.best ? hard.best : null;
     const gen = ++analysisGen;
     const diff = difficulty === "easy" ? "normal" : difficulty === "extreme" ? "hard" : difficulty;
@@ -404,17 +404,17 @@
           if (!hard) {
             if (!best) {
               // Worker cancel/timeout → null; do not cache as "最佳一手".
-              analysisVerdict = { grade: "ok", text: t("coach.incomplete") };
+              analysisVerdict = { grade: "ok", key: "coach.incomplete" };
               analysisCell = null;
               sync();
               return;
             }
             if (best.r !== played.r || best.c !== played.c) {
               cell = best;
-              verdict = { grade: "ok", text: t("coach.better") };
+              verdict = { grade: "ok", key: "coach.better" };
             } else {
               cell = null;
-              verdict = { grade: "best", text: t("coach.best") };
+              verdict = { grade: "best", key: "coach.best" };
             }
           } else if (!hard.best && best && (best.r !== played.r || best.c !== played.c)) {
             cell = best; // pair a blunder verdict with the recommended move
@@ -428,7 +428,7 @@
           if (gen !== analysisGen || viewIndex !== i) return;
           // Don't leave the UI wedged on「分析中…」when the engine path fails
           if (!hard) {
-            analysisVerdict = { grade: "ok", text: t("coach.incomplete") };
+            analysisVerdict = { grade: "ok", key: "coach.incomplete" };
             analysisCell = null;
             sync();
           }
@@ -674,12 +674,16 @@
       // (两者都是平衡手段)。v1.55 起禁手不再蕴含双人 —— 引擎交货口已保证合法。
       if (ruleSet === "renju") openingRule = "standard";
     } catch (_) {}
+    prefRule = ruleChoice();
   }
 
   function saveSettings() {
+    // 规则存的是**偏好**,不是这一局:导入的连珠棋谱、库里打开的旧局会临时改掉
+    // 这一局的 ruleSet,但不该顺手改掉玩家在侧栏选的那一格(v1.63.1)。
+    const pref = { ruleSet: prefRule === "renju" ? "renju" : "free", openingRule: prefRule === "swap2" ? "swap2" : "standard" };
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel, showCoords, analysisOn, openingRule, ruleSet })
+      JSON.stringify({ mode, difficulty, humanColor, soundOn, themeId, thinkLevel, showCoords, analysisOn, openingRule: pref.openingRule, ruleSet: pref.ruleSet })
     );
   }
 
@@ -708,6 +712,13 @@
     ruleSet = val === "renju" ? "renju" : "free";
     openingRule = val === "swap2" ? "swap2" : "standard";
   }
+
+  /**
+   * 侧栏那一格的选择(偏好)。ruleSet / openingRule 是**这一局**的规则,可以被棋谱
+   * 或旧局临时改掉;新局一律回到这里。
+   * @type {'free'|'swap2'|'renju'}
+   */
+  let prefRule = "free";
 
   /**
    * 黑在 (r,c) 落子的禁手原因,没有则 null。白方与自由式一律 null。
@@ -1185,6 +1196,7 @@
 
   function startRetry(ply) {
     if (!history.length || ply < 1 || ply > history.length) return;
+    if (retry && ply > retry.ply) return; // 那一手只在重下线上,原局里没有它
     if (retry) {
       // 重下之中再重下:以原局为准,不嵌套
       const src = retry.source;
@@ -1276,6 +1288,7 @@
     if (!card) return;
     const show = endCardOn && result !== "play" && history.length > 0;
     card.hidden = !show;
+    syncEndNudge();
     if (!show) return;
     const title = document.getElementById("end-card-title");
     const body = document.getElementById("end-card-body");
@@ -1322,7 +1335,7 @@
         if (keys.length > 1) {
           const more = document.createElement("div");
           more.className = "muted endcard-more";
-          more.textContent = t("endcard.more", { list: keys.slice(1).map((k) => k.i).join("、") });
+          more.textContent = t("endcard.more", { list: keys.slice(1).map((k) => k.i).join(t("list.sep")) });
           body.appendChild(more);
         }
       }
@@ -1341,7 +1354,23 @@
     if (againBtn) againBtn.textContent = t(retry ? "endcard.retryAgain" : "endcard.again");
   }
 
+  /**
+   * 终局卡住在侧栏里。窗口窄于 900 时侧栏不自动展开(展开就是一层盖住棋盘的抽屉),
+   * 于是 v1.63 的整条学习闭环在窄窗口下没有入口:一局下完只剩状态胶囊里的「白棋胜」。
+   * 侧栏收着时,在棋盘下沿放一扇门;侧栏一开,门就撤。
+   */
+  function syncEndNudge() {
+    const el = document.getElementById("end-nudge");
+    if (!el) return;
+    const card = document.getElementById("end-card");
+    const show = !!card && !card.hidden && !isPanelOpen();
+    el.hidden = !show;
+    if (show) el.textContent = t("endcard.nudge", { head: document.getElementById("end-card-title").textContent });
+  }
+
   function wireEndCard() {
+    const nudge = document.getElementById("end-nudge");
+    if (nudge) nudge.onclick = () => { setPanelOpen(true); };
     const retryBtn = document.getElementById("end-card-retry");
     if (retryBtn) retryBtn.onclick = () => { startRetry(Number(retryBtn.dataset.ply)); };
     const practiceBtn = document.getElementById("end-card-practice");
@@ -1400,9 +1429,12 @@
     const snap = {
       v: 4, history: g.history, mode: g.mode, difficulty: g.difficulty || difficulty,
       humanColor: g.humanColor || "b", ruleSet: g.ruleSet, elapsedBaseMs: g.durationMs || 0,
-      originalStartedAt: g.startedAt, statsEndedAt: g.endedAt, importPaused: false, archiveId: g.id,
+      // 不带 statsEndedAt:那是「这次会话记下的终局」的凭据,悔棋拿它去撤统计、删对局库。
+      // 库里的旧局早已记过,打开来看、悔棋接着下,都不该把它从库里抹掉。
+      originalStartedAt: g.startedAt, importPaused: false, archiveId: g.id,
     };
     if (!applySnapshot(snap)) { toast(t("games.missing")); return; }
+    hideEndCard(); // 终局卡属于刚下完的那一局;打开旧局是复盘,侧栏复盘面板接手
     lastArchiveId = g.id;
     if (result !== "play") statsRecordedGen = gameGen; // 已经记过,不再记
     closeSlots();
@@ -1549,6 +1581,7 @@
         }
       }
     }
+    syncEndNudge();
     // Follow the .28s CSS layout transition frame-by-frame, then settle —
     // a single mid-transition resize left the canvas at a stale size.
     panelAnimUntil = performance.now() + 340;
@@ -1922,7 +1955,7 @@
     // computer never moved again, and nothing called sync(), so the pill stayed
     // frozen on "电脑思考中…" forever. The button is disabled in that state,
     // but z / Cmd-Z / the native menu item all reach undo() directly.
-    if (!history.length || hintBusy) return;
+    if (history.length <= undoFloor() || hintBusy) return;
     // Undo doubles as the way out of a long think: cancel first, then retract
     // the move that triggered it. Every path below ends in sync() + maybeAiTurn().
     abortThinking();
@@ -1953,8 +1986,10 @@
     viewIndex = history.length;
     board = boardAfter(history.length);
     if (wasRecorded) {
-      Stats.unrecordByEndedAt(endedAt);
-      Archive.removeByEndedAt(endedAt);
+      if (endedAt) {
+        Stats.unrecordByEndedAt(endedAt);
+        Archive.removeByEndedAt(endedAt);
+      }
       lastArchiveId = null;
       statsRecordedGen = -1;
       lastStatsEndedAt = null;
@@ -1969,8 +2004,15 @@
     maybeAiTurn();
   }
 
+  /**
+   * 悔棋最多退到哪一手。重下关键一手时,失着之前的那段是原局,不属于这盘练习 ——
+   * 退过去,结束时存下的分支就会从错的局面长出来(v1.63.1)。
+   */
+  function undoFloor() { return retry ? retry.ply - 1 : 0; }
+
   function reset(opts) {
     gameGen += 1;
+    applyRuleChoice(prefRule); // 新局回到偏好;上一局若是导入的连珠棋谱,规则只属于它
     board = emptyBoard();
     turn = "b";
     result = "play";
@@ -2177,7 +2219,7 @@
       verdictEl.hidden = !show;
       if (show) {
         const who = t((viewIndex - 1) % 2 === 0 ? "side.black" : "side.white");
-        verdictEl.textContent = t("coach.line", { n: viewIndex, who: who, text: analysisVerdict.text });
+        verdictEl.textContent = t("coach.line", { n: viewIndex, who: who, text: t(analysisVerdict.key) });
         verdictEl.className = "coach-verdict grade-" + (analysisVerdict.grade || "ok");
       }
     }
@@ -2186,7 +2228,7 @@
 
     undoBtns.forEach((b) => {
       // NOT disabled while aiThinking — 悔棋 is the cancel affordance (see abortThinking).
-      if (b) b.disabled = history.length === 0 || hintBusy || !live || !!swap2;
+      if (b) b.disabled = history.length <= undoFloor() || hintBusy || !live || !!swap2;
     });
     document.getElementById("rep-start").disabled = viewIndex <= 0;
     document.getElementById("rep-prev").disabled = viewIndex <= 0;
@@ -2264,6 +2306,13 @@
 
     syncSettingsUI();
     Review.renderSide();
+    // 重下线上第 ply 手之后的着法不在原局里:从那里「重下」或「练这一手」都会落到原局
+    // 同号的另一手上(v1.63.1)。只留推演。
+    const offOriginal = !!retry && viewIndex > retry.ply;
+    for (const id of ["review-side-retry", "review-side-practice"]) {
+      const b = document.getElementById(id);
+      if (b) b.hidden = offOriginal;
+    }
     syncRetryBar();
     syncEndCard();
     syncDailyBadge();
@@ -2370,7 +2419,8 @@
       const out = [];
       const push = (g) => {
         if (!g || !g.history || !g.history.length) return;
-        const sig = g.history.length + ":" + g.history[g.history.length - 1].r + "," + g.history[g.history.length - 1].c + ":" + g.history[0].r + "," + g.history[0].c;
+        // 整条手顺做键:几乎每局都从天元开局,「手数 + 首末手」会把不同的两局当成一局
+        const sig = g.history.map((m) => m.r * 15 + m.c).join(",");
         if (seen.has(sig)) return;
         seen.add(sig);
         out.push(g);
@@ -2496,8 +2546,9 @@
       if (!b) return;
       const val = b.dataset.rule;
       if (val !== "free" && val !== "swap2" && val !== "renju") return;
-      if (val === ruleChoice()) return;
+      if (val === ruleChoice() && val === prefRule) return;
       if (history.length && !(await confirmNative(t("confirm.switchRule"), t("confirm.switchRuleTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
+      prefRule = val;
       applyRuleChoice(val);
       saveSettings();
       reset({ keepSettings: true });
@@ -2656,6 +2707,8 @@
       if (Practice.isOpen()) { Practice.close(); return; }
       if (settingsModal.classList.contains("show")) { closeSettings(); return; }
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
+      // 棋盘有焦点时 Esc 先交给棋盘(「Esc 离开」是它播报过的承诺),其次才收侧栏
+      if (document.activeElement === canvas && handleBoardKey(ev)) return;
       if (appEl.classList.contains("panel-open")) setPanelOpen(false);
       return;
     }

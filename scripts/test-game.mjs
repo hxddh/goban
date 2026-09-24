@@ -1595,10 +1595,10 @@ const Practice = ctx.GobanPractice;
 
   const coachFacts = (pre, color, played) => {
     if (Core.wouldWin(pre, played.r, played.c, color)) return { grade: "best", text: "胜着" };
-    if (Ai.listWinCells(pre, color).length) return { grade: "blunder", text: "错失胜着" };
+    if (Ai.listWinCells(pre, color).length) return { grade: "blunder", kind: "missedWin", text: "错失胜着" };
     const a = pre.map((r) => r.slice());
     a[played.r][played.c] = color;
-    if (Ai.listWinCells(a, Core.opp(color)).length) return { grade: "blunder", text: "漏防对手成五" };
+    if (Ai.listWinCells(a, Core.opp(color)).length) return { grade: "blunder", kind: "missedBlock", text: "漏防对手成五" };
     return null;
   };
   let gen = 0;
@@ -1983,6 +1983,28 @@ const Practice = ctx.GobanPractice;
       }
     }
     assert(missing.length === 0, "每种题型的题面 / 答错 / 两级提示中英都有 (" + missing.join(", ") + ")");
+  }
+
+  // v1.63.1:Windows 上的快捷键说明不该写 ⌘、绿键和 View 菜单。同一份 i18n.js
+  // 分别放进 Win32 / MacIntel 两个上下文,两个方向都要对 —— 只查 Windows 的话,
+  // 把 ⌘ 全换成 Ctrl 也能过。
+  {
+    const src = fs.readFileSync(path.join(root, "src/web/js/i18n.js"), "utf8");
+    const on = (platform) => {
+      const doc = { documentElement: { setAttribute() {} }, querySelectorAll: () => [], querySelector: () => null };
+      const c = { console, navigator: { platform }, document: doc };
+      vm.createContext(c);
+      vm.runInContext(src, c, { filename: "i18n.js" });
+      return c.GobanI18n;
+    };
+    const win = on("Win32"), mac = on("MacIntel");
+    const keys = ["help.undo", "help.new", "help.modes", "help.fullscreen", "help.fullscreen.d", "fs.tip"];
+    const winBad = keys.filter((k) => /⌘|⌃|Zoom|View →/.test(win.t(k)));
+    win.setLang("en");
+    const winBadEn = keys.filter((k) => /⌘|⌃|Zoom|View →/.test(win.t(k)));
+    assert(winBad.length === 0 && winBadEn.length === 0 && /Ctrl\+Z/.test(win.t("help.undo")),
+      "Windows 快捷键说明没有 ⌘ / 绿键 / View 菜单 (" + winBad.concat(winBadEn).join(", ") + ")");
+    assert(/⌘Z/.test(mac.t("help.undo")) && /⌘⌃F/.test(mac.t("fs.tip")), "反证:macOS 上仍是 ⌘ 与原来的全屏说明");
   }
 
   // ---- Engine-floor gates -------------------------------------------------
@@ -2501,6 +2523,9 @@ const Practice = ctx.GobanPractice;
   assert(Sgf.parseSgf(renju).ruleSet === "renju", "RU[Renju] round-trips as renju");
   assert(Sgf.parseSgf(free).ruleSet === "free", "RU[Gomoku] round-trips as free");
   assert(Sgf.parseSgf("(;SZ[15];B[hh];W[ih])").ruleSet === null, "no RU[] → null (caller keeps its rule)");
+  assert(Sgf.parseSgf("(;SZ[15]GRU[Renju];B[hh];W[ih])").ruleSet === null
+    && Sgf.parseSgf("(;SZ[15]\nRU[Renju];B[hh];W[ih])").ruleSet === "renju",
+    "RU 必须是完整的属性名:GRU[..] 不算,换行后的 RU[..] 算");
   assert(Sgf.ruleFromSgf("RU[RIF]") === "renju" && Sgf.ruleFromSgf("RU[Freestyle]") === "free" && Sgf.ruleFromSgf("RU[Chinese]") === null,
     "rule names are recognised loosely, unknown ones ignored");
   // 反证:同两手、不同 RU,解析结果**必须**不同 —— 这正是评审报告里的 P0
@@ -2667,6 +2692,14 @@ const Practice = ctx.GobanPractice;
   await Review.deepen({ difficulty: "normal" });
   assert(before >= 1 && Review.getData().blunders.filter((b) => b.tier === "soft").length === 0,
     "反证:when the engine would have played the same move, the soft flag is withdrawn");
+  // v1.63.1:引擎请求被别的请求顶掉时以 null 了结(engine.restartWorker)。那不是「引擎同意」——
+  // 此前 null 与同意同走撤销分支,开着单手分析点一下侧栏,软失着就整批消失。
+  setup(loose, async () => null);
+  const softN = Review.compute().blunders.filter((b) => b.tier === "soft").length;
+  await Review.deepen({ difficulty: "normal" });
+  const dn = Review.getData();
+  assert(softN >= 1 && dn.blunders.filter((b) => b.tier === "soft").length === softN && !dn.deepened,
+    "an interrupted engine call (null) keeps the flag and leaves the pass unfinished");
 }
 
 if (failed) {

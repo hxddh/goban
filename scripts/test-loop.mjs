@@ -342,6 +342,142 @@ const GAME = [[7, 7], [8, 7], [7, 8], [8, 8], [7, 9], [8, 9], [7, 10], [8, 10], 
   await page.close();
 }
 
+// ======== v1.63.1:对 v1.63 的一轮正确性复核,每条一道闸门 ========
+async function finishGame(page) {
+  const click = clicker(page);
+  await toPvp(page);
+  for (const [r, c] of GAME) { await click(r, c); await page.waitForTimeout(100); }
+  await page.waitForTimeout(600);
+}
+const CJK = /[\u4e00-\u9fff]/;
+
+// ---- 8. 语言切换后,终局卡与侧栏里的失着原因跟着换 ----
+{
+  const page = await newPage();
+  await finishGame(page);
+  const zhBody = await text(page, "end-card-body");
+  await page.evaluate(() => document.getElementById("settings-btn").click());
+  await page.waitForTimeout(150);
+  await page.evaluate(() => document.querySelector('#lang-seg button[data-lang="en"]').click());
+  await page.waitForTimeout(200);
+  await page.evaluate(() => document.getElementById("settings-close").click());
+  await page.waitForTimeout(150);
+  const enBody = await text(page, "end-card-body");
+  // 反证:切换之前确实是中文,否则「没有中文」是空转
+  report("8 语言切换后终局卡不留旧语言(失着原因存键不存译文)",
+    CJK.test(zhBody) && /missed block/.test(enBody) && !CJK.test(enBody),
+    JSON.stringify({ zhBody, enBody, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- 9. 从对局库打开旧局再悔棋,不删库、不撤统计 ----
+{
+  const page = await newPage();
+  await finishGame(page);
+  const statsBefore = await page.evaluate(() => localStorage.getItem("goban.v12.stats"));
+  await page.evaluate(() => document.getElementById("btn-new").click());
+  await page.waitForTimeout(150);
+  await dismissConfirm(page);
+  await page.evaluate(() => document.getElementById("sgf-slots").click());
+  await page.waitForTimeout(200);
+  await page.evaluate(() => document.querySelector("#games-list .game-open").click());
+  await page.waitForTimeout(500);
+  await dismissConfirm(page);
+  await page.waitForTimeout(300);
+  const cardHidden = await hidden(page, "end-card");
+  await page.evaluate(() => document.getElementById("undo").click());
+  await page.waitForTimeout(300);
+  const s = await save(page);
+  const games = await archive(page);
+  const statsAfter = await page.evaluate(() => localStorage.getItem("goban.v12.stats"));
+  report("9 旧局悔棋:局面退一手,但对局库与统计原样;打开旧局不带上一局的终局卡",
+    s.history.length === 8 && games.length === 1 && games[0].history.length === 9 && statsAfter === statsBefore && !!statsBefore && cardHidden,
+    JSON.stringify({ h: s.history.length, games: games.length, statsSame: statsAfter === statsBefore, cardHidden, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- 10. 导入连珠棋谱只改这一局,不改侧栏偏好;新局回到偏好 ----
+{
+  const page = await newPage();
+  await toPvp(page);
+  const sgf = "(;GM[4]FF[4]SZ[15]RU[Renju];B[hh];W[ih])";
+  await page.evaluate(async (x) => { await navigator.clipboard.writeText(x); }, sgf);
+  await page.evaluate(() => document.getElementById("sgf-paste").click());
+  await page.waitForTimeout(500);
+  await dismissConfirm(page);
+  await page.waitForTimeout(200);
+  const during = await save(page);
+  const pref = await page.evaluate(() => JSON.parse(localStorage.getItem("goban.v11.settings") || "{}"));
+  await page.evaluate(() => document.getElementById("btn-new").click());
+  await page.waitForTimeout(150);
+  await dismissConfirm(page);
+  await page.waitForTimeout(200);
+  const rule = await page.evaluate(() => (document.querySelector("#rule-seg button.active") || {}).dataset.rule);
+  report("10 导入 RU[Renju]:本局按连珠,设置里的规则不动,新局回到自由",
+    during.ruleSet === "renju" && pref.ruleSet === "free" && rule === "free",
+    JSON.stringify({ during: during.ruleSet, pref: pref.ruleSet, rule, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- 11. 重下时悔棋不越过失着那一手 ----
+{
+  const page = await newPage();
+  await finishGame(page);
+  await page.click("#end-card-retry");
+  await page.waitForTimeout(400);
+  const before = (await save(page)).history.length;
+  const disabled = await page.evaluate(() => document.getElementById("undo").disabled);
+  await page.keyboard.press("z");
+  await page.waitForTimeout(300);
+  const after = await save(page);
+  report("11 重下第 8 手:悔棋按钮灰、按 Z 也退不到原局那段",
+    before === 7 && disabled && after.history.length === 7 && after.retry && after.retry.ply === 8,
+    JSON.stringify({ before, disabled, after: after.history.length, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- 12. 窄窗口:侧栏不自动展开,棋盘下沿有终局的门 ----
+{
+  const page = await newPage();
+  await page.setViewportSize({ width: 820, height: 640 });
+  await page.waitForTimeout(200);
+  const click = clicker(page);
+  await toPvp(page);
+  await page.keyboard.press("Escape"); // 窄窗口下侧栏是盖住棋盘的抽屉,收起来再下
+  await page.waitForTimeout(400);
+  for (const [r, c] of GAME) { await click(r, c); await page.waitForTimeout(100); }
+  await page.waitForTimeout(600);
+  const panelOpen = await page.evaluate(() => document.getElementById("app").classList.contains("panel-open"));
+  const nudgeHidden = await hidden(page, "end-nudge");
+  const nudge = await text(page, "end-nudge");
+  await page.evaluate(() => { const b = document.getElementById("end-nudge"); if (b) b.click(); });
+  await page.waitForTimeout(450);
+  const openedAfter = await page.evaluate(() => document.getElementById("app").classList.contains("panel-open"));
+  const nudgeGone = await hidden(page, "end-nudge");
+  report("12 窄窗口终局:侧栏收着时有一扇门,点开侧栏,门随即撤掉",
+    !panelOpen && !nudgeHidden && /黑棋胜|Black wins/.test(nudge) && openedAfter && nudgeGone,
+    JSON.stringify({ panelOpen, nudgeHidden, nudge, openedAfter, nudgeGone, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- 13. 棋盘聚焦时 Esc 先离开棋盘,不收侧栏 ----
+{
+  const page = await newPage();
+  await toPvp(page);
+  const openBefore = await page.evaluate(() => document.getElementById("app").classList.contains("panel-open"));
+  await page.focus("#board");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(150);
+  const st = await page.evaluate(() => ({
+    focused: document.activeElement === document.getElementById("board"),
+    open: document.getElementById("app").classList.contains("panel-open"),
+  }));
+  report("13 棋盘上按 Esc:离开棋盘(兑现播报里的「Esc 离开」),侧栏不动",
+    openBefore && !st.focused && st.open, JSON.stringify({ openBefore, st, errs: page.__errors }));
+  await page.close();
+}
+
 await browser.close();
 server.close();
 fs.rmSync(WORKER_SRC_DIR, { recursive: true, force: true });

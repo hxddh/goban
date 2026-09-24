@@ -697,6 +697,52 @@
   const FROM_GAMES_MAX = 24;
 
   /**
+   * 一局派生出的题只取决于它的手顺与规则,所以按局缓存(v1.63.1)。此前缓存键是
+   * 整排棋局的指纹,而当前对局每落一子指纹就变 —— 每手都把对局库从头重扫一遍,
+   * 100 局时每次 sync() 要 75–106ms。现在每手只重算正在下的这一局。
+   */
+  const perGameCache = new Map();
+  const PER_GAME_CACHE_MAX = 256;
+
+  function puzzlesOfGame(g) {
+    const history = g.history;
+    const renju = !!g.renju;
+    const sig = (g.id || "") + (renju ? "R" : "") + ":" + history.map((m) => m.r * 15 + m.c).join(",");
+    const hit = perGameCache.get(sig);
+    if (hit) return hit;
+    const out = [];
+    for (let i = 1; i <= history.length; i++) {
+      const side = (i - 1) % 2 === 0 ? "b" : "w";
+      const pre = Core.boardAfter(history, i - 1);
+      const played = history[i - 1];
+      const meta = { renju: renju, gameId: g.id || null, ply: i };
+      if (Core.wouldWinRule(pre, played.r, played.c, side, renju)) continue; // played the win
+      let p = null;
+      if (winCells(pre, side, renju).length) {
+        p = makePuzzle(pre, side, "win1", SRC_GAME, null, meta);
+      } else {
+        const after = cloneBoard(pre);
+        after[played.r][played.c] = side;
+        if (winCells(after, Core.opp(side), renju).length) {
+          p = makePuzzle(pre, side, "defend", SRC_GAME, null, meta); // null when hopeless
+        }
+      }
+      if (p) out.push(p);
+      // 连珠:黑到手且盘上有 1–3 个禁手点 → 「找禁手点」
+      if (renju && side === "b" && i > 6) {
+        const fp = Core.renjuForbiddenPoints(pre);
+        if (fp.length >= 1 && fp.length <= 3) {
+          const f = makePuzzle(pre, "b", "forbid", SRC_GAME, null, meta);
+          if (f) out.push(f);
+        }
+      }
+    }
+    if (perGameCache.size >= PER_GAME_CACHE_MAX) perGameCache.clear();
+    perGameCache.set(sig, out);
+    return out;
+  }
+
+  /**
    * Derive puzzles from played games: missed wins + recoverable missed
    * defenses, and (连珠局)禁手陷阱. 每道题带着原局 id 与手数,练完能回去。
    */
@@ -706,42 +752,14 @@
     if (gamePuzzleCache.sig === sig) return gamePuzzleCache.out;
     const out = [];
     const seen = new Set();
-    const push = (p) => {
-      if (!p) return false;
-      const key = puzzleKey(p);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      out.push(p);
-      return out.length >= FROM_GAMES_MAX;
-    };
     for (const g of games) {
-      const history = g && g.history;
-      if (!Array.isArray(history) || history.length < 2) continue;
-      const renju = !!g.renju;
-      for (let i = 1; i <= history.length; i++) {
-        const side = (i - 1) % 2 === 0 ? "b" : "w";
-        const pre = Core.boardAfter(history, i - 1);
-        const played = history[i - 1];
-        const meta = { renju: renju, gameId: g.id || null, ply: i };
-        if (Core.wouldWinRule(pre, played.r, played.c, side, renju)) continue; // played the win
-        let p = null;
-        if (winCells(pre, side, renju).length) {
-          p = makePuzzle(pre, side, "win1", SRC_GAME, null, meta);
-        } else {
-          const after = cloneBoard(pre);
-          after[played.r][played.c] = side;
-          if (winCells(after, Core.opp(side), renju).length) {
-            p = makePuzzle(pre, side, "defend", SRC_GAME, null, meta); // null when hopeless
-          }
-        }
-        if (push(p)) break;
-        // 连珠:黑到手且盘上有 1–3 个禁手点 → 「找禁手点」
-        if (renju && side === "b" && i > 6) {
-          const fp = Core.renjuForbiddenPoints(pre);
-          if (fp.length >= 1 && fp.length <= 3) {
-            if (push(makePuzzle(pre, "b", "forbid", SRC_GAME, null, meta))) break;
-          }
-        }
+      if (!g || !Array.isArray(g.history) || g.history.length < 2) continue;
+      for (const p of puzzlesOfGame(g)) {
+        const key = puzzleKey(p);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(p);
+        if (out.length >= FROM_GAMES_MAX) break;
       }
       if (out.length >= FROM_GAMES_MAX) break;
     }
@@ -937,7 +955,8 @@
    *   `due`    next review date
    */
   function recordAnswer(prev, key, correct, dateStr, how) {
-    const st = prev && prev.items ? { items: Object.assign({}, prev.items) } : { items: {} };
+    // 保留 v:丢了它,下一次 progressFor 会把整份进度当旧格式再搬一遍、再写一遍
+    const st = prev && prev.items ? { items: Object.assign({}, prev.items), v: prev.v } : { items: {} };
     const it = Object.assign({ n: 0, wrong: 0, ok: false, streak: 0, hinted: 0, revealed: 0 }, st.items[key]);
     it.n += 1;
     it.last = dateStr;
@@ -1498,7 +1517,14 @@
     if (A) A.playAnswer(false);
     // 看答案记为一次「看过」:不算错题本里的又一次错(attempts 为 0 时才计),
     // 但 streak 归零、明天到期 —— 看过答案的题不会被当成会了。
-    saveProgress(recordAnswer(loadProgress(), puzzleKey(cur), false, todayStr(), "revealed"));
+    const st = loadProgress();
+    const key = puzzleKey(cur);
+    if (!attempts) saveProgress(recordAnswer(st, key, false, todayStr(), "revealed"));
+    else if (st.items && st.items[key]) {
+      // 错过一次时已记了 wrong;看答案只再记一次「看过」,不再多算一次错
+      st.items[key] = Object.assign({}, st.items[key], { revealed: (st.items[key].revealed || 0) + 1 });
+      saveProgress(st);
+    }
     showAnswer(null, false);
     setFeedback(t("practice.revealed", { cells: answerCoords() }) + " " + wrongText(), "bad");
     endPuzzle();

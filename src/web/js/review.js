@@ -95,14 +95,14 @@
       const pre = deps.boardAfter(i - 1);
       const played = history[i - 1];
       const hard = deps.coachFacts(pre, color, played);
-      let reason = null;
+      let reasonKey = null;
       let drop = 0;
       let best = null;
       let punish = null;
       let kind = null;
       if (hard && hard.grade === "blunder") {
-        reason = hard.text;
         kind = hard.kind || null;
+        reasonKey = "coach." + kind;
         best = hard.best || null;
         // 漏防:对手下一手就能成五的那个点,既是「对手怎样惩罚」,也是「本该挡的点」
         if (!best && deps.winCells) {
@@ -121,11 +121,13 @@
         const before = sgn * adv[i - 1];
         const after = sgn * adv[Math.min(i + 1, N)];
         drop = before - after;
-        if (drop >= BLUNDER_DROP) reason = t("review.blunderReason");
+        if (drop >= BLUNDER_DROP) reasonKey = "review.blunderReason";
       }
-      if (reason) {
+      if (reasonKey) {
         blunders.push({
-          i, color, reason, drop,
+          i, color, reasonKey, drop,
+          // 存键不存译文:这份数据会活过一次语言切换(终局卡、侧栏、导出都读它)
+          get reason() { return t(this.reasonKey); },
           hard: !!(hard && hard.grade === "blunder"),
           tier: hard && hard.grade === "blunder" ? "hard" : "soft",
           kind: kind, best: best, punish: punish, gap: 0,
@@ -164,8 +166,9 @@
     const onProgress = (opts && opts.onProgress) || function () {};
     d.deepening = true;
     const history = deps.getHistory();
-    const soft = d.blunders.filter((b) => b.tier === "soft" || (b.tier === "hard" && !b.best));
+    const soft = d.blunders.filter((b) => !b.asked && (b.tier === "soft" || (b.tier === "hard" && !b.best)));
     let done = 0;
+    let unresolved = 0;
     const run = async () => {
       for (const b of soft) {
         if (gen !== deepenGen) return d;
@@ -176,16 +179,21 @@
           best = await deps.aiMoveAsync({ board: pre, side: b.color, difficulty: difficulty, timeMs: DEEPEN_MS });
         } catch (_) { best = null; }
         if (gen !== deepenGen) return d;
+        // null 不是「引擎也这么走」:另一路引擎请求(提示、单手分析)会重建 worker,
+        // 把这里悬着的请求以 null 了结。当作没问到,留在原档,下次打开复盘再问。
+        if (!best) { unresolved++; done++; onProgress(done, soft.length); continue; }
+        b.asked = true;
         if (b.tier === "soft") {
-          if (!best || sameCell(best, played)) {
-            b.tier = "clear"; // 引擎也这么走:不是失着
+          if (sameCell(best, played)) {
+            // 引擎也这么走:不是失着。当场撤掉 —— 进行中的每次 render 都读这份列表
+            d.blunders = d.blunders.filter((x) => x !== b);
           } else {
             const gap = scoreAfter(pre, best, b.color) - scoreAfter(pre, played, b.color);
             b.gap = gap;
             if (gap >= ENGINE_GAP) {
               b.tier = "engine";
               b.best = best;
-              b.reason = t("review.engineReason");
+              b.reasonKey = "review.engineReason";
               // 对手怎样惩罚:实际着之后对手的首选
               const after = pre.map((row) => row.slice());
               after[played.r][played.c] = b.color;
@@ -196,16 +204,15 @@
               } catch (_) { b.punish = null; }
             }
           }
-        } else if (best && !sameCell(best, played)) {
+        } else if (!sameCell(best, played)) {
           b.best = best;
         }
         done++;
         onProgress(done, soft.length);
       }
       if (gen !== deepenGen) return d;
-      d.blunders = d.blunders.filter((b) => b.tier !== "clear");
       d.summary = { b: d.blunders.filter((b) => b.color === "b").length, w: d.blunders.filter((b) => b.color === "w").length };
-      d.deepened = true;
+      d.deepened = unresolved === 0;
       d.deepening = false;
       return d;
     };
