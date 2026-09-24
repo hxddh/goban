@@ -2767,6 +2767,20 @@ const Practice = ctx.GobanPractice;
   const f1 = C3._debug.sane(pos1, { r: 7, c: 7 }), f2 = C3._debug.sane(pos1, null);
   assert(f1 && !pos1[f1.r][f1.c] && f2 && !pos1[f2.r][f2.c] && C3._debug.sane(pos1, { r: 7, c: 9 }).c === 9,
     "C3 出口兜底:占用点与空结果都换成空点,合法手原样放行");
+  // 预算管到 VCF:nodeBudget 2000 的普档在 200 个中盘局面上最多超几个节点(v1.65 评审前 VCF 不查预算,最坏 2622)
+  {
+    let seed = 7; const rnd2 = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    let worst = 0;
+    for (let t = 0; t < 200; t++) {
+      const b = Core.emptyBoard(); const k = 30 + Math.floor(rnd2() * 40); let side = "b", placed = 0;
+      while (placed < k) { const r = 2 + Math.floor(rnd2() * 11), c = 2 + Math.floor(rnd2() * 11); if (b[r][c]) continue; b[r][c] = side; placed++; side = Core.opp(side); }
+      let done = false; for (let r = 0; r < 15; r++) for (let c = 0; c < 15; c++) if (b[r][c] && Core.findWin(b, r, c, b[r][c])) done = true;
+      if (done) continue;
+      C3.aiMove({ board: b, side, difficulty: "normal", nodeBudget: 2000, vary: false });
+      worst = Math.max(worst, C3._debug.nodes());
+    }
+    assert(worst <= 2000 + 64, "C3 节点预算管到 VCF:预算 2000,200 个中盘局面最多用 " + worst);
+  }
 }
 
 // --- v1.64 index.html 结构:弹层之间互不嵌套,div 开合配平 ---

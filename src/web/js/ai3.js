@@ -320,7 +320,8 @@
   function vcf(side, depth) {
     const me = side, op = 1 - side, color = side + 1, opColor = 2 - side;
     if (has(me, P_FIVE)) return findCell(me, P_FIVE);
-    if (depth <= 0 || ++vcfNodes > VCF_NODE_CAP) return -1;
+    // 预算也管 VCF:它最多 6 万次递归,每次都经 make(),普档 400ms 与 nodeBudget 调用方都会被它拖过线
+    if (depth <= 0 || ++vcfNodes > VCF_NODE_CAP || outOfBudget()) return -1;
     if (count(op, P_FIVE) >= 2) return -1;
     let only = -1;
     if (has(op, P_FIVE)) only = findCell(op, P_FIVE);
@@ -608,6 +609,7 @@
     resetFrom(board2d);
     h1 = 0; h2 = 0;
     for (let cell = 0; cell < N; cell++) if (bd[cell]) hashXor(cell, bd[cell]);
+    nodes = 0; // 每一手从零数(resetFrom 摆子也经 make,早退的阶段不能带着上一手的数)
 
     if (stones <= 2) {
       lastStage = "book";
@@ -656,6 +658,7 @@
         vcfNodes = 0;
         const still = has(side, P_FIVE) ? -1 : vcf(op, prof.vcfDepth);
         unmake(cell); hashXor(cell, side + 1);
+        if (aborted) break; // 算到一半被预算截断的「挡得住」不作数
         if (still < 0) safe.push(cell);
         if (deadline > 0 && nowMs() >= deadline) break;
       }
@@ -733,7 +736,7 @@
     lastStage: () => lastStage,
     lastInfo: () => lastInfo,
     profileFor,
-    _debug: { sane, PAT, P4OF, resetFrom, make, unmake, p4, pat, cnt, vcf, evaluate, bd, codes: { DEAD, B1, F1, B2, F2, B3, F3, B4, F4, FIVE }, combos: { P_NONE, P_F2, P_B3, P_22, P_B3P, P_F3, P_F3P, P_33, P_B4, P_B4P, P_43, P_F4, P_FIVE } },
+    _debug: { sane, nodes: () => nodes, PAT, P4OF, resetFrom, make, unmake, p4, pat, cnt, vcf, evaluate, bd, codes: { DEAD, B1, F1, B2, F2, B3, F3, B4, F4, FIVE }, combos: { P_NONE, P_F2, P_B3, P_22, P_B3P, P_F3, P_F3P, P_33, P_B4, P_B4P, P_43, P_F4, P_FIVE } },
   };
 })(typeof window !== "undefined" ? window : globalThis);
 

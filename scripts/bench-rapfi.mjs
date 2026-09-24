@@ -56,8 +56,10 @@ function engineFor(diff) {
   if (E.GobanTier && E.GobanTier.engineFor) return E.GobanTier.engineFor(diff);
   return diff === "hard" || diff === "extreme" ? E.GobanAi2 : E.GobanAi;
 }
+// 普档发布时限 v1.65 起 400ms(app.js / ai-worker.js);量 v1.64 及更早的 ref 时仍是 250ms
+const NORMAL_MS = process.env.REF ? 250 : 400;
 const TIER = {
-  easy: { diff: "easy", ms: 0 }, normal: { diff: "normal", ms: 250 },
+  easy: { diff: "easy", ms: 0 }, normal: { diff: "normal", ms: NORMAL_MS },
   hard: { diff: "hard", ms: 2000 }, ext: { diff: "extreme", ms: 5000 },
 };
 
@@ -150,7 +152,7 @@ const tiers = (process.env.TIERS || "normal,hard,ext").split(",");
 const limits = (process.env.MS || "20,100").split(",").map(Number);
 const book = openingBook(num("OPENINGS", 12));
 const rapfi = new Rapfi(RAPFI);
-console.log(`引擎 ${process.env.REF || "工作区"} · 开局 ${book.length} 个 × 正反 · 各档按发布时限(简 0 / 普 250 / 难 2000 / 极 5000 ms)`);
+console.log(`引擎 ${process.env.REF || "工作区"} · 开局 ${book.length} 个 × 正反 · 各档按发布时限(简 0 / 普 ${NORMAL_MS} / 难 2000 / 极 5000 ms)`);
 const rows = [];
 for (const ms of limits) {
   await rapfi.init(ms);
