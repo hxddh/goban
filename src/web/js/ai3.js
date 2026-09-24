@@ -586,6 +586,7 @@
       maxDepth: extreme ? 30 : normal ? 12 : 18,
       rootWidth: extreme ? 26 : normal ? 20 : 26,
       inner: extreme ? [14, 10, 8] : normal ? [12, 9, 7] : [14, 10, 8],
+      // 见 aiMoveCore 3b:开着(根宽 36)时极对难 3/13/8,关掉并收回难档宽度 6/14/4
       denyVct: false,
     };
   }
@@ -665,8 +666,8 @@
         lastStage = "deny";
       }
     }
-    // 3b) 极档:对手有活三连杀(VCT)时,只留下拆得掉它的手。执白时这就是「难」与「极」
-    //     的分水岭 —— 自由式黑方先手必胜,白方要活下来,靠的正是在杀成形之前拆掉它。
+    // 3b) 对手有活三连杀(VCT)时,只留下拆得掉它的手。v1.65 默认关:逐点验证每手吃掉约三成
+    //     时间,实测极对难 −73(关掉后 +29)。留着,等多线程把时间补回来再开。
     if (prof.denyVct && cands.length > 1 && lastStage !== "deny") {
       const saveDeadline = deadline;
       if (deadline > 0) deadline = nowMs() + (deadline - nowMs()) * 0.35;
