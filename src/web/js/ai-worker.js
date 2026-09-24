@@ -8,10 +8,10 @@
  * The importScripts below only runs when this file is loaded standalone
  * (e.g. plain HTTP during development).
  */
-/* global GobanAi, GobanAi2 */
+/* global GobanAi, GobanAi2, GobanAi3, GobanTier */
 if (!self.GobanAi && typeof importScripts === "function") {
   try {
-    importScripts("core.js", "ai.js", "ai2.js");
+    importScripts("core.js", "ai.js", "ai2.js", "ai3.js");
   } catch (e) {
     self.postMessage({ type: "error", error: String(e && e.message ? e.message : e) });
   }
@@ -22,7 +22,7 @@ self.onmessage = function (ev) {
   const id = data.id;
   // health check: lets the app verify the worker actually booted
   if (data.ping) {
-    self.postMessage({ pong: true, engines: !!(self.GobanAi && self.GobanAi2) });
+    self.postMessage({ pong: true, engines: !!(self.GobanAi && self.GobanAi2 && self.GobanAi3 && self.GobanTier) });
     return;
   }
   try {
@@ -38,13 +38,10 @@ self.onmessage = function (ev) {
         timeMs = think === "fast" ? 2500 : think === "deep" ? 8000 : 5000;
       } else if (difficulty === "hard") {
         timeMs = think === "fast" ? 800 : think === "deep" ? 3500 : 2000;
-      } else if (difficulty === "normal") timeMs = 250;
+      } else if (difficulty === "normal") timeMs = 400;
       else timeMs = 30;
     }
-    const engine =
-      (difficulty === "hard" || difficulty === "extreme") && self.GobanAi2
-        ? self.GobanAi2
-        : self.GobanAi;
+    const engine = self.GobanTier ? self.GobanTier.engineFor(difficulty) : self.GobanAi;
     const move = engine.aiMove({
       board: data.board,
       humanColor: data.humanColor,

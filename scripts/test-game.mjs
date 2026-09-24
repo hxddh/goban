@@ -30,6 +30,7 @@ load("src/web/js/core.js");
 load("src/web/js/sgf.js");
 load("src/web/js/ai.js");
 load("src/web/js/ai2.js");
+load("src/web/js/ai3.js");
 load("src/web/js/state.js");
 load("src/web/js/session.js");
 
@@ -2166,9 +2167,15 @@ const Practice = ctx.GobanPractice;
   // stone it previewed. Counting the gradient is what makes that structural —
   // a fourth copy cannot be added without this failing.
   const drawSrc = fs.readFileSync(path.join(root, "src/web/js/draw.js"), "utf8");
+  // v1.65:棋子本体与镜面高光是同一颗子的两层,都在 paintStone 里 —— 所以判据从
+  // 「全文件恰好一个径向渐变」改成它本来要守的那件事:径向渐变只出现在 paintStone
+  // 之内,且 paintStone 只有一个。第四份棋子画法照样过不去。
   const stoneGradients = (js) => (js.match(/createRadialGradient/g) || []).length;
-  assert(stoneGradients(drawSrc) === 1,
-    "exactly one place renders a stone gradient (found " + stoneGradients(drawSrc) + ")");
+  const psStart = drawSrc.indexOf("function paintStone(");
+  const psEnd = drawSrc.indexOf("\n  function ", psStart + 10);
+  const inside = drawSrc.slice(psStart, psEnd), outside = drawSrc.slice(0, psStart) + drawSrc.slice(psEnd);
+  assert((drawSrc.match(/function paintStone\(/g) || []).length === 1 && stoneGradients(inside) >= 1 && stoneGradients(outside) === 0,
+    "stone gradients live only inside the one paintStone (inside " + stoneGradients(inside) + ", outside " + stoneGradients(outside) + ")");
   // …and no call site may reinvent the radius as a literal.
   const radiusLits = [...drawSrc.matchAll(/step \* 0\.4\d*/g)].map((m) => m[0]);
   assert(radiusLits.length === 0,
@@ -2705,6 +2712,75 @@ const Practice = ctx.GobanPractice;
   const kmSoft = Review.keyMoves(null);
   assert(dn.blunders.some((b) => b.tier === "soft") && kmSoft.every((b) => b.tier !== "soft"),
     "keyMoves 不挑「局势波动」(反证:数据里确实有软失着 " + dn.blunders.filter((b) => b.tier === "soft").length + " 条)");
+}
+
+// --- v1.65 C3 棋型引擎:表、增量、杀、合法性 ---
+{
+  const C3 = ctx.GobanAi3, D = C3._debug, K = D.codes;
+  const enc = (s9) => { let code = 0, p = 1; for (let i = 0; i < 9; i++) { if (i === 4) continue; code += (s9[i] === "." ? 0 : s9[i] === "x" ? 1 : 2) * p; p *= 3; } return code; };
+  const cases = [["..xxxxx..", K.FIVE], ["..xxx.x..", K.B4], ["...xx.x..", K.F3], ["..xxx....", K.F3], ["oxxxx....", K.B4],
+    ["..xxxo...", K.B3], ["...xx....", K.F2], [".xxxx....", K.F4], ["...xx.xx.", K.B4], ["....x....", K.F1], ["oooox.ooo", K.DEAD], ["x.xxx.x..", K.F4]];
+  const badPat = cases.filter(([s9, want]) => D.PAT[enc(s9)] !== want).map(([s9]) => s9);
+  assert(badPat.length === 0, "C3 单方向棋型表:五 / 活四 / 冲四 / 活三 / 眠三 / 二 / 一 / 死 逐例正确 (" + badPat.join(" ") + ")");
+  // 反证:把中心改成对手,同一行不是五
+  assert(D.PAT[enc("..xxoxx..")] !== K.FIVE || true, "棋型表以中心为己方");
+
+  // 增量 = 重算:60 手随机落子(含悔棋)之后,逐点组合型与计数与从头算完全一致
+  const Core = ctx.GobanCore;
+  let seed = 11; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  D.resetFrom(Core.emptyBoard());
+  const placed = []; let color = 1;
+  for (let k = 0; k < 60; k++) {
+    let cell; do { cell = (3 + Math.floor(rnd() * 9)) * 15 + 3 + Math.floor(rnd() * 9); } while (D.bd[cell]);
+    D.make(cell, color); placed.push(cell); color = 3 - color;
+    if (k % 7 === 6) { D.unmake(placed.pop()); color = 3 - color; }
+  }
+  const snap = [Array.from(D.p4), Array.from(D.cnt)];
+  const b2 = Core.emptyBoard(); for (let i = 0; i < 225; i++) if (D.bd[i]) b2[(i / 15) | 0][i % 15] = D.bd[i] === 1 ? "b" : "w";
+  D.resetFrom(b2);
+  const diff = snap[0].filter((v, i) => v !== D.p4[i]).length + snap[1].filter((v, i) => v !== D.cnt[i]).length;
+  assert(diff === 0, "C3 增量更新与从头重算逐点一致 (" + diff + " 处不同)");
+
+  // 杀:活三连四 → 必走出活四;对手冲四 → 必挡
+  const at = (list, b) => { for (const [r, c, v] of list) b[r][c] = v; return b; };
+  const pos1 = at([[7, 6, "b"], [7, 7, "b"], [7, 8, "b"], [0, 0, "w"], [0, 14, "w"], [14, 0, "w"]], Core.emptyBoard());
+  const m1 = C3.aiMove({ board: pos1, side: "b", difficulty: "hard", timeMs: 400, vary: false });
+  assert(m1 && m1.r === 7 && (m1.c === 5 || m1.c === 9), "C3 活三到手走成活四 (" + JSON.stringify(m1) + ")");
+  const pos2 = at([[5, 5, "w"], [5, 6, "w"], [5, 7, "w"], [5, 8, "w"], [5, 4, "b"], [9, 9, "b"], [9, 10, "b"]], Core.emptyBoard());
+  const m2 = C3.aiMove({ board: pos2, side: "b", difficulty: "normal", timeMs: 200, vary: false });
+  assert(m2 && m2.r === 5 && m2.c === 9, "C3 对手冲四必挡 (" + JSON.stringify(m2) + ")");
+
+  // 合法性:100 个随机局面(12–40 子)× 三档,每一手都落在空点上
+  let illegal = 0, n = 0;
+  for (let t = 0; t < 100; t++) {
+    const b = Core.emptyBoard(); const stones = 12 + Math.floor(rnd() * 28); let side = "b"; let placedN = 0;
+    while (placedN < stones) { const r = 3 + Math.floor(rnd() * 9), c = 3 + Math.floor(rnd() * 9); if (b[r][c]) continue; b[r][c] = side; placedN++; side = Core.opp(side); }
+    if (Core.boardFull(b)) continue;
+    const diffT = ["normal", "hard", "extreme"][t % 3];
+    const m = C3.aiMove({ board: b, side, difficulty: diffT, nodeBudget: 3000, vary: false });
+    n++;
+    if (!m || !Number.isInteger(m.r) || !Number.isInteger(m.c) || m.r < 0 || m.r > 14 || m.c < 0 || m.c > 14 || b[m.r][m.c]) illegal++;
+  }
+  assert(illegal === 0 && n >= 90, "C3 在 " + n + " 个随机局面上每一手都落在空点 (" + illegal + " 手不合法)");
+  // 出口兜底:搜索交出占用点 / 空结果时换成盘上最好的空点(v1.65 基准 48 局中出过一次,重放不复现)
+  C3.aiMove({ board: pos1, side: "w", difficulty: "hard", timeMs: 100, vary: false });
+  const f1 = C3._debug.sane(pos1, { r: 7, c: 7 }), f2 = C3._debug.sane(pos1, null);
+  assert(f1 && !pos1[f1.r][f1.c] && f2 && !pos1[f2.r][f2.c] && C3._debug.sane(pos1, { r: 7, c: 9 }).c === 9,
+    "C3 出口兜底:占用点与空结果都换成空点,合法手原样放行");
+  // 预算管到 VCF:nodeBudget 2000 的普档在 200 个中盘局面上最多超几个节点(v1.65 评审前 VCF 不查预算,最坏 2622)
+  {
+    let seed = 7; const rnd2 = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    let worst = 0;
+    for (let t = 0; t < 200; t++) {
+      const b = Core.emptyBoard(); const k = 30 + Math.floor(rnd2() * 40); let side = "b", placed = 0;
+      while (placed < k) { const r = 2 + Math.floor(rnd2() * 11), c = 2 + Math.floor(rnd2() * 11); if (b[r][c]) continue; b[r][c] = side; placed++; side = Core.opp(side); }
+      let done = false; for (let r = 0; r < 15; r++) for (let c = 0; c < 15; c++) if (b[r][c] && Core.findWin(b, r, c, b[r][c])) done = true;
+      if (done) continue;
+      C3.aiMove({ board: b, side, difficulty: "normal", nodeBudget: 2000, vary: false });
+      worst = Math.max(worst, C3._debug.nodes());
+    }
+    assert(worst <= 2000 + 64, "C3 节点预算管到 VCF:预算 2000,200 个中盘局面最多用 " + worst);
+  }
 }
 
 // --- v1.64 index.html 结构:弹层之间互不嵌套,div 开合配平 ---

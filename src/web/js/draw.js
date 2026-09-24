@@ -30,11 +30,11 @@
          muted brick while the status pill and the frame glow used this, so a
          win wore two different colours in one app. */
       winGlow: "#ffe08a",
-      boardTop: "#e8c49a", boardMid: "#d4a574", boardBot: "#c28b52",
+      boardTop: "#e4c294", boardMid: "#d8ad7b", boardBot: "#cb9c66",
       grain: true, line: "#3d2914", star: "#3d2914",
       style: "stone",
-      lastB: "rgba(255,255,255,0.4)",
-      lastW: "rgba(30,22,14,0.32)",
+      lastB: "rgba(255,246,230,0.86)",
+      lastW: "rgba(58,40,22,0.62)",
       win: "rgba(160, 70, 50, 0.55)",
       hint: "rgba(40, 110, 180, 0.75)",
       analysis: "rgba(210, 150, 30, 0.9)",
@@ -48,8 +48,8 @@
       boardTop: "#1e332c", boardMid: "#172822", boardBot: "#101c18",
       grain: false, line: "#5a7a6c", star: "#7dcea0",
       style: "stone",
-      lastB: "rgba(220,230,225,0.38)",
-      lastW: "rgba(10,16,14,0.4)",
+      lastB: "rgba(168,230,207,0.9)",
+      lastW: "rgba(16,40,32,0.66)",
       win: "rgba(125, 206, 160, 0.55)",
       hint: "rgba(120, 220, 180, 0.8)",
       analysis: "rgba(240, 190, 90, 0.95)",
@@ -63,8 +63,8 @@
       boardTop: "#f6ead4", boardMid: "#ecd9b5", boardBot: "#e2cba0",
       grain: true, line: "#6b5344", star: "#6b5344",
       style: "stone",
-      lastB: "rgba(255,255,255,0.45)",
-      lastW: "rgba(40,35,28,0.3)",
+      lastB: "rgba(255,246,230,0.86)",
+      lastW: "rgba(110,70,36,0.7)",
       win: "rgba(140, 90, 50, 0.5)",
       hint: "rgba(50, 100, 170, 0.75)",
       analysis: "rgba(190, 130, 20, 0.9)",
@@ -288,23 +288,30 @@
     const ghost = !!(opts && opts.ghost);
     const dpr = (opts && opts.dpr) || 1;
     const mute = ghost ? (c) => mixHex(c, GHOST_GREY, GHOST_MIX) : (c) => c;
+    // v1.65 材质:单一光源在左上。
+    //   白子是微暖的蛤碁石白,体积由明暗给出 —— 中间亮、向下向右渐暗到一圈带暖灰的边;
+    //        此前那圈灰描边(木盘上 alpha ≈ 0.36)读起来像矢量剪贴画。
+    //   黑子是哑光板岩,冷一点的深灰,高光宽而弱;此前一块灰斑,像塑料。
     const sg = ctx.createRadialGradient(
-      x - rr * 0.38, y - rr * 0.42, rr * 0.08, x, y, rr
+      x - rr * 0.34, y - rr * 0.4, rr * 0.05, x + rr * 0.06, y + rr * 0.08, rr * 1.02
     );
     if (s === "b") {
       if (themeId === "night") {
-        sg.addColorStop(0, mute("#4a4a4a"));
-        sg.addColorStop(0.35, mute("#1c1c1c"));
-        sg.addColorStop(1, mute("#050505"));
+        sg.addColorStop(0, mute("#4c5056"));
+        sg.addColorStop(0.3, mute("#212327"));
+        sg.addColorStop(0.75, mute("#0e0f11"));
+        sg.addColorStop(1, mute("#040405"));
       } else {
-        sg.addColorStop(0, mute("#6a6a6a"));
-        sg.addColorStop(0.4, mute("#242424"));
-        sg.addColorStop(1, mute("#050505"));
+        sg.addColorStop(0, mute("#5e6268"));
+        sg.addColorStop(0.32, mute("#2a2c30"));
+        sg.addColorStop(0.75, mute("#121315"));
+        sg.addColorStop(1, mute("#050506"));
       }
     } else {
-      sg.addColorStop(0, mute("#ffffff"));
-      sg.addColorStop(0.5, mute("#f2f2f2"));
-      sg.addColorStop(1, mute(themeId === "day" ? "#c8c8c8" : "#bcbcbc"));
+      sg.addColorStop(0, mute("#fffefb"));
+      sg.addColorStop(0.45, mute("#f4f2ec"));
+      sg.addColorStop(0.82, mute("#e2ded6"));
+      sg.addColorStop(1, mute(themeId === "day" ? "#aba699" : themeId === "night" ? "#cdc8bd" : "#bab4a8"));
     }
     // A real shadow, cast by the stone itself. What was here before was a
     // second disc of the same radius offset by a flat 1.2/1.8 bitmap px
@@ -342,10 +349,11 @@
     const sep = Math.abs(stoneLum - boardLum) / 255;   // 0 = invisible
     const need = Math.max(0, 1 - sep / 0.62);          // 0 when separated
     if (s === "w") {
+      // 边由上面那圈暖灰给出;这里只留一丝极淡的线,浅盘(日间)上才稍重一点
       ctx.beginPath();
-      ctx.arc(x, y, rr, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(0,0,0," + (0.16 + 0.30 * need).toFixed(3) + ")";
-      ctx.lineWidth = Math.max(1, dpr * (0.5 + 0.5 * need));
+      ctx.arc(x, y, rr - 0.25 * dpr, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(60,48,30," + (0.05 + 0.2 * need).toFixed(3) + ")";
+      ctx.lineWidth = Math.max(1, dpr * 0.6);
       ctx.stroke();
     } else if (need > 0.02) {
       const rim = ctx.createLinearGradient(x - rr, y - rr, x + rr, y + rr);
@@ -357,6 +365,17 @@
       ctx.strokeStyle = rim;
       ctx.lineWidth = Math.max(1, dpr);
       ctx.stroke();
+    }
+
+    if (!ghost) {
+      // 镜面高光:一小片,边缘柔 —— 让子「有釉」,而不是整片发亮
+      const hl = ctx.createRadialGradient(x - rr * 0.36, y - rr * 0.42, 0, x - rr * 0.36, y - rr * 0.42, rr * 0.42);
+      hl.addColorStop(0, s === "b" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.7)");
+      hl.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.beginPath();
+      ctx.arc(x, y, rr, 0, Math.PI * 2);
+      ctx.fillStyle = hl;
+      ctx.fill();
     }
 
     if (ghost) {
@@ -552,6 +571,8 @@
       // the frame still reads above the grid.
       const gridW = inkW(dpr);
       ctx.lineWidth = gridW;
+      // v1.65:盘内线退后一步(不透明度 0.72),外框保持实墨 —— 盘面更「静」,框仍立得住
+      ctx.globalAlpha = 0.72;
       ctx.lineCap = "square";
       const a0 = crisp(pad, gridW);
       const a1 = crisp(pad + step * (SIZE - 1), gridW);
@@ -566,6 +587,7 @@
         ctx.lineTo(p, a1);
         ctx.stroke();
       }
+      ctx.globalAlpha = 1;
       const edgeW = inkW(dpr * 2);
       ctx.lineWidth = edgeW;
       const e0 = crisp(pad - 1, edgeW);
@@ -577,7 +599,7 @@
         const x = pad + c * step;
         const y = pad + r * step;
         ctx.beginPath();
-        ctx.arc(x, y, Math.max(2.5, step * 0.09), 0, Math.PI * 2);
+        ctx.arc(x, y, Math.max(2.2, step * 0.075), 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -703,12 +725,19 @@
       const last = history[viewIndex - 1];
       const x = pad + last.c * step;
       const y = pad + last.r * step;
-      const markR = Math.max(2.2, step * 0.105);
+      // v1.65:实心小点,不是细圈 —— 细圈在白子上几乎看不见(白子本身就是浅色的环)。
+      // 练习本主题的子是线描,线描里放实心点会像另一个记号,那里仍用细圈。
       ctx.beginPath();
-      ctx.arc(x, y, markR, 0, Math.PI * 2);
-      ctx.strokeStyle = board[last.r][last.c] === "b" ? th.lastB : th.lastW;
-      ctx.lineWidth = Math.max(1.05, step * 0.032);
-      ctx.stroke();
+      if (th.style === "pencil") {
+        ctx.arc(x, y, Math.max(2.2, step * 0.105), 0, Math.PI * 2);
+        ctx.strokeStyle = board[last.r][last.c] === "b" ? th.lastB : th.lastW;
+        ctx.lineWidth = Math.max(1.05, step * 0.032);
+        ctx.stroke();
+      } else {
+        ctx.arc(x, y, Math.max(2.4, step * 0.085), 0, Math.PI * 2);
+        ctx.fillStyle = board[last.r][last.c] === "b" ? th.lastB : th.lastW;
+        ctx.fill();
+      }
     }
 
     // 键盘游标(v1.63):棋盘有焦点时方向键移动的那个交叉点。方角框比禁手的小方框

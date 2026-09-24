@@ -50,7 +50,7 @@
   let syncFallbacks = 0;
   let pongResolve = null;
 
-  const WORKER_SRC = ["js/core.js", "js/ai.js", "js/ai2.js", "js/ai-worker.js"];
+  const WORKER_SRC = ["js/core.js", "js/ai.js", "js/ai2.js", "js/ai3.js", "js/ai-worker.js"];
 
   function withDefaults(opts) {
     const d = deps.defaults();

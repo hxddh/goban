@@ -18,7 +18,7 @@ const ctx = { console, Date, performance };
 ctx.globalThis = ctx;
 ctx.window = ctx;
 vm.createContext(ctx);
-for (const f of ["core.js", "ai.js", "ai2.js"]) {
+for (const f of ["core.js", "ai.js", "ai2.js", "ai3.js"]) {
   vm.runInContext(
     fs.readFileSync(path.join(root, "src/web/js", f), "utf8"),
     ctx,
@@ -28,6 +28,9 @@ for (const f of ["core.js", "ai.js", "ai2.js"]) {
 const Core = ctx.GobanCore;
 const Ai = ctx.GobanAi;
 const Ai2 = ctx.GobanAi2;
+const Ai3 = ctx.GobanAi3;
+/** 发布档的路由(v1.65 起 普 / 难 / 极 = C3):难度承诺量的必须是玩家真正对上的那台引擎 */
+const Tier = ctx.GobanTier;
 
 /** sideCfg: { eng, difficulty, timeMs?, nodeBudget? } */
 function play(cfgB, cfgW, maxMoves) {
@@ -171,9 +174,9 @@ const C2HARD = { eng: Ai2, difficulty: "hard", nodeBudget: 80000 };
   assert(eDef.n === eDef.total, "入门:挡住每一个冲四/成五威胁 (" + eDef.n + "/" + eDef.total + ")");
   const eVcf = hits(Ai, "easy", 30, "vcf");
   assert(eVcf.n < eVcf.total * 0.7, "入门:并不总能算出连续冲四 —— 否则它不是入门 (" + eVcf.n + "/" + eVcf.total + ")");
-  const nVcf = hits(Ai, "normal", 250, "vcf");
+  const nVcf = hits(Tier.engineFor("normal"), "normal", 400, "vcf");
   assert(nVcf.n >= nVcf.total * 0.9, "普通:会算连续冲四 (" + nVcf.n + "/" + nVcf.total + ")");
-  const hVcf = hits(Ai2, "hard", 800, "vcf");
+  const hVcf = hits(Tier.engineFor("hard"), "hard", 800, "vcf");
   assert(hVcf.n >= hVcf.total * 0.9, "困难:会做杀 (" + hVcf.n + "/" + hVcf.total + ")");
 
   // 活三局面:白三连、两端开;黑到手,远处三子。挡点是两端之一。
@@ -198,8 +201,40 @@ const C2HARD = { eng: Ai2, difficulty: "hard", nodeBudget: 80000 };
   const eThree = blocksThree(Ai, "easy", 30);
   // 入门是随机化的:40 局面 p≈0.5,±3σ 约 [8, 32]
   assert(eThree >= 6 && eThree <= 34, "入门:常常漏掉活三,但不是从不挡 (" + eThree + "/40)");
-  const nThree = blocksThree(Ai, "normal", 250);
+  const nThree = blocksThree(Tier.engineFor("normal"), "normal", 400);
   assert(nThree >= 38, "普通:必挡直接威胁,活三也挡 (" + nThree + "/40)");
+}
+
+// ---- v1.65:C3 的级差与单调性(确定性:nodeBudget + vary:false)-----------------
+// C3 必须在两种颜色下都压过 C2(上一代难 / 极档的引擎);更多节点不许更弱。
+{
+  const C3H = { eng: Ai3, difficulty: "hard", nodeBudget: 60000 };
+  const g1 = play(C3H, C2HARD, 120);
+  assert(g1.winner === "b", "DET C3hard(B,60k) beats C2hard(W,80k) — got " + g1.winner + "/" + g1.moves);
+  const g2 = play(C2HARD, C3H, 120);
+  assert(g2.winner !== "b" && g2.winner !== "ERR", "DET C3hard(W,60k) holds C2hard(B,80k) — got " + g2.winner + "/" + g2.moves);
+  const OPEN = [[[7, 7], [6, 8]], [[7, 7], [7, 8], [8, 7]], [[7, 7], [8, 8], [6, 6]]];
+  const deep = { eng: Ai3, difficulty: "hard", nodeBudget: 90000 };
+  const shallow = { eng: Ai3, difficulty: "hard", nodeBudget: 20000 };
+  let dW = 0, sW = 0;
+  for (const op of OPEN) {
+    const run = (B, W) => {
+      const b = Core.emptyBoard(); let turn = "b";
+      for (const [r, c] of op) { b[r][c] = turn; turn = Core.opp(turn); }
+      for (let k = op.length; k < 200; k++) {
+        const cfg = turn === "b" ? B : W;
+        const m = cfg.eng.aiMove({ board: b, side: turn, difficulty: cfg.difficulty, nodeBudget: cfg.nodeBudget, vary: false });
+        if (!m || b[m.r][m.c]) return "ERR";
+        b[m.r][m.c] = turn;
+        if (Core.findWin(b, m.r, m.c, turn)) return turn;
+        turn = Core.opp(turn);
+      }
+      return "none";
+    };
+    const a = run(deep, shallow); if (a === "b") dW++; else if (a === "w") sW++;
+    const c = run(shallow, deep); if (c === "w") dW++; else if (c === "b") sW++;
+  }
+  assert(dW >= sW, "MONOTONIC C3: deep(90k) not weaker than shallow(20k) — deep " + dW + " shallow " + sW);
 }
 
 if (failed) {

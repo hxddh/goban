@@ -139,7 +139,9 @@
       --modal-board-chrome: 224px;
       --icon-size: 18px;
       --icon-stroke: 2;
-      --font-num: "SF Mono", "Menlo", "Consolas", ui-monospace, monospace;
+      /* v1.65:数字不再用等宽字体 —— 顶栏的 16/16 · 00:03 读起来像调试输出。对齐靠
+         tabular-nums(系统 UI 字体自带等宽数字),字形与正文同一家族。 */
+      --font-num: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
     }
     [data-theme="night"] {
       --bg: #0b1210;
@@ -219,7 +221,7 @@
       overflow: hidden;
     }
     #app { position: relative; height: 100%; width: 100%; overflow: hidden; }
-    .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+    .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; letter-spacing: 0; }
 
     /* 图标定义表本身不占位。用 absolute + 0 尺寸而不是 display:none —— 后者在
        部分引擎里会让 <use> 引不到 symbol,而这个应用跑的是 WKWebView / WebView2,
@@ -413,6 +415,16 @@
       display: flex; align-items: center; gap: 8px; min-width: 0;
     }
     .vs-right { flex-direction: row; text-align: right; }
+    /* v1.65:轮到的一方 —— 棋子外一圈强调色,另一方退后。「行」字徽章只留给读屏。 */
+    .vs .badge {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip: rect(0 0 0 0); white-space: nowrap;
+    }
+    .vs-side { transition: opacity var(--dur-ui) var(--ease); }
+    .vs.has-turn .vs-side:not(.is-turn) { opacity: 0.55; }
+    .vs-side.is-turn .stone { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--accent); }
+    /* 日间侧栏是米色,白子几乎融进去 —— 给它一线暖灰的边 */
+    [data-theme="day"] .vs-side:not(.is-turn) .stone.white { box-shadow: 0 0 0 1px rgba(110,85,50,0.3), 0 1px 2px rgba(0,0,0,0.18); }
     .vs-right .vs-name { justify-content: flex-end; }
     /* `.vs-mid` 与 `.muted` 同特异性而 `.muted` 在表里更靠后 —— v1.50 把「vs 标记」
        写进 --fs-micro 的角色清单,这条声明却一直没赢过:实测「对」是 12px,而同档的
@@ -638,7 +650,8 @@
       /* 旋钮居中由 --ctl-h 算出,不是写死的 3px —— 开关跟着控件高度走。 */
       position: absolute; top: calc((var(--ctl-h) - 2px - 20px) / 2); left: 3px;
       width: 20px; height: 20px; border-radius: 50%;
-      background: var(--text); opacity: 0.35;
+      /* v1.65:关着的旋钮 0.35 → 0.62。0.35 时关态几乎看不出是一个能拨的开关 */
+      background: var(--text); opacity: 0.62;
       transition: transform var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease), background var(--dur-ui) var(--ease);
     }
     .switch[aria-pressed="true"] {
@@ -1081,10 +1094,11 @@
        31%/29%;色标 #6a6a6a → #242424(40%) → #050505 与 #fff → #f2f2f2(50%)
        → #bcbcbc 均与画布逐字一致。夜间主题画布另有一组更暗的黑子色标,这里
        跟上。 */
-    .stone.black { background: radial-gradient(circle at 31% 29%, #6a6a6a, #242424 40%, #050505); }
-    .stone.white { background: radial-gradient(circle at 31% 29%, #ffffff, #f2f2f2 50%, #bcbcbc); }
-    [data-theme="night"] .stone.black { background: radial-gradient(circle at 31% 29%, #4a4a4a, #1c1c1c 35%, #050505); }
-    [data-theme="day"] .stone.white { background: radial-gradient(circle at 31% 29%, #ffffff, #f2f2f2 50%, #c8c8c8); }
+    .stone.black { background: radial-gradient(circle at 33% 30%, #5e6268, #2a2c30 32%, #121315 75%, #050506); }
+    .stone.white { background: radial-gradient(circle at 33% 30%, #fffefb, #f4f2ec 45%, #e2ded6 82%, #bab4a8); }
+    [data-theme="night"] .stone.black { background: radial-gradient(circle at 33% 30%, #4c5056, #212327 30%, #0e0f11 75%, #040405); }
+    [data-theme="night"] .stone.white { background: radial-gradient(circle at 33% 30%, #fffefb, #f4f2ec 45%, #e2ded6 82%, #cdc8bd); }
+    [data-theme="day"] .stone.white { background: radial-gradient(circle at 33% 30%, #fffefb, #f4f2ec 45%, #e2ded6 82%, #aba699); }
     [data-theme="notebook"] .stone {
       box-shadow: none; border-radius: 0; background: transparent !important;
       display: grid; place-items: center; font-size: var(--fs-ui); line-height: 1;
@@ -1093,7 +1107,18 @@
     [data-theme="notebook"] .stone.white { color: #9a3412; }
     [data-theme="notebook"] .stone.black::after { content: "△"; }
     [data-theme="notebook"] .stone.white::after { content: "○"; }
-    [data-theme="day"] .tool-btn.primary,
+    /* v1.65:日间原来与练习本共用这条蓝色 —— 练习本的强调色本来就是墨水蓝,日间却是
+       暖米色,整套主题里只有「新局」一处冷蓝,像从别的应用借来的。换成日间自己的
+       暖棕;白字在最浅处 #8a5a2b 上是 5.9:1,仍过 4.5。 */
+    /* 夜盘的强调色是薄荷绿,主按钮却沿用木盘的杏色 —— 同一个问题的另一处 */
+    [data-theme="night"] .tool-btn.primary {
+      background: linear-gradient(180deg, #a3dfc0, #6fbf94);
+      color: #0b1a13;
+    }
+    [data-theme="day"] .tool-btn.primary {
+      background: linear-gradient(180deg, #8a5a2b, #6b431d);
+      color: #fff;
+    }
     [data-theme="notebook"] .tool-btn.primary {
       /* v1.33.2: was #6a9fd4 → #3b6ea5. White 12px/600 is not "large text",
          so it needs 4.5:1 — and it got 2.79 at the button's top edge, 3.44–4.20
