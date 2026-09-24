@@ -21,6 +21,7 @@ test -f frontend/dist/js/app.js
 test -f frontend/dist/js/core.js
 test -f frontend/dist/js/host.js
 test -f frontend/dist/js/state.js
+test -f frontend/dist/js/session.js
 test -f frontend/dist/js/draw.js
 test -f frontend/dist/js/ui.js
 test -f frontend/dist/js/sgfio.js

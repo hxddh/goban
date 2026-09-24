@@ -818,22 +818,16 @@
     }
 
     .review-hint {
-      margin: 0 0 8px; font-size: var(--fs-ui); color: var(--muted); line-height: 1.4;
+      margin: 0 0 4px; font-size: var(--fs-ui); color: var(--muted); line-height: 1.4;
     }
     .review-curve {
-      width: 100%; height: 96px; display: block;
+      width: 100%; height: 64px; display: block; margin: 6px 0 4px;
       border: 1px solid var(--card-border);
       border-radius: var(--radius-md);
       background: var(--btn-ghost);
       cursor: pointer;
     }
-    .review-stat {
-      margin: 8px 0 8px; font-size: var(--fs-body); font-weight: 600; color: var(--fg);
-    }
-    .review-blunders {
-      display: flex; flex-direction: column; gap: 4px;
-      max-height: 34vh; overflow-y: auto;
-    }
+    .review-stat { font-size: var(--fs-ui); font-variant-numeric: tabular-nums; margin-left: 6px; }
     .swap2-bar {
       position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
       display: flex; flex-direction: column; align-items: center; gap: 8px;
@@ -866,6 +860,25 @@
       cursor: pointer;
       z-index: 6;
     }
+    /* 初见一句话:与终局的门同一位置、同一层;第一次启动才有 */
+    .welcome-bar {
+      position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 8px;
+      max-width: min(92%, 460px);
+      padding: 6px 6px 6px 14px;
+      font-size: var(--fs-ui); color: var(--text); white-space: nowrap;
+      background: var(--panel);
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      border: 1px solid var(--card-border);
+      border-radius: 999px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.22);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      z-index: 6;
+    }
+    .welcome-bar > span { overflow: hidden; text-overflow: ellipsis; }
+    .welcome-bar .tool-btn { border-radius: 999px; }
+    .welcome-bar .welcome-x { padding: 4px 8px; }
     .swap2-msg {
       font-size: var(--fs-body); font-weight: 600; color: var(--fg); text-align: center;
     }
@@ -937,30 +950,6 @@
     .stats-line { font-size: var(--fs-body); margin: 8px 0; color: var(--fg); }
     .stats-line.muted2 { color: var(--muted); }
 
-    .review-actions {
-      display: flex; flex-wrap: wrap; gap: 4px 12px;
-      margin: 2px 0 12px;
-    }
-    .review-none { font-size: var(--fs-body); padding: 4px 2px; }
-    .review-blunder-row {
-      -webkit-appearance: none; appearance: none; text-align: left;
-      display: flex; justify-content: space-between; align-items: center; gap: 8px;
-      padding: 8px 12px;
-      border: 1px solid var(--card-border);
-      border-radius: var(--radius-sm);
-      background: var(--btn-ghost);
-      color: var(--fg);
-      font: inherit; font-size: var(--fs-body);
-      cursor: pointer;
-    }
-    .review-blunder-row:hover {
-      border-color: var(--card-border);
-      border-color: color-mix(in srgb, var(--accent) 45%, var(--card-border));
-      background: var(--btn-ghost);
-      background: color-mix(in srgb, var(--accent) 8%, transparent);
-    }
-    .review-blunder-row .rb-move { font-weight: 600; }
-    .review-blunder-row .rb-reason { color: var(--muted); }
 
     /* Fixed 3-column grid rather than a wrapping flex row: with English labels
        the six links wrap, and space-between then flings the last two to the
@@ -1035,15 +1024,15 @@
          cover, it needs no background at all. It simply IS the panel, which is
          the only way its colour can never drift from the panel's. */
       margin: 0 -20px -20px;
-      padding: 16px 20px 20px;
+      padding: 10px 20px 8px;
       border-top: 1px solid var(--card-border);
-      display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center;
-      /* v1.52 —— 英文那五个词要 259.4px(盒宽合计 227.4 + 四个间隙 32),容器只有
-         243:差 16.4,于是 Stats 掉到第二行、底栏从 69.2 长到 105.4。
-         横向内边距 4→2(省 20)、间隙 8→6(省 8),共省 28,余 11.6。
-         纵向 8px 不动 —— 那是 v1.32 为 24px 最小点击高度定的。 */
-      gap: 4px 6px;
+      display: flex; flex-direction: column; gap: 4px;
     }
+    /* v1.64:三个学习入口等宽一排,与顶栏同一套 .tool-btn;存档 / 统计退成一行小字 */
+    .learn-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .learn-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 6px; min-width: 0; }
+    .learn-badge { font-variant-numeric: tabular-nums; line-height: 1; }
+    .foot-links { display: flex; gap: 6px; }
     .side-scroll {
       flex: 1;
       min-height: 0;
@@ -1079,7 +1068,8 @@
     .side-scroll[data-below="1"] { --fade-bot: 28px; }
     /* 8px vertical keeps these three at the 24px minimum hit height; the 4px
        the spacing grid rounded them to left them at 23. */
-    .side-foot .text-link { color: var(--muted); font-size: var(--fs-ui); padding: 8px 2px; }
+    /* v1.64 起只剩存档 / 统计两个次要入口:上下 5px,仍过 24px 的最小命中高度(v1.32) */
+    .side-foot .text-link { color: var(--muted); font-size: var(--fs-ui); padding: 5px 2px; }
     .side-foot .text-link:hover { color: var(--text); }
 
     .stone {
@@ -1360,6 +1350,8 @@
     .review-chip.tier-hard { border-color: var(--bad); border-width: 2px; }
     .review-chip.tier-engine { border-color: var(--bad); }
     .review-chip.tier-soft { border-style: dashed; color: var(--muted); }
+    /* 折叠着的「局势波动」:不是一手,是一扇门 —— 不画边,字是次要色 */
+    .review-chip.more { border-color: transparent; color: var(--muted); font-weight: 500; }
     .review-chip.cur {
       background: var(--btn-hover);
       background: color-mix(in srgb, var(--accent) 32%, transparent);
@@ -1377,8 +1369,6 @@
     .tier-hard .rb-tier { color: var(--bad); border-color: var(--bad); }
     .review-side-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .review-side-actions .tool-btn { flex: 1 1 auto; }
-    .review-blunder-row { flex-wrap: wrap; }
-    .review-blunder-row.tier-soft .rb-move { color: var(--muted); }
 
     /* —— 对局库 —— */
     .games-head { display: flex; align-items: baseline; gap: 8px; margin: 12px 0 8px; }

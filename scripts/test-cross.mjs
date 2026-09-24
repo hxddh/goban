@@ -1420,7 +1420,8 @@ async function enableSwap2Pvp(page) {
 {
   const bad = [];
   const page = await newPage();
-  const opens = { slots: "sgf-slots", review: "sgf-review", practice: "open-practice", stats: "open-stats" };
+  // 复盘 v1.64 起不是弹层了(侧栏面板,没有「关闭」主按钮之争),不在这张表里
+  const opens = { slots: "sgf-slots", practice: "open-practice", stats: "open-stats" };
   for (const [name, id] of Object.entries(opens)) {
     await page.evaluate((i) => document.getElementById(i).click(), id);
     await page.waitForTimeout(400);
@@ -2641,9 +2642,11 @@ async function enableSwap2Pvp(page) {
     await page.waitForTimeout(600);
     await page.evaluate(() => { const x = document.getElementById("sgf-review"); if (x && !x.disabled) x.click(); });
     await page.waitForTimeout(900);
-    const rows = await page.evaluate(() => [...document.querySelectorAll(".review-blunder-row")]
-      .map((x) => x.textContent.replace(/\s+/g, " ").trim()));
-    await page.evaluate(() => { const c = [...document.querySelectorAll("#review-modal button")].find((x) => /close|关闭/i.test(x.textContent)); if (c) c.click(); });
+    // v1.64:复盘在侧栏面板里;「局势波动」默认折叠,先展开,整局列出的每一手都要查
+    await page.evaluate(() => { const m = document.querySelector("#review-side-chips [data-more]"); if (m) m.click(); });
+    await page.waitForTimeout(150);
+    const rows = await page.evaluate(() => [...document.querySelectorAll("#review-side-chips .review-chip[data-i]")]
+      .map((x) => x.dataset.i));
     await page.waitForTimeout(350);
     const nums = rows.map((t) => { const m = t.match(/(\d+)/); return m ? Number(m[1]) : null; }).filter(Boolean);
     const said = {};
@@ -2936,13 +2939,17 @@ async function enableSwap2Pvp(page) {
         h: +f.getBoundingClientRect().height.toFixed(1),
         n: bs.length,
         rows: [...new Set(bs.map((x) => Math.round(x.getBoundingClientRect().top)))].length,
+        // v1.64:底栏分两层(学习入口一排按钮 + 存档 / 统计一排文字),每一层各自不许折行
+        groupRows: [...f.querySelectorAll(".learn-row, .foot-links")].map((g) =>
+          [...new Set([...g.querySelectorAll("button")].map((x) => Math.round(x.getBoundingClientRect().top)))].length),
         minW: +Math.min(...bs.map((x) => x.getBoundingClientRect().width)).toFixed(1),
         minH: +Math.min(...bs.map((x) => x.getBoundingClientRect().height)).toFixed(1),
       };
     });
     seen[lang + "/底栏"] = foot;
     if (foot.n < 5) bad.push(lang + ": 底栏只量到 " + foot.n + " 个入口 —— 覆盖不足");
-    if (foot.rows !== 1) bad.push(lang + ": 底栏折成 " + foot.rows + " 行（高 " + foot.h + "）—— 五个入口塞不下");
+    if (foot.groupRows.length !== 2 || foot.groupRows.some((r) => r !== 1))
+      bad.push(lang + ": 底栏某一层折行了 " + JSON.stringify(foot.groupRows) + "（高 " + foot.h + "）");
     // 24px 是 v1.32 定的最小命中尺寸，省宽度不许省到这条线以下
     if (foot.minW < 24) bad.push(lang + ": 底栏最窄入口只有 " + foot.minW + "px 宽，低于 24 的最小命中尺寸");
     if (foot.minH < 24) bad.push(lang + ": 底栏最矮入口只有 " + foot.minH + "px 高");
@@ -3486,8 +3493,9 @@ async function enableSwap2Pvp(page) {
     await page.evaluate(() => document.getElementById("sgf-review").click());
     await page.waitForTimeout(1200);
     const st = await page.evaluate(() => {
-      const m = document.getElementById("review-modal");
-      const body = document.getElementById("review-body");
+      // v1.64:复盘是侧栏面板;「开」= 面板可见,「正文」= 手数芯片或「没有失着」那一句
+      const m = document.getElementById("review-side");
+      const body = document.getElementById("review-side-chips");
       const note = document.getElementById("review-renju-note");
       const cv = document.getElementById("review-curve");
       let ink = 0;
@@ -3497,8 +3505,8 @@ async function enableSwap2Pvp(page) {
         for (let i = 3; i < d.length; i += 4) if (d[i] > 8) ink++;
       }
       return {
-        open: !!(m && m.classList.contains("show")),
-        bodyShown: !!(body && !body.hidden),
+        open: !!(m && !m.hidden),
+        bodyShown: !!(body && body.childElementCount > 0),
         noteShown: !!(note && !note.hidden),
         ink: ink,
       };
@@ -3509,7 +3517,7 @@ async function enableSwap2Pvp(page) {
     // 反证 A(把 v1.55 的拦截加回 openReview)第一次跑就是这样死的 —— 闸门抛异常
     // 而不是报错,在批量脚本里表现为**一片安静**,和「没问题」长得一模一样。
     if (st.open) {
-      await page.evaluate(() => document.getElementById("review-close").click());
+      await page.evaluate(() => document.getElementById("review-side-close").click());
       await page.waitForTimeout(300);
     }
     return st;

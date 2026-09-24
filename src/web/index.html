@@ -61,6 +61,13 @@
         </div>
         <!-- v1.63.1:终局卡在侧栏里;侧栏收着(窄窗口不自动展开)时,棋盘下沿留一扇门 -->
         <button type="button" class="end-nudge" id="end-nudge" hidden></button>
+        <!-- v1.64:初见一句话。只在第一次启动出现、不挡棋盘:点棋盘就是「下一局」,
+             另一个选择是先做今天的题。落第一子、点题、点 × 任一件事之后就不再出现。 -->
+        <div class="welcome-bar" id="welcome-bar" hidden role="note">
+          <span data-i18n="welcome.msg">点棋盘就开始一局，或者</span>
+          <button type="button" class="tool-btn primary" id="welcome-daily" data-i18n="welcome.daily">先做今天的 5 道题</button>
+          <button type="button" class="text-link welcome-x" id="welcome-close" aria-label="收起" title="收起" data-i18n-aria="endcard.close" data-i18n-title="endcard.close">×</button>
+        </div>
       </div>
     </div>
 
@@ -97,9 +104,8 @@
             </div>
           </div>
           <div class="side-meta">
+            <!-- v1.64:手数与用时只在顶栏写一次(此前顶栏、这里、棋谱表头、状态胶囊四处) -->
             <div class="meta-stats">
-              <span><strong class="num" id="info-moves">0</strong> <span data-i18n="side.moves">手</span></span>
-              <span class="num" id="info-time">00:00</span>
               <span id="info-mode"></span>
             </div>
             <span id="save-hint" class="save-hint" data-i18n="side.autosave">自动存档</span>
@@ -195,16 +201,23 @@
             <button type="button" id="rep-end" title="终局 (End)" data-i18n-title="rep.end.title" aria-label="终局" data-i18n-aria="aria.repEnd"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-last"/></svg></button>
           </div>
           <div class="coach-verdict" id="coach-verdict" hidden aria-live="polite"></div>
-          <!-- v1.63:常驻复盘面板。弹层负责曲线与总览;这里跟着查看的那一手走,
-               列全部失着(数字即手数),说当前这一手的 威胁 → 落点 → 惩罚 → 替代,
-               并给「重下 / 练这一手 / 推演」。跳转后解释不再消失。 -->
+          <!-- v1.64:复盘只有这一个面。v1.63 时它是弹层(曲线 + 总览)与这里(跟着查看的
+               那一手走)两处,用户得先知道那条隐含分工。现在曲线、失着、解释、重下 / 练 /
+               推演 / 导出都在这里;弹层退役。只有静态分差的「局势波动」默认折叠。 -->
           <section class="review-side" id="review-side" hidden aria-label="复盘面板" data-i18n-aria="review.side.aria">
             <div class="review-side-head">
               <span class="side-h" data-i18n="review.side.title">复盘</span>
+              <span class="review-stat muted" id="review-stat"></span>
               <span class="spacer"></span>
-              <button type="button" class="text-link" id="review-side-open" data-i18n="review.side.curve">曲线</button>
+              <button type="button" class="text-link" id="review-export" title="导出带评注 SGF" data-i18n="review.side.export" data-i18n-title="review.exportSgf">导出</button>
               <button type="button" class="text-link" id="review-side-close" data-i18n="dlg.close">关闭</button>
             </div>
+            <canvas id="review-curve" class="review-curve" role="img"
+                    aria-label="评分曲线，逐手优劣；具体失着见下方" data-i18n-aria="aria.reviewCurve"
+                    title="点击跳到对应手" data-i18n-title="review.curve.title"></canvas>
+            <p class="review-hint" id="review-progress" hidden data-i18n="review.deepening">引擎正在逐条比较失着…</p>
+            <!-- v1.56:禁手档下曲线仍按无禁手估(实测黑方 3.5% 的手偏乐观),说在它旁边 -->
+            <p class="review-hint" id="review-renju-note" hidden data-i18n="review.renjuNote">禁手档：胜负判定与更优点已按规则算；优劣曲线仍按无禁手估，黑方略偏乐观</p>
             <div class="review-chips" id="review-side-chips"></div>
             <div class="review-explain" id="review-side-explain"></div>
             <div class="review-side-actions" id="review-side-actions" hidden>
@@ -227,12 +240,19 @@
              stay with 棋谱 above. The foot is sticky, so these five are reachable
              at any window height — 1280×720 used to bury 存档/复盘 below the fold. -->
       </div>
+      <!-- v1.64:学习是这款产品的定位,它的入口却曾是侧栏最底下五个同样大小的小字。
+           现在分两层:复盘 / 练习 / 每日是按钮,与「新局」同一套控件;存档与统计是
+           「看过去」的,留作文字链接。每日的到期数是一枚徽标,不再是字后面的一个数字。 -->
       <div class="side-foot">
-        <button type="button" class="text-link" id="sgf-slots" title="命名存档与历史对局" data-i18n="sgf.slots" data-i18n-title="sgf.slots.title">存档</button>
-        <button type="button" class="text-link" id="sgf-review" title="全局复盘：评分曲线与失着" data-i18n="sgf.review" data-i18n-title="sgf.review.title">复盘</button>
-        <button type="button" class="text-link" id="open-practice" title="战术练习：找制胜一手 / 找防守点" data-i18n="foot.practice" data-i18n-title="foot.practice.title">练习</button>
-        <button type="button" class="text-link" id="open-daily" title="每日挑战：每天固定 5 题，连续打卡" data-i18n="foot.daily" data-i18n-title="foot.daily.title">每日</button>
-        <button type="button" class="text-link" id="open-stats" title="对局统计" data-i18n="foot.stats" data-i18n-title="foot.stats.title">统计</button>
+        <div class="learn-row">
+          <button type="button" class="tool-btn learn-btn" id="sgf-review" title="复盘：曲线、失着与解释" data-i18n="sgf.review" data-i18n-title="sgf.review.title">复盘</button>
+          <button type="button" class="tool-btn learn-btn" id="open-practice" title="战术练习：找制胜一手 / 找防守点" data-i18n="foot.practice" data-i18n-title="foot.practice.title">练习</button>
+          <button type="button" class="tool-btn learn-btn" id="open-daily" title="每日挑战：每天固定 5 题，连续打卡" data-i18n-title="foot.daily.title"><span id="open-daily-label" data-i18n="foot.daily">每日</span><span class="badge learn-badge" id="daily-badge" hidden></span></button>
+        </div>
+        <div class="foot-links">
+          <button type="button" class="text-link" id="sgf-slots" title="命名存档与历史对局" data-i18n="sgf.slots" data-i18n-title="sgf.slots.title">存档</button>
+          <button type="button" class="text-link" id="open-stats" title="对局统计" data-i18n="foot.stats" data-i18n-title="foot.stats.title">统计</button>
+        </div>
       </div>
     </aside>
 
@@ -401,31 +421,6 @@
       </div>
     </div>
 
-    <div class="modal-bg" id="review-modal" role="dialog" aria-modal="true" aria-label="复盘分析" data-i18n-aria="review.title">
-      <div class="modal review-modal">
-        <h3 data-i18n="review.title">复盘分析</h3>
-        <div id="review-empty" class="muted" hidden data-i18n="review.empty">先下几手再来复盘</div>
-        <div id="review-body" hidden>
-          <p class="review-hint" data-i18n="review.curveHint">评分曲线（黑上 · 白下）· 红点为失着 · 点曲线或下方失着可跳转</p>
-          <canvas id="review-curve" class="review-curve" role="img"
-                  aria-label="评分曲线，逐手优劣；具体失着见下方列表" data-i18n-aria="aria.reviewCurve"
-                  title="点击跳到对应手" data-i18n-title="review.curve.title"></canvas>
-          <div class="review-stat" id="review-stat"></div>
-          <p class="review-hint" id="review-progress" hidden data-i18n="review.deepening">引擎正在逐条比较失着…</p>
-          <!-- v1.56：禁手档下复盘开了回来，但曲线仍按无禁手估（实测黑方 3.5% 的手
-               偏乐观）。把这条偏差写在它旁边，而不是藏在发布说明里。 -->
-          <p class="review-hint" id="review-renju-note" hidden data-i18n="review.renjuNote">禁手档：胜负判定与更优点已按规则算；优劣曲线仍按无禁手估，黑方略偏乐观</p>
-          <div class="review-actions">
-            <button type="button" class="text-link" id="review-pv" title="从当前查看的一手起，引擎推演后续着法（虚影）" data-i18n="review.pv" data-i18n-title="review.pv.title">推演当前局面</button>
-            <button type="button" class="text-link" id="review-export" data-i18n="review.exportSgf">导出带评注 SGF</button>
-          </div>
-          <div class="review-blunders" id="review-blunders"></div>
-        </div>
-        <div class="close-row">
-          <button type="button" class="tool-btn" id="review-close" data-i18n="dlg.close">关闭</button>
-        </div>
-      </div>
-    </div>
   </div>
   
   <script src="js/version.js"></script>
@@ -436,6 +431,7 @@
   <script src="js/ai2.js"></script>
   <script src="js/host.js"></script>
   <script src="js/state.js"></script>
+  <script src="js/session.js"></script>
   <script src="js/draw.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/sgfio.js"></script>

@@ -31,6 +31,7 @@ load("src/web/js/sgf.js");
 load("src/web/js/ai.js");
 load("src/web/js/ai2.js");
 load("src/web/js/state.js");
+load("src/web/js/session.js");
 
 const Core = ctx.GobanCore;
 const Sgf = ctx.GobanSgf;
@@ -2700,6 +2701,88 @@ const Practice = ctx.GobanPractice;
   const dn = Review.getData();
   assert(softN >= 1 && dn.blunders.filter((b) => b.tier === "soft").length === softN && !dn.deepened,
     "an interrupted engine call (null) keeps the flag and leaves the pass unfinished");
+  // v1.64:终局卡的「值得记住」只从可证明 / 引擎比较里挑;这时第二遍没跑完,软失着都还在
+  const kmSoft = Review.keyMoves(null);
+  assert(dn.blunders.some((b) => b.tier === "soft") && kmSoft.every((b) => b.tier !== "soft"),
+    "keyMoves 不挑「局势波动」(反证:数据里确实有软失着 " + dn.blunders.filter((b) => b.tier === "soft").length + " 条)");
+}
+
+// --- v1.64 index.html 结构:弹层之间互不嵌套,div 开合配平 ---
+// 这一版改侧栏底部时少了两个 </div>,确认弹层没闭合,其后的设置 / 说明 / 存档 / 练习 /
+// 统计五个弹层全被包进了它 —— 加上 .show 也看不见。浏览器闸门用 evaluate 点按钮,
+// 不管可见性,一条都没报;是截图脚本点不到「主题」才露出来的。
+{
+  const html = fs.readFileSync(path.join(root, "src/web/index.html"), "utf8").replace(/<!--[\s\S]*?-->/g, "");
+  const stack = [];
+  const nested = [];
+  let unbalanced = 0;
+  for (const m of html.matchAll(/<(\/?)div\b([^>]*)>/g)) {
+    if (!m[1]) {
+      const isModal = /class="[^"]*\bmodal-bg\b/.test(m[2]);
+      const id = (m[2].match(/id="([^"]+)"/) || [])[1] || "";
+      if (isModal && stack.some((x) => x.modal)) nested.push(id + " ⊂ " + stack.filter((x) => x.modal).map((x) => x.id).join(","));
+      stack.push({ modal: isModal, id: id });
+    } else if (!stack.pop()) unbalanced++;
+  }
+  assert(nested.length === 0 && stack.length === 0 && unbalanced === 0,
+    "弹层互不嵌套、div 配平 (" + JSON.stringify({ nested, open: stack.length, unbalanced }) + ")");
+}
+
+// --- v1.64 旧进度折算:没有 due 的记录今天到期;答对过、没错过的算一次独立答对 ---
+{
+  const Pr = Practice.progress;
+  const old = { items: {
+    a: { n: 2, wrong: 0, ok: true },
+    b: { n: 3, wrong: 2, ok: true },
+    c: { n: 1, wrong: 1, ok: false },
+    d: { n: 1, wrong: 0, ok: true, streak: 3, due: "2026-10-01" },
+  } };
+  const f = Pr.foldLegacyMastery(old, "2026-09-24");
+  const it = f.st.items;
+  assert(f.folded === 3 && it.a.streak === 1 && it.a.due === "2026-09-24" && it.b.streak === 0 && it.c.streak === 0
+    && it.c.due === "2026-09-24" && it.d.streak === 3 && it.d.due === "2026-10-01",
+    "旧记录折算:干净答对 → streak 1;错过的 → 0;都今天到期;v1.63 的记录原样 (" + JSON.stringify(it) + ")");
+  assert(!Pr.isMastered(it.a) && old.items.a.due === undefined,
+    "折算不直接给「掌握」,也不改传入的对象");
+}
+
+// --- v1.64 会话:偏好与这一局分开;kind × 操作 真值表(session.js) ---
+{
+  const S = ctx.GobanSession;
+  // 偏好:坏值回默认;旧存储的两个规则字段合成一格;禁手不叠 swap2
+  const d = S.readPrefs({ mode: "x", difficulty: "insane", humanColor: 3 });
+  assert(JSON.stringify(d) === JSON.stringify(Object.assign({}, S.DEFAULT_PREFS)), "readPrefs: 坏值一律回默认");
+  assert(S.readPrefs({ ruleSet: "renju", openingRule: "swap2" }).rule === "renju"
+    && S.readPrefs({ ruleSet: "free", openingRule: "swap2" }).rule === "swap2"
+    && S.readPrefs({}).rule === "free", "readPrefs: v1.63 的 ruleSet + openingRule 合成侧栏那一格");
+  // 往返:48 种偏好组合存进去读回来一模一样,且照写旧字段(降级读得回)
+  let rt = 0, legacy = 0;
+  for (const mode of ["ai", "pvp"]) for (const difficulty of ["easy", "normal", "hard", "extreme"])
+    for (const humanColor of ["b", "w"]) for (const rule of ["free", "swap2", "renju"]) {
+      const p = { mode, difficulty, humanColor, rule };
+      const stored = JSON.parse(JSON.stringify(S.prefsToStore(p)));
+      if (JSON.stringify(S.readPrefs(stored)) === JSON.stringify(p)) rt++;
+      const old = Object.assign({}, stored); delete old.rule;
+      if (S.readPrefs(old).rule === rule) legacy++;
+    }
+  assert(rt === 48 && legacy === 48, "偏好 48 种组合往返不变,只看旧字段也读得回 (" + rt + "/" + legacy + ")");
+  const g = S.gameFromPrefs({ mode: "pvp", difficulty: "hard", humanColor: "w", rule: "swap2" });
+  assert(JSON.stringify(g) === JSON.stringify({ mode: "pvp", difficulty: "hard", humanColor: "w", ruleSet: "free", openingRule: "swap2" }),
+    "新局的五个字段整份来自偏好");
+  // kind × 操作
+  const cases = [
+    [{}, "play", "record", 0, true],
+    [{ importPaused: true }, "import", "record", 0, false],
+    [{ retry: { ply: 8 } }, "retry", "branch", 7, true],
+    [{ retry: { ply: 1 } }, "retry", "branch", 0, true],
+    [{ retry: { ply: 8 }, importPaused: true }, "retry", "branch", 7, true],
+  ];
+  const bad = cases.filter(([st, kind, fin, floor, ai]) => {
+    const pol = S.policy(st);
+    return S.kindOf(st) !== kind || pol.onFinish !== fin || S.undoFloor(st) !== floor || pol.autoAi !== ai;
+  });
+  assert(bad.length === 0, "kind × (终局去向 / 悔棋下限 / 电脑自动走) 逐格如表 (" + JSON.stringify(bad) + ")");
+  assert(Object.isFrozen(S.POLICY) && Object.isFrozen(S.POLICY.play), "策略表不可被运行时改写");
 }
 
 if (failed) {

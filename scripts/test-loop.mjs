@@ -171,21 +171,22 @@ const GAME = [[7, 7], [8, 7], [7, 8], [8, 8], [7, 9], [8, 9], [7, 10], [8, 10], 
     inRetry && blocked && restored && !sideHidden,
     JSON.stringify({ barMsg, inRetry, blocked, restored, sideHidden, h1: s1 && s1.history.length, h3: s3 && s3.history.length, errs: page.__errors }));
 
-  // ---- 3. 复盘弹层跳转后解释常驻 ----
+  // ---- 3. 复盘只有侧栏一个面(v1.64):「复盘」打开侧栏面板,点手数看解释 ----
   await page.evaluate(() => { const x = document.getElementById("review-side-close"); if (x) x.click(); });
   await page.waitForTimeout(150);
   const closedSide = await hidden(page, "review-side");
   await page.evaluate(() => document.getElementById("sgf-review").click());
   await page.waitForTimeout(900);
-  const rows = await page.evaluate(() => [...document.querySelectorAll(".review-blunder-row")].map((x) => ({ i: Number(x.dataset.i), tier: [...x.classList].find((c) => c.startsWith("tier-")), text: x.textContent.replace(/\s+/g, " ").trim() })));
-  await page.evaluate(() => { const b = document.querySelector('.review-blunder-row[data-i="8"]'); if (b) b.click(); });
+  const rows = await page.evaluate(() => [...document.querySelectorAll("#review-side-chips .review-chip[data-i]")].map((x) => ({ i: Number(x.dataset.i), tier: [...x.classList].find((c) => c.startsWith("tier-")) })));
+  await page.evaluate(() => { const b = document.querySelector('#review-side-chips .review-chip[data-i="8"]'); if (b) b.click(); });
   await page.waitForTimeout(400);
-  const modalOpen = await page.evaluate(() => document.getElementById("review-modal").classList.contains("show"));
+  const modalCount = await page.evaluate(() => document.querySelectorAll("#review-modal").length);
   const side = await page.evaluate(() => {
     const e = document.getElementById("review-side");
+    const cv = document.getElementById("review-curve");
     return {
       hidden: !e || e.hidden,
-      chips: [...document.querySelectorAll("#review-side-chips .review-chip")].map((c) => c.textContent),
+      curveInPanel: !!(cv && e && e.contains(cv) && cv.getBoundingClientRect().height > 0),
       cur: (document.querySelector("#review-side-chips .review-chip.cur") || {}).textContent || null,
       lines: [...document.querySelectorAll("#review-side-explain .rs-lines li")].map((l) => l.textContent),
       head: (document.querySelector("#review-side-explain .rs-head") || {}).textContent || "",
@@ -194,11 +195,11 @@ const GAME = [[7, 7], [8, 7], [7, 8], [8, 8], [7, 9], [8, 9], [7, 10], [8, 10], 
     };
   });
   const row8 = rows.find((r) => r.i === 8);
-  report("3 复盘跳转后弹层关、侧栏解释常驻:威胁 → 落点 → 惩罚 → 替代,且证据分层可见",
-    closedSide && !!row8 && row8.tier === "tier-hard" && /可证明|proven/.test(row8.text)
-      && !modalOpen && !side.hidden && side.cur === "8" && side.lines.length === 4 && /G8|L8/.test(side.lines[0]) && /K7/.test(side.lines[1]) && /G8|L8/.test(side.lines[3])
+  report("3 复盘只有侧栏一个面:曲线在面板里、手数跳转、威胁 → 落点 → 惩罚 → 替代,证据分层可见",
+    closedSide && !!row8 && row8.tier === "tier-hard" && /可证明|proven/.test(side.head) && modalCount === 0 && side.curveInPanel
+      && !side.hidden && side.cur === "8" && side.lines.length === 4 && /G8|L8/.test(side.lines[0]) && /K7/.test(side.lines[1]) && /G8|L8/.test(side.lines[3])
       && !side.actionsHidden && side.pos === "8 / 9",
-    JSON.stringify({ rows, side, modalOpen, errs: page.__errors }));
+    JSON.stringify({ rows, side, modalCount, errs: page.__errors }));
   await page.close();
 }
 
