@@ -584,8 +584,9 @@
       vctDepth: extreme ? 9 : 0,
       vctCap: extreme ? 120000 : 0,
       maxDepth: extreme ? 30 : normal ? 12 : 18,
-      rootWidth: extreme ? 36 : normal ? 20 : 26,
-      inner: extreme ? [20, 14, 11] : normal ? [12, 9, 7] : [14, 10, 8],
+      rootWidth: extreme ? 26 : normal ? 20 : 26,
+      inner: extreme ? [14, 10, 8] : normal ? [12, 9, 7] : [14, 10, 8],
+      denyVct: false,
     };
   }
 
@@ -666,7 +667,7 @@
     }
     // 3b) 极档:对手有活三连杀(VCT)时,只留下拆得掉它的手。执白时这就是「难」与「极」
     //     的分水岭 —— 自由式黑方先手必胜,白方要活下来,靠的正是在杀成形之前拆掉它。
-    if (prof.vctDepth > 0 && cands.length > 1 && lastStage !== "deny") {
+    if (prof.denyVct && cands.length > 1 && lastStage !== "deny") {
       const saveDeadline = deadline;
       if (deadline > 0) deadline = nowMs() + (deadline - nowMs()) * 0.35;
       vctNodes = 0; vctCap = prof.vctCap >> 1;
