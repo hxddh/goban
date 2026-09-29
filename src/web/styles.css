@@ -879,25 +879,20 @@
       cursor: pointer;
       z-index: 6;
     }
-    /* 初见一句话:与终局的门同一位置、同一层;第一次启动才有 */
+    /* 初见一句话(第一次启动才有)。v1.68 起住在侧栏的空棋谱区里,不再压着棋盘最下面一行 */
     .welcome-bar {
-      position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
-      display: flex; align-items: center; gap: 8px;
-      max-width: min(92%, 460px);
-      padding: 6px 6px 6px 14px;
-      font-size: var(--fs-ui); color: var(--text); white-space: nowrap;
-      background: var(--panel);
-      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+      margin: 4px 0 8px;
+      padding: 10px 8px 10px 12px;
+      font-size: var(--fs-ui); color: var(--text); line-height: var(--lh-text);
       border: 1px solid var(--card-border);
-      border-radius: 999px;
-      box-shadow: 0 6px 24px rgba(0,0,0,0.22);
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
-      z-index: 6;
+      border-radius: var(--radius-md);
     }
-    .welcome-bar > span { overflow: hidden; text-overflow: ellipsis; }
+    .welcome-bar > span { flex: 1 1 100%; }
     .welcome-bar .tool-btn { border-radius: 999px; }
-    .welcome-bar .welcome-x { padding: 4px 8px; }
+    .welcome-bar .welcome-x { padding: 4px 8px; margin-left: auto; }
+    /* 提示在的时候,空棋谱那句说明让位 */
+    .welcome-bar:not([hidden]) ~ .move-empty { display: none; }
     .swap2-msg {
       font-size: var(--fs-body); font-weight: 600; color: var(--fg); text-align: center;
     }
@@ -979,10 +974,20 @@
        一直这样过了 14 个版本。
        四列放得下:行宽 243、列间距 4、按钮内边距 8,每格文字可用 49.8px,而中文最宽 24、
        英文最宽 Import 39.8 —— 余 10px。 */
+    /* 列数跟着显示出来的按钮走(空棋盘时只有导入、粘贴两个,见下) */
     .link-row {
-      display: grid; grid-template-columns: repeat(4, 1fr);
+      display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
       gap: 2px 4px; margin-top: 12px;
     }
+    /* v1.68:空棋盘时没有意义的控件不显示 —— 没有可翻的棋谱、没有可复制导出的对局、
+       手数与用时都是 0、也没有「已存」。落下第一子即出现。 */
+    #app.is-empty #replay-seg,
+    #app.is-empty #sgf-copy,
+    #app.is-empty #sgf-download,
+    #app.is-empty #moves,
+    #app.is-empty #clock,
+    #app.is-empty #save-hint,
+    #app.is-empty #replay-pos { display: none; }
     /* v1.66:四个文件操作是低频的,用中性色,不再比「新局」醒目(强调色只留给主操作) */
     .link-row .text-link { text-align: center; color: var(--muted); font-weight: 400; }
     .link-row .text-link:hover { color: var(--text); }

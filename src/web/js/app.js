@@ -2113,7 +2113,8 @@
     // 正确的判据是「**人**有没有落过子」:人机模式下数人那一色的子,双人模式下
     // 两边都是人,数总手数。
     const playing = humanStones() > 0;
-    for (const id of ["mode-field", "color-field", "rule-field"]) {
+    // 规则(v1.68 起在设置弹层里)不参与:对局中改它从下一局起生效,不需要藏
+    for (const id of ["mode-field", "color-field"]) {
       const el = document.getElementById(id);
       if (el) el.hidden = playing;
     }
@@ -2150,8 +2151,9 @@
     document.querySelectorAll("#theme-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.theme === themeId);
     });
+    // 亮的是偏好:对局中在设置里改了规则,这一局照旧,新规则从下一局起
     document.querySelectorAll("#rule-seg button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.rule === ruleChoice());
+      b.classList.toggle("active", b.dataset.rule === prefs.rule);
     });
     const aiOnly = mode === "ai";
     const diffField = document.getElementById("diff-field");
@@ -2225,11 +2227,17 @@
     const live = isLive();
 
     moves.textContent = viewIndex + "/" + history.length;
+    // v1.68:空棋盘时,翻页、复制、导出、手数 / 用时、「已存」都没有意义 —— 不显示(见 styles.css)
+    const appEl0 = document.getElementById("app");
+    appEl0.classList.toggle("is-empty", history.length === 0);
+    // 这一局的规则(设置里亮的是偏好,可能是「下一局起」):给读屏之外的东西(测试、样式)一个稳定的钩子
+    appEl0.dataset.rule = ruleChoice();
     const modeEl = document.getElementById("info-mode");
     if (modeEl) {
-      modeEl.textContent = mode === "pvp"
-        ? t("mode.pvp")
-        : t("diff." + difficulty + ".full");
+      // 规则挪进设置之后,非「自由」时在这里留一个标记,不会忘了自己在什么规则下
+      const rc = ruleChoice();
+      modeEl.textContent = (mode === "pvp" ? t("mode.pvp") : t("diff." + difficulty + ".full"))
+        + (rc === "free" ? "" : " · " + t("rule." + rc));
     }
     document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
     const verdictEl = document.getElementById("coach-verdict");
@@ -2564,10 +2572,16 @@
       if (!b) return;
       const val = b.dataset.rule;
       if (val !== "free" && val !== "swap2" && val !== "renju") return;
-      if (val === ruleChoice() && val === prefs.rule) return;
-      if (history.length && !(await confirmNative(t("confirm.switchRule"), t("confirm.switchRuleTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
+      if (val === prefs.rule && val === ruleChoice()) return;
       prefs.rule = val;
       saveSettings();
+      // v1.68:规则在设置弹层里。对局中改不打断这一局(也就不必在弹层上再叠一个确认框),
+      // 从下一局起生效;空棋盘上改立即换
+      if (history.length) {
+        syncSettingsUI();
+        toast(t("toast.ruleNext", { name: t("rule." + val) }));
+        return;
+      }
       reset({ keepSettings: true });
       toast(t(
         val === "renju" ? "toast.ruleRenju"

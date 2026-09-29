@@ -303,6 +303,7 @@
 
   // --- 预算 -------------------------------------------------------------------
   let deadline = 0, nodeCap = 0, aborted = false;
+  let moveStartMs = 0, moveBudgetMs = 0, timeManaged = false;
   function outOfBudget() {
     if (aborted) return true;
     if (nodeCap > 0 && nodes >= nodeCap) { aborted = true; return true; }
@@ -532,7 +533,7 @@
   function searchRoot(side, maxDepth, candidates) {
     const color = side + 1;
     let order = candidates.slice();
-    let bestCell = order[0], bestScore = -Infinity, doneDepth = 0;
+    let bestCell = order[0], bestScore = -Infinity, doneDepth = 0, sameRun = 0;
     for (let depth = 2; depth <= maxDepth; depth++) {
       let alpha = -Infinity;
       const scores = [];
@@ -559,10 +560,18 @@
         }
         break;
       }
+      sameRun = iterBest === bestCell ? sameRun + 1 : 1;
       bestCell = iterBest; bestScore = iterScore; doneDepth = depth;
       scores.sort((a, b) => b.sc - a.sc);
       order = scores.map((x) => x.cell);
       if (bestScore >= WIN_MIN || bestScore <= -WIN_MIN) break; // 杀已算清
+      // v1.68 时间管理(困难 / 极限):新一层通常要花前面所有层之和的 2–3 倍 —— 过了 45% 预算
+      // 才开的那一层几乎搜不完,结果被丢掉;最佳手连续 3 层不变且已过 15% 预算,再算多半也
+      // 不会变。自对弈重放:平均等待 1.6 s → 1.0 s,3% 的手选择不同(REVIEW-v1.67 §2.4)。
+      if (timeManaged && moveBudgetMs > 0) {
+        const frac = (nowMs() - moveStartMs) / moveBudgetMs;
+        if (frac >= 0.45 || (sameRun >= 3 && frac >= 0.15)) break;
+      }
     }
     return { cell: bestCell, depth: doneDepth, score: bestScore };
   }
@@ -596,6 +605,9 @@
       inner: easy ? [8, 6, 5] : normal ? [12, 9, 7] : [14, 10, 8],
       // 见 aiMoveCore 3b:开着(根宽 36)时极对难 3/13/8,关掉并收回难档宽度 6/14/4
       denyVct: false,
+      // 见 searchRoot:困难 / 极限按「搜不完的层不开、最佳手稳定就落子」提前结束。
+      // 入门 / 普通不用 —— 它们的强弱是按时间校准的(普对简约七成)。
+      timeManaged: !easy && !normal,
     };
   }
 
@@ -630,7 +642,8 @@
     if (has(op, P_FIVE)) { lastStage = "blockwin"; return toRC(findCell(op, P_FIVE)); }
 
     nodes = 0; aborted = false;
-    deadline = prof.budgetMs > 0 ? nowMs() + prof.budgetMs : 0;
+    moveStartMs = nowMs(); moveBudgetMs = prof.budgetMs; timeManaged = prof.timeManaged;
+    deadline = prof.budgetMs > 0 ? moveStartMs + prof.budgetMs : 0;
     nodeCap = prof.nodeBudget;
     ttGen = (ttGen % 250) + 1;
     killers.fill(-1);
@@ -788,7 +801,7 @@
   global.GobanTier = {
     engineFor: function (difficulty) {
       // v1.66 起四档都走 C3;C1 只剩开局库与禁手出口
-      return global.GobanAi3 || global.GobanAi2 || global.GobanAi;
+      return global.GobanAi3 || global.GobanAi;
     },
   };
 })(typeof window !== "undefined" ? window : globalThis);
