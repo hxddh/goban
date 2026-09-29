@@ -207,7 +207,7 @@ async function answerRound(expectAllCorrect) {
 
 // ---- Test 5: stats panel shows the daily line (no finished games yet) ----
 {
-  await page.click("#open-stats");
+  await page.click("#sgf-slots"); // v1.71:战绩并进「记录」
   await page.waitForTimeout(120);
   const body = await modalText("stats-body");
   const emptyHidden = await page.evaluate(
@@ -215,7 +215,7 @@ async function answerRound(expectAllCorrect) {
   report("5 stats shows daily check-in line",
     /每日挑战 打卡 1 天/.test(body) && /今日已完成/.test(body) && emptyHidden,
     JSON.stringify({ body: body.slice(0, 60), emptyHidden }));
-  await page.click("#stats-close");
+  await page.click("#slots-close");
   await page.waitForTimeout(80);
 }
 

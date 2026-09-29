@@ -342,7 +342,7 @@ async function enableSwap2Pvp(page) {
 // across the window widths the app actually runs at.
 {
   const page = await newPage();
-  const IDS = ["undo", "btn-hint", "btn-new", "help-btn", "toggle-panel"];
+  const IDS = ["undo", "btn-hint", "btn-new", "settings-btn", "toggle-panel"]; // v1.71:快捷键挪进设置
   const hitTest = () =>
     page.evaluate((ids) => {
       const bar = document.querySelector(".chrome").getBoundingClientRect();
@@ -378,10 +378,10 @@ async function enableSwap2Pvp(page) {
     // …and a real click must still reach a handler while the panel is open
     let helpOpens = false;
     try {
-      await page.click("#help-btn", { timeout: 2500 });
+      await page.click("#settings-btn", { timeout: 2500 });
       await page.waitForTimeout(200);
       helpOpens = await page.evaluate(() =>
-        document.getElementById("help-modal").classList.contains("show"));
+        document.getElementById("settings-modal").classList.contains("show"));
     } catch (_) { helpOpens = false; }
     if (!helpOpens) blocked.push(width + "px 展开:帮助点不开");
     await page.keyboard.press("Escape"); // close help (if it opened)
@@ -722,7 +722,7 @@ async function enableSwap2Pvp(page) {
   await page.click("#settings-close");
   await page.waitForTimeout(250);
 
-  await page.evaluate(() => document.getElementById("help-btn").click());
+  await page.evaluate(() => document.getElementById("open-help").click()); // v1.71:设置里的「快捷键」
   await page.waitForTimeout(300);
   let escaped = 0;
   for (let i = 0; i < 6; i++) {
@@ -741,7 +741,7 @@ async function enableSwap2Pvp(page) {
 // v1.33 改成钉住脚栏——断言从"侧栏不滚动"改成"入口在视口内"，因为后者才是
 // 用户真正在乎的事，而且不随内容多寡失效。
 {
-  const FEATS = ["open-practice", "open-stats", "sgf-slots", "sgf-review"]; // v1.70:「每日」并进「练习」
+  const FEATS = ["open-practice", "sgf-slots"]; // v1.70:「每日」并进「练习」;v1.71:统计并进「记录」,复盘不足两手不显示
   const bad = [];
   for (const [w, h] of [[1280, 720], [1366, 768], [960, 900], [1440, 900]]) {
     const page = await newPage();
@@ -762,7 +762,7 @@ async function enableSwap2Pvp(page) {
     if (page.__errors.length) bad.push(w + "x" + h + ":errs " + page.__errors.join("|"));
     await page.close();
   }
-  report("K 四个功能入口在 720/768/900 高的窗口都在视口内",
+  report("K 功能入口在 720/768/900 高的窗口都在视口内",
     bad.length === 0, JSON.stringify({ bad }));
 }
 
@@ -779,7 +779,7 @@ async function enableSwap2Pvp(page) {
     };
     return {
       open: document.getElementById("app").classList.contains("panel-open"),
-      feats: ["open-practice", "sgf-review", "open-stats", "sgf-slots"]
+      feats: ["open-practice", "sgf-slots"]
         .filter((id) => { const e = document.getElementById(id); return e && inView(e); }).length,
     };
   });
@@ -789,8 +789,8 @@ async function enableSwap2Pvp(page) {
   await page.waitForTimeout(400);
   const remembered = await page.evaluate(() =>
     !document.getElementById("app").classList.contains("panel-open"));
-  report("L 首次运行侧栏展开（4 个功能入口可见）且记住用户关闭",
-    seen.open && seen.feats === 4 && remembered && page.__errors.length === 0,
+  report("L 首次运行侧栏展开（功能入口可见）且记住用户关闭",
+    seen.open && seen.feats === 2 && remembered && page.__errors.length === 0,
     JSON.stringify({ ...seen, remembered, errs: page.__errors }));
   await page.close();
 }
@@ -1374,7 +1374,7 @@ async function enableSwap2Pvp(page) {
   await cdp.send("DOM.enable");
   await cdp.send("CSS.enable");
   const { root } = await cdp.send("DOM.getDocument");
-  const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: ".brand" });
+  const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: ".status-pill" }); // v1.71:顶栏不再写「五子棋」
   const { fonts } = await cdp.send("CSS.getPlatformFontsForNode", { nodeId });
   const used = fonts.map((f) => f.familyName).sort();
   // 已知的量测字体。换了就必须改这里，顺便重新审一遍受影响的数字。
@@ -1448,7 +1448,7 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const page = await newPage();
   // 复盘 v1.64 起不是弹层了(侧栏面板,没有「关闭」主按钮之争),不在这张表里
-  const opens = { slots: "sgf-slots", practice: "open-practice", stats: "open-stats" };
+  const opens = { slots: "sgf-slots", practice: "open-practice" }; // v1.71:战绩并进「记录」
   for (const [name, id] of Object.entries(opens)) {
     await page.evaluate((i) => document.getElementById(i).click(), id);
     await page.waitForTimeout(400);
@@ -1806,7 +1806,7 @@ async function enableSwap2Pvp(page) {
   await page.evaluate(() => document.getElementById("settings-btn").click());
   await page.waitForTimeout(300);
   const r = await page.evaluate(() => {
-    const ids = ["btn-new", "btn-hint", "toggle-panel", "help-btn"];
+    const ids = ["btn-new", "btn-hint", "toggle-panel", "settings-btn"];
     const out = [];
     for (const id of ids) {
       const el = document.getElementById(id);
@@ -1968,7 +1968,7 @@ async function enableSwap2Pvp(page) {
       await openPanel(page);
       await setLang(page, "en");
     }
-    await page.evaluate(() => { const x = document.getElementById("open-stats"); if (x) x.click(); });
+    await page.evaluate(() => { const x = document.getElementById("sgf-slots"); if (x) x.click(); }); // v1.71:战绩在「记录」里
     await page.waitForTimeout(500);
     const r = await page.evaluate(() => {
       const tb = document.querySelector(".stats-table");
@@ -2431,10 +2431,10 @@ async function enableSwap2Pvp(page) {
     const px = await pixel();
     // 弹层里还有近百个文字元素(统计表、每日行、总计行)——不开弹层只能算到 55 个,
     // 下面那条覆盖判据就是这么把第一版拦下来的。
-    await page.evaluate(() => { const x = document.getElementById("open-stats"); if (x) x.click(); });
+    await page.evaluate(() => { const x = document.getElementById("sgf-slots"); if (x) x.click(); }); // v1.71:战绩在「记录」里
     await page.waitForTimeout(500);
     const c2 = await computed();
-    await page.evaluate(() => { const x = document.getElementById("stats-close"); if (x) x.click(); });
+    await page.evaluate(() => { const x = document.getElementById("slots-close"); if (x) x.click(); });
     await page.waitForTimeout(300);
     const c = { checked: c1.checked + c2.checked, out: [...c1.out, ...c2.out] };
     const pxBad = px.filter((x) => x.比值 < x.需要);
@@ -2520,7 +2520,7 @@ async function enableSwap2Pvp(page) {
   if (n < 4) bad.push("顶栏只量到 " + n + " 个按钮，覆盖太少");
   for (const k of Object.keys(hits)) if (hits[k] !== "可点") bad.push("顶栏「" + k + "」" + hits[k]);
   // 弹层仍须盖住顶栏
-  await page.evaluate(() => { const x = document.getElementById("help-btn"); if (x) x.click(); });
+  await page.evaluate(() => { const x = document.getElementById("settings-btn"); if (x) x.click(); });
   await page.waitForTimeout(450);
   const covered = await page.evaluate(() => {
     const e = document.getElementById("btn-new"); if (!e) return null;
@@ -2903,7 +2903,7 @@ async function enableSwap2Pvp(page) {
     }
   }
   // 浏览器自己算的无障碍名，和上面的结构判据对一遍（只查结构不查计算值是同义反复）
-  for (const id of ["rep-start", "rep-live", "help-btn", "settings-btn", "toggle-panel"]) {
+  for (const id of ["rep-prev", "rep-live", "settings-btn", "toggle-panel"]) {
     const snap = await page.locator("#" + id).ariaSnapshot().catch(() => "");
     const m = /button "([^"]*)"/.exec(snap || "");
     const name = m ? m[1] : "";
@@ -2988,7 +2988,7 @@ async function enableSwap2Pvp(page) {
     if (foot.minH < 24) bad.push(lang + ": 底栏最矮入口只有 " + foot.minH + "px 高");
 
     // ---- 说明弹层 ----
-    await page.evaluate(() => document.getElementById("help-btn").click());
+    await page.evaluate(() => document.getElementById("open-help").click());
     await page.waitForTimeout(300);
     const at = await readHelp();
     seen[lang + "/说明弹层"] = at;
