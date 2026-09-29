@@ -31,7 +31,7 @@
          win wore two different colours in one app. */
       winGlow: "#ffe08a",
       boardTop: "#e4c294", boardMid: "#d8ad7b", boardBot: "#cb9c66",
-      grain: true, line: "#3d2914", star: "#3d2914",
+      line: "#3d2914", star: "#3d2914",
       style: "stone",
       lastB: "rgba(255,246,230,0.86)",
       lastW: "rgba(58,40,22,0.62)",
@@ -46,7 +46,7 @@
          win wore two different colours in one app. */
       winGlow: "#a8e6cf",
       boardTop: "#1e332c", boardMid: "#172822", boardBot: "#101c18",
-      grain: false, line: "#5a7a6c", star: "#7dcea0",
+      line: "#5a7a6c", star: "#7dcea0",
       style: "stone",
       lastB: "rgba(168,230,207,0.9)",
       lastW: "rgba(16,40,32,0.66)",
@@ -61,7 +61,7 @@
          win wore two different colours in one app. */
       winGlow: "#a65d2e",
       boardTop: "#f6ead4", boardMid: "#ecd9b5", boardBot: "#e2cba0",
-      grain: true, line: "#6b5344", star: "#6b5344",
+      line: "#6b5344", star: "#6b5344",
       style: "stone",
       lastB: "rgba(255,246,230,0.86)",
       lastW: "rgba(110,70,36,0.7)",
@@ -423,52 +423,8 @@
     return h;
   }
 
-  // --- 木纹纹理(v1.66)------------------------------------------------------
-  const grainCache = new Map();
-  function grainTexture(themeId, th) {
-    const key = themeId;
-    if (grainCache.has(key)) return grainCache.get(key);
-    const S = 640;
-    const cv = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(S, S) : Object.assign(document.createElement("canvas"), { width: S, height: S });
-    const g = cv.getContext("2d");
-    const img = g.createImageData(S, S);
-    const d = img.data;
-    const hash = (x, y) => { const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return v - Math.floor(v); };
-    const smooth = (t) => t * t * (3 - 2 * t);
-    const noise = (x, y) => {
-      const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
-      const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), e = hash(xi + 1, yi + 1);
-      const u = smooth(xf), v = smooth(yf);
-      return a + (b - a) * u + (c - a) * v + (a - b - c + e) * u * v;
-    };
-    const light = themeId === "day";
-    const rings = 18;                         // 横贯整盘的年轮数
-    const inkA = light ? 0.04 : 0.06;         // 晚材最深处的不透明度
-    for (let y = 0; y < S; y++) {
-      for (let x = 0; x < S; x++) {
-        const nx = x / S, ny = y / S;
-        // 低频噪声把等值线推弯;x 方向拉长,纹理顺着木板走
-        const warp = noise(nx * 2.2, ny * 5.5) * 0.9 + noise(nx * 5, ny * 13) * 0.25;
-        const u = (ny + warp * 0.11 + Math.sin(nx * 3.1 + 1.3) * 0.012) * rings;
-        const f = u - Math.floor(u);
-        // 晚材:一条细而深的线;早材:宽而淡
-        // 每一圈深浅不同(有的几乎看不见),间距因此也显得不匀 —— 真木纹就是这样
-        const ringW = 0.25 + 1.1 * hash(Math.floor(u), 7);
-        const late = ringW * Math.pow(Math.max(0, 1 - Math.abs(f - 0.5) * 7), 2);
-        const fiber = (hash(x >> 1, y) - 0.5) * 0.025;
-        const aDark = Math.max(0, late * inkA + fiber);
-        const i = (y * S + x) * 4;
-        d[i] = 58; d[i + 1] = 34; d[i + 2] = 14;
-        d[i + 3] = Math.round(Math.min(1, aDark) * 255);
-      }
-    }
-    g.putImageData(img, 0, 0);
-    grainCache.set(key, cv);
-    return cv;
-  }
-
   /**
-   * The whole static layer — board fill, grain, grid, stars, coordinate
+   * The whole static layer — board fill, grid, stars, coordinate
    * labels, stones — painted into ANY context at ANY size, reading no module
    * state whatsoever.
    *
@@ -577,14 +533,7 @@
       g.addColorStop(1, th.boardBot);
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, w);
-
-      if (th.grain) {
-        // v1.66:程序化木纹。此前是 34 条抖动过的弧线 —— 仍然读得出「一条条画上去的线」。
-        // 现在按像素生成:年轮是一族被低频噪声推弯的等值线,暗的晚材细而疏、亮的早材宽,
-        // 再叠一层极细的纤维噪声。确定性(哈希,不用 Math.random),按主题与尺寸缓存,
-        // 所以重绘不闪、也不每帧重算(640² 生成一次约 20ms)。
-        ctx.drawImage(grainTexture(themeId, th), 0, 0, w, w);
-      }
+      // v1.66 起不画木纹:盘面只是一层渐变底色,纹理只会和格线抢视线
 
       ctx.strokeStyle = th.line;
       // Authored in CSS pixels. w/500 drifted with the board — 3 device px on
