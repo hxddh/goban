@@ -1746,6 +1746,12 @@
     focusPracticeClose();
   }
 
+  /** 这一局这一手能不能出成一道题(v1.71:「练这一手」据此显示,与 openFor 同一套判据)。 */
+  function hasPuzzleFor(gameId, ply) {
+    if (!gameId) return false;
+    return fromGames().some((p) => p.gameId === gameId && p.ply === ply);
+  }
+
   /**
    * 从某一局某一手直接进练习(终局卡 / 复盘侧栏的「练这一手」)。找不到对应题
    * (那一手没有可证明的战术)时退回普通练习,并返回 false。
@@ -1848,7 +1854,7 @@
   }
 
   global.GobanPractice = {
-    init, wire, open, openFor, openDaily, close, isOpen, dailySummary, practiceSummary, dueCount,
+    init, wire, open, openFor, hasPuzzleFor, openDaily, close, isOpen, dailySummary, practiceSummary, dueCount,
     // pure daily helpers, exposed for unit tests
     daily: { pickForDate, pickDaily, advanceDaily, prevDayStr, seededRng },
     // pure puzzle predicates + the curated bank, exposed for unit tests

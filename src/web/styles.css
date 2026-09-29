@@ -251,11 +251,6 @@
       pointer-events: none;
     }
     .chrome > * { pointer-events: auto; }
-    .brand {
-      font-weight: 600; font-size: var(--fs-body); letter-spacing: 0.06em;
-      opacity: 0.92;
-      flex-shrink: 0;
-    }
     .status-pill {
       font-size: var(--fs-ui); font-weight: 500; color: var(--text);
       padding: 4px 12px; border-radius: 999px;
@@ -433,12 +428,6 @@
     /* 日间的强调色在米色上只有 2.5:1,环用深一档的强调文字色 */
     [data-theme="day"] .vs .vs-side.is-turn .stone { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--accent-text); }
     .vs-right .vs-name { justify-content: flex-end; }
-    /* `.vs-mid` 与 `.muted` 同特异性而 `.muted` 在表里更靠后 —— v1.50 把「vs 标记」
-       写进 --fs-micro 的角色清单,这条声明却一直没赢过:实测「对」是 12px,而同档的
-       .side-h / .badge / .meta-chip 都是 11px。加一层选择器让声明真的生效。 */
-    .vs .vs-mid {
-      font-size: var(--fs-micro); letter-spacing: 0.14em; flex-shrink: 0; opacity: 0.55;
-    }
     .vs-name {
       font-size: var(--fs-body); font-weight: 600;
       display: flex; align-items: center; gap: 4px;
@@ -702,6 +691,10 @@
       text-align: left;
       white-space: nowrap;
     }
+    /* v1.71:浅色两套里「正文 60%」只有 3.9 / 3.7:1,不到 AA 的 4.5(此前闸门在空棋盘上量,量不到棋谱);
+       改用为 AA 定过的 --muted。深色两套里 60% 本来就过线,保留更轻的那一档。 */
+    [data-theme="day"] .move-list button,
+    [data-theme="notebook"] .move-list button { color: var(--muted); }
     .move-list button:hover { background: var(--btn); color: var(--text); }
     .move-list button.cur {
       background: var(--btn-hover);
@@ -968,6 +961,8 @@
        用时是 0。落下第一子即出现。 */
     #app.is-empty #replay-seg,
     #app.is-empty #clock,
+    #app.is-empty #undo,
+    #app.is-empty #btn-hint,
     #app.is-empty #replay-pos { display: none; }
     /* v1.70:棋谱文件挪进存档弹层,与备份同一行式;行间不再画第二条分隔线 */
     .backup-row.sgf-row { border-top: 0; margin-top: 8px; padding-top: 0; }
@@ -1035,7 +1030,8 @@
       display: flex; flex-direction: column; gap: 4px;
     }
     /* v1.64:三个学习入口等宽一排,与顶栏同一套 .tool-btn;存档 / 统计退成一行小字 */
-    .learn-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+    /* v1.71:列数跟着显示的按钮走 —— 不足两手时「复盘」不显示,「练习」独占一行 */
+    .learn-row { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
     .learn-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 6px; min-width: 0; }
     .learn-badge { font-variant-numeric: tabular-nums; line-height: 1; }
     .foot-links { display: flex; gap: 6px; }

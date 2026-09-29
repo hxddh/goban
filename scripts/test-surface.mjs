@@ -234,8 +234,8 @@ async function newGame(page) {
     const b = document.getElementById("daily-badge");
     return {
       tool: ["sgf-review", "open-practice"].every((id) => document.getElementById(id).classList.contains("tool-btn")),
-      h: [h("sgf-review"), h("open-practice"), h("btn-new")],
-      quiet: ["sgf-slots", "open-stats"].every((id) => document.getElementById(id).classList.contains("text-link")),
+      h: [h("open-practice"), h("btn-new")], // v1.71:不足两手时「复盘」不显示
+      quiet: ["sgf-slots"].every((id) => document.getElementById(id).classList.contains("text-link")),
       badge: b && !b.hidden ? b.textContent : null,
     };
   });
@@ -250,7 +250,7 @@ async function newGame(page) {
   await page.waitForTimeout(300);
   const one = await look();
   report("S4 复盘 / 练习是按钮(与新局等高),存档 / 统计是文字;到期数是「练习」上的徽标,0 时不出现",
-    zero.tool && zero.quiet && zero.h.every((x) => x === zero.h[2]) && zero.badge === null && one.badge === "1",
+    zero.tool && zero.quiet && zero.h.every((x) => x === zero.h[1]) && zero.badge === null && one.badge === "1",
     JSON.stringify({ zero, one, errs: page.__errors }));
   await page.close();
 }
@@ -464,11 +464,11 @@ async function newGame(page) {
   await page.evaluate(() => document.getElementById("welcome-close").click());
   await page.waitForTimeout(150);
   const bare = await count();
-  const emptyHidden = !(await shown("rep-start"));
+  const emptyHidden = !(await shown("rep-prev"));
   const ruleInSide = await page.evaluate(() => !!document.querySelector("#side #rule-field"));
   await clicker(page)(7, 7);
   await page.waitForTimeout(400);
-  const afterMove = await shown("rep-start");
+  const afterMove = await shown("rep-prev");
   report("S10 一打开:提示不压棋盘、可点控件 ≤ 22、空棋盘不显示翻页,落子后在",
     overlap === false && bare <= 22 && emptyHidden && afterMove && !ruleInSide,
     JSON.stringify({ overlap, withWelcome, bare, emptyHidden, afterMove, ruleInSide, errs: page.__errors }));
@@ -514,6 +514,105 @@ async function newGame(page) {
     inSlots && /^\(;/.test(copied) && pTitle === "每日挑战" && dailyChip && freeTitle === "战术练习";
   report("S11 侧栏只留下棋要用的:控件 ≤ 21 / ≤ 19;文件操作在存档里、每日在练习里;信息不重复", ok,
     JSON.stringify({ first, mid, dup, inSlots, copied: copied.slice(0, 12), pTitle, dailyChip, freeTitle, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- S12. 再简一层,并把挖出来的 bug 钉死(v1.71)----
+// 控件:首次打开 ≤ 16、对局中 ≤ 15、终局 ≤ 18(v1.70 是 21 / 19 / 24);弹层 5 种(v1.70 是 6)。
+// 挪走的都还在:Home / End、? 与设置里的「快捷键」、「记录」里的战绩。
+// B1 离开 swap2 提示条收起;B2 下完的局点新局不再确认;B3「练这一手」出现就一定有题;
+// B4 不足两手不显示「复盘」;B5 文案不再提已不存在的东西;标准一局的提示条减半以上(v1.70 这段流程实测 4 条)。
+{
+  const page = await newPage();
+  const click = clicker(page);
+  const count = () => page.evaluate(() => [...document.querySelectorAll("button, [role=button], input, select")]
+    .filter((e) => e.offsetParent !== null && e.getBoundingClientRect().width > 0 && !e.closest("#move-list")).length);
+  const toasts = [];
+  await page.exposeFunction("__toastSeen", (x) => toasts.push(x));
+  await page.evaluate(() => {
+    const el = document.getElementById("toast");
+    new MutationObserver(() => { const x = (el.textContent || "").trim(); if (x) window.__toastSeen(x); })
+      .observe(el, { childList: true, characterData: true, subtree: true });
+  });
+  const first = await count();
+  const reviewHiddenEmpty = await page.evaluate(() => (document.getElementById("sgf-review") || {}).offsetParent === null);
+  // 标准一局:换难度、落子、提示、看旧手再回来、换主题
+  await page.evaluate(() => document.querySelector('#diff-seg button[data-diff="easy"]').click());
+  for (const [r, c] of [[7, 7], [6, 8], [8, 6]]) { await click(r, c); await page.waitForTimeout(900); }
+  await page.evaluate(() => (document.getElementById("btn-hint") || { click() {} }).click()); await page.waitForTimeout(900);
+  await page.keyboard.press("ArrowLeft"); await page.waitForTimeout(100);
+  await page.evaluate(() => (document.getElementById("rep-live") || { click() {} }).click()); await page.waitForTimeout(100);
+  await page.evaluate(() => (document.getElementById("settings-btn") || { click() {} }).click()); await page.waitForTimeout(100);
+  await page.evaluate(() => document.querySelector('#theme-seg [data-theme="night"]').click()); await page.waitForTimeout(100);
+  await page.evaluate(() => (document.getElementById("settings-close") || { click() {} }).click()); await page.waitForTimeout(200);
+  const mid = await count();
+  const reviewShownMid = await page.evaluate(() => document.getElementById("sgf-review").offsetParent !== null);
+  await page.keyboard.press("Home"); await page.waitForTimeout(100);
+  const home = await page.evaluate(() => document.getElementById("replay-pos").textContent.trim());
+  await page.keyboard.press("End"); await page.waitForTimeout(100);
+  const end = await page.evaluate(() => document.getElementById("replay-pos").textContent.trim());
+  const toastCount = toasts.length;
+  // 下到终局
+  for (let i = 0; i < 40; i++) {
+    if (await page.evaluate(() => !document.getElementById("end-card").hidden)) break;
+    await click(1 + (i % 13), 1 + ((i * 5) % 13)); await page.waitForTimeout(500);
+  }
+  const over = await page.evaluate(() => !document.getElementById("end-card").hidden);
+  const endCount = await count();
+  // B3:复盘面板里「练这一手」出现的每一手,点下去都真有题
+  await page.evaluate(() => (document.getElementById("end-card-review") || { click() {} }).click()); await page.waitForTimeout(600);
+  const n = await page.evaluate(() => Number(document.getElementById("replay-pos").textContent.split("/")[1]));
+  let offered = 0, empty = 0;
+  for (let ply = 1; ply <= n && offered < 3; ply++) {
+    await page.evaluate((i) => { const b = [...document.querySelectorAll("#move-list button")][i - 1]; if (b) b.click(); }, ply);
+    await page.waitForTimeout(60);
+    const vis = await page.evaluate(() => { const b = document.getElementById("review-side-practice"); return !!b && b.offsetParent !== null; });
+    if (!vis) continue;
+    offered++; toasts.length = 0;
+    await page.evaluate(() => (document.getElementById("review-side-practice") || { click() {} }).click()); await page.waitForTimeout(300);
+    if (toasts.some((x) => /没有可练/.test(x))) empty++;
+    await page.evaluate(() => (document.getElementById("practice-close") || { click() {} }).click()); await page.waitForTimeout(100);
+  }
+  // B2:下完的局点新局不再确认
+  await page.evaluate(() => (document.getElementById("btn-new") || { click() {} }).click()); await page.waitForTimeout(250);
+  const askedAfterEnd = await page.evaluate(() => document.getElementById("confirm-modal").classList.contains("show"));
+  if (askedAfterEnd) await page.click("#confirm-ok");
+  // 快捷键:设置里有入口;? 直接开
+  await page.evaluate(() => (document.getElementById("settings-btn") || { click() {} }).click()); await page.waitForTimeout(100);
+  await page.evaluate(() => (document.getElementById("open-help") || { click() {} }).click()); await page.waitForTimeout(150);
+  const helpViaSettings = await page.evaluate(() => document.getElementById("help-modal").classList.contains("show") && !document.getElementById("settings-modal").classList.contains("show"));
+  const helpText = await page.evaluate(() => document.getElementById("help-modal").innerText);
+  await page.keyboard.press("Escape"); await page.waitForTimeout(100);
+  await page.keyboard.press("?"); await page.waitForTimeout(150);
+  const helpViaKey = await page.evaluate(() => document.getElementById("help-modal").classList.contains("show"));
+  await page.keyboard.press("Escape"); await page.waitForTimeout(100);
+  // 战绩在「记录」里
+  await page.evaluate(() => (document.getElementById("sgf-slots") || { click() {} }).click()); await page.waitForTimeout(200);
+  const statsInSlots = await page.evaluate(() => { const b = document.getElementById("stats-body"); return !!b && !!b.closest("#slots-modal") && !b.hidden; });
+  await page.evaluate(() => (document.getElementById("slots-close") || { click() {} }).click());
+  const modalKinds = await page.evaluate(() => document.querySelectorAll(".modal-bg").length);
+  // B1:双人下 swap2 → 自由,提示条收起
+  await page.evaluate(() => document.querySelector('#mode-seg button[data-mode="pvp"]').click()); await page.waitForTimeout(150);
+  for (const rule of ["swap2", "free"]) {
+    await page.evaluate(() => (document.getElementById("settings-btn") || { click() {} }).click()); await page.waitForTimeout(80);
+    await page.click('#rule-seg button[data-rule="' + rule + '"]'); await page.waitForTimeout(80);
+    await page.evaluate(() => (document.getElementById("settings-close") || { click() {} }).click()); await page.waitForTimeout(150);
+  }
+  const swap2BarStale = await page.evaluate(() => !document.getElementById("swap2-bar").hidden);
+  // B5:文案
+  const stale = await page.evaluate(() => {
+    const t = window.GobanI18n.t;
+    return [t("practice.round.nextDue", { n: 1 })].concat([...document.querySelectorAll("#help-modal td")].map((e) => e.textContent))
+      .filter((x) => /侧栏「棋谱」|「每日」|☰|统计 \/ 练习/.test(x));
+  });
+  const ok = first <= 16 && mid <= 15 && over && endCount <= 18 && modalKinds === 5 &&
+    home.startsWith("0 /") && end.split("/")[0].trim() === end.split("/")[1].trim() &&
+    helpViaSettings && helpViaKey && statsInSlots && !swap2BarStale && !askedAfterEnd &&
+    empty === 0 && reviewHiddenEmpty && reviewShownMid && stale.length === 0 && toastCount <= 2 &&
+    !/侧栏「棋谱」/.test(helpText);
+  report("S12 再简一层:控件 ≤ 16 / 15 / 18、弹层 5 种;挪走的都在;B1–B5 修好;提示条减半", ok,
+    JSON.stringify({ first, mid, endCount, over, modalKinds, home, end, helpViaSettings, helpViaKey, statsInSlots,
+      swap2BarStale, askedAfterEnd, offered, empty, reviewHiddenEmpty, reviewShownMid, stale, toastCount, errs: page.__errors }));
   await page.close();
 }
 

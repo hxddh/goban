@@ -492,7 +492,8 @@
   }
 
   async function requestNewGame() {
-    if (history.length) {
+    // v1.71:下完的局早已自动存进对局记录,不必再问「放弃当前对局?」
+    if (history.length && result === "play") {
       const ok = await confirmNative(
         t("newgame.confirm"),
         t("newgame.ok"),
@@ -501,8 +502,7 @@
       if (!ok) return;
     }
     // reset() bumps gameGen so any in-flight AI timeout cannot place.
-    reset();
-    toast(t("newgame.started"));
+    reset(); // v1.71:棋盘清空就是反馈,不再弹「新局已开始」
   }
 
   function applyTheme(id) {
@@ -616,8 +616,7 @@
         toast(t("hint.none"));
         hintCell = null;
       } else {
-        hintCell = { r: m.r, c: m.c };
-        toast(t("hint.shown", { color: t(side === "b" ? "side.black" : "side.white") }));
+        hintCell = { r: m.r, c: m.c }; // 虚线十字本身就是反馈;状态胶囊写着「· 有提示」
       }
     } catch (_) {
       if (gen === gameGen) {
@@ -1024,6 +1023,7 @@
   }
 
   function openSlots() {
+    renderStatsIn();
     Slots.render();
     renderGamesList();
     const m = document.getElementById("slots-modal");
@@ -1284,7 +1284,6 @@
     const title = document.getElementById("end-card-title");
     const body = document.getElementById("end-card-body");
     const retryBtn = document.getElementById("end-card-retry");
-    const practiceBtn = document.getElementById("end-card-practice");
     const backBtn = document.getElementById("end-card-back");
     const reviewBtn = document.getElementById("end-card-review");
     const againBtn = document.getElementById("end-card-again");
@@ -1335,14 +1334,11 @@
       retryBtn.hidden = !key || !!retry;
       if (key) { retryBtn.dataset.ply = String(key.i); retryBtn.textContent = t("endcard.retry", { n: key.i }); }
     }
-    if (practiceBtn) {
-      const canPractice = !!key && !retry && !!lastArchiveId && key.tier === "hard";
-      practiceBtn.hidden = !canPractice;
-      if (canPractice) practiceBtn.dataset.ply = String(key.i);
-    }
     if (backBtn) backBtn.hidden = !retry;
     if (reviewBtn) reviewBtn.hidden = !!retry;
-    if (againBtn) againBtn.textContent = t(retry ? "endcard.retryAgain" : "endcard.again");
+    // v1.71:终局卡只留两个动作(重下关键一手 · 看复盘);「再来一局」就是顶栏高亮的「新局」,
+    // 只在重下线上留一个「再试一次」—— 那是练习闭环里的下一步,顶栏没有它
+    if (againBtn) againBtn.hidden = !retry;
   }
 
   /**
@@ -1380,10 +1376,6 @@
     if (nudge) nudge.onclick = () => { setPanelOpen(true); };
     const retryBtn = document.getElementById("end-card-retry");
     if (retryBtn) retryBtn.onclick = () => { startRetry(Number(retryBtn.dataset.ply)); };
-    const practiceBtn = document.getElementById("end-card-practice");
-    if (practiceBtn) practiceBtn.onclick = () => {
-      if (!Practice.openFor(lastArchiveId, Number(practiceBtn.dataset.ply))) toast(t("practice.noneForMove"));
-    };
     const backBtn = document.getElementById("end-card-back");
     if (backBtn) backBtn.onclick = () => { endRetry(true); toast(t("retry.back")); };
     const reviewBtn = document.getElementById("end-card-review");
@@ -1391,7 +1383,6 @@
     const againBtn = document.getElementById("end-card-again");
     if (againBtn) againBtn.onclick = () => {
       if (retry) { const ply = retry.ply; endRetry(false); startRetry(ply); }
-      else { hideEndCard(); requestNewGame(); }
     };
     const closeBtn = document.getElementById("end-card-close");
     if (closeBtn) closeBtn.onclick = () => { hideEndCard(); };
@@ -1840,19 +1831,12 @@
     showEndCard();
   }
 
-  function openStats() {
+  /** v1.71:战绩并进「对局记录」弹层,和存档、历史对局一处看 */
+  function renderStatsIn() {
     Stats.render();
-    const m = document.getElementById("stats-modal");
-    if (m) {
-      m.classList.add("show");
-      const focusEl = document.getElementById("stats-close");
-      if (focusEl) setTimeout(() => focusEl.focus(), 0);
-    }
-  }
-
-  function closeStats() {
-    const m = document.getElementById("stats-modal");
-    if (m) m.classList.remove("show");
+    const body = document.getElementById("stats-body");
+    const clear = document.getElementById("stats-clear");
+    if (clear) clear.hidden = !body || body.hidden;
   }
 
   function place(r, c, fromAi) {
@@ -2052,6 +2036,7 @@
     clearAnalysis();
     clearVariation();
     swap2 = null;
+    renderSwap2Bar(); // v1.71:离开 swap2 时收起提示条(此前换规则后它会一直挂在棋盘上)
     if (openingRule === "swap2") startSwap2();
     saveSettings();
     sync();
@@ -2261,10 +2246,8 @@
       // NOT disabled while aiThinking — 悔棋 is the cancel affordance (see abortThinking).
       if (b) b.disabled = history.length <= undoFloor() || hintBusy || !live || !!swap2;
     });
-    document.getElementById("rep-start").disabled = viewIndex <= 0;
     document.getElementById("rep-prev").disabled = viewIndex <= 0;
     document.getElementById("rep-next").disabled = viewIndex >= history.length;
-    document.getElementById("rep-end").disabled = viewIndex >= history.length;
     document.getElementById("rep-live").disabled = live;
     document.getElementById("sgf-copy").disabled = history.length === 0;
     document.getElementById("sgf-download").disabled = history.length === 0;
@@ -2352,6 +2335,17 @@
       const b = document.getElementById(id);
       if (b) b.hidden = offOriginal;
     }
+    // v1.71:「练这一手」只在题库真能出这道题时出现(此前按「可证明的失着」显示,点下去常是「没有可练的题」)
+    const practiceSide = document.getElementById("review-side-practice");
+    const sideOpen = !document.getElementById("review-side").hidden;
+    if (practiceSide && !practiceSide.hidden && sideOpen) {
+      let ok = false;
+      try { ok = !!lastArchiveId && Practice.hasPuzzleFor(lastArchiveId, viewIndex); } catch (_) { ok = false; }
+      practiceSide.hidden = !ok;
+    }
+    // v1.71:没有可复盘的(不足两手)就不显示「复盘」,不再是一个只会说「先下几手」的按钮
+    const reviewBtn = document.getElementById("sgf-review");
+    if (reviewBtn) reviewBtn.hidden = history.length < 2;
     syncRetryBar();
     syncEndCard();
     syncWelcome();
@@ -2409,13 +2403,10 @@
       if (b) setViewIndex(Number(b.dataset.i));
     };
   }
-  document.getElementById("rep-start").onclick = () => setViewIndex(0);
   document.getElementById("rep-prev").onclick = () => setViewIndex(viewIndex - 1);
   document.getElementById("rep-next").onclick = () => setViewIndex(viewIndex + 1);
-  document.getElementById("rep-end").onclick = () => setViewIndex(history.length);
   document.getElementById("rep-live").onclick = () => {
     goLive();
-    toast(t("replay.backToLive"));
   };
   document.getElementById("sgf-copy").onclick = () => { copySgf(); };
   document.getElementById("sgf-download").onclick = () => { downloadSgf(); };
@@ -2428,8 +2419,6 @@
   const slotsEl = document.getElementById("sgf-slots");
   if (slotsEl) slotsEl.onclick = () => { openSlots(); };
 
-  const statsEl = document.getElementById("open-stats");
-  if (statsEl) statsEl.onclick = () => { openStats(); };
 
   Engine.init({
     defaults: () => ({
@@ -2476,16 +2465,12 @@
   Practice.wire();
   const practiceEl = document.getElementById("open-practice");
   if (practiceEl) practiceEl.onclick = () => { Practice.open(); };
-  const statsCloseEl = document.getElementById("stats-close");
-  if (statsCloseEl) statsCloseEl.onclick = () => { closeStats(); };
-  const statsModalEl = document.getElementById("stats-modal");
-  if (statsModalEl) statsModalEl.onclick = (ev) => { if (ev.target === statsModalEl) closeStats(); };
   const statsClearEl = document.getElementById("stats-clear");
   if (statsClearEl) {
     statsClearEl.onclick = async () => {
       if (!(await confirmNative(t("stats.clearConfirm"), t("stats.clearTitle"), { ok: t("stats.clear"), cancel: t("dlg.cancel") }))) return;
       Stats.clear();
-      Stats.render();
+      renderStatsIn();
       toast(t("stats.cleared"));
     };
   }
@@ -2562,8 +2547,7 @@
     if (history.length && !(await confirmNative(t("confirm.switchMode"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
     applyMode(b.dataset.mode);
     saveSettings();
-    reset({ keepSettings: true });
-    toast(t(mode === "ai" ? "toast.modeAi" : "toast.modePvp"));
+    reset({ keepSettings: true }); // 点的就是那一格,不再复述;⌘1 / ⌘2(侧栏可能收着)仍会说
   };
 
   const ruleSeg = document.getElementById("rule-seg");
@@ -2598,8 +2582,7 @@
     // 难度是唯一在对局中立即生效的一格:这一局与偏好一起改
     difficulty = prefs.difficulty = b.dataset.diff;
     saveSettings();
-    syncSettingsUI();
-    toast(t("toast.difficulty", { name: t("diff." + difficulty + ".full") }));
+    syncSettingsUI(); // 选中格变亮就是反馈
   };
   const thinkSeg = document.getElementById("think-seg");
   if (thinkSeg) {
@@ -2630,17 +2613,11 @@
     mlSig = "";
     syncSettingsUI();
     sync();
-    toast(t("toast.language"));
   };
   document.getElementById("theme-seg").onclick = (ev) => {
     const b = ev.target.closest("button[data-theme]");
     if (!b) return;
-    applyTheme(b.dataset.theme);
-    const names = {
-      wood: t("theme.wood.title"), night: t("theme.night.title"),
-      day: t("theme.day.title"), notebook: t("theme.notebook.title"),
-    };
-    toast(t("toast.theme", { name: names[themeId] || themeId }));
+    applyTheme(b.dataset.theme); // 棋盘当场换色,不再复述
   };
   document.getElementById("opt-sound").onclick = () => {
     soundOn = !soundOn;
@@ -2704,7 +2681,8 @@
     if (close) setTimeout(() => close.focus(), 0);
   }
   function closeHelp() { helpModal.classList.remove("show"); }
-  document.getElementById("help-btn").onclick = openHelp;
+  // v1.71:快捷键入口在设置弹层里(顶栏不再常驻);按 ? 照旧直接打开
+  document.getElementById("open-help").onclick = () => { closeSettings(); openHelp(); };
   document.getElementById("help-close").onclick = closeHelp;
   helpModal.onclick = (ev) => { if (ev.target === helpModal) closeHelp(); };
 
@@ -2731,12 +2709,10 @@
   window.addEventListener("keydown", (ev) => {
     const k = ev.key.toLowerCase();
     const slotsModal = document.getElementById("slots-modal");
-    const statsModal = document.getElementById("stats-modal");
     const practiceModal = document.getElementById("practice-modal");
     if (ev.key === "Escape") {
       if (confirmModal.classList.contains("show")) { finishConfirm(false); return; }
       if (slotsModal && slotsModal.classList.contains("show")) { closeSlots(); return; }
-      if (statsModal && statsModal.classList.contains("show")) { closeStats(); return; }
       if (Practice.isOpen()) { Practice.close(); return; }
       if (settingsModal.classList.contains("show")) { closeSettings(); return; }
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
@@ -2759,10 +2735,6 @@
     // Tab stays inside whichever modal is open; other game shortcuts are blocked
     if (slotsModal && slotsModal.classList.contains("show")) {
       trapModalTab(ev, slotsModal);
-      return;
-    }
-    if (statsModal && statsModal.classList.contains("show")) {
-      trapModalTab(ev, statsModal);
       return;
     }
     if (practiceModal && practiceModal.classList.contains("show")) {
