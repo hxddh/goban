@@ -57,7 +57,6 @@
       "role.you": "你",
       "role.computer": "电脑",
       "role.pending": "待定",
-      "side.autosave": "自动存档",
 
       // —— sidebar: game settings ——
       "sec.game": "对局",
@@ -120,6 +119,7 @@
       "rep.live.title": "回到最新",
       "rep.next.title": "下一手 (→)",
       "rep.end.title": "终局 (End)",
+      "sgf.label": "棋谱文件",
       "sgf.copy": "复制",
       "sgf.export": "导出",
       "sgf.import": "导入",
@@ -134,9 +134,7 @@
 
       // —— sidebar: footer ——
       "foot.practice": "练习",
-      "foot.practice.title": "战术练习：找制胜一手 / 找防守点",
-      "foot.daily": "每日",
-      "foot.daily.title": "每日挑战：每天固定 5 题，连续打卡",
+      "foot.practice.title": "练习：今天的 5 题、找制胜一手 / 找防守点",
       "foot.stats": "统计",
       "foot.stats.title": "对局统计",
       "foot.clear": "清除存档",
@@ -350,9 +348,7 @@
       "swap2.choosing": "平衡开局 · 待选边",
 
       // —— runtime: save / slots ——
-      "save.at": "已存 {time}",
       "save.failed": "存档失败",
-      "save.none": "无存档",
       "save.cleared": "存档已清除",
       "save.clearConfirm": "清除自动存档并开始新局？",
       "save.clearTitle": "清除存档",
@@ -526,6 +522,7 @@
       "practice.round.nextDue": "还有 {n} 题今天到期复习，在「每日」里。",
       "practice.round.nextTomorrow": "明天回来做到期复习，独立做对才算掌握。",
       "practice.skill.aria": "题型",
+      "practice.skill.daily": "今日",
       "practice.skill.all": "全部",
       "practice.skill.win1": "成五",
       "practice.skill.defend": "防守",
@@ -607,7 +604,6 @@
       "role.you": "You",
       "role.computer": "Computer",
       "role.pending": "TBD",
-      "side.autosave": "Autosaved",
 
       "sec.game": "GAME",
       "set.mode": "Mode",
@@ -667,6 +663,7 @@
       "rep.live.title": "Back to live",
       "rep.next.title": "Next (→)",
       "rep.end.title": "End (End)",
+      "sgf.label": "Game file",
       "sgf.copy": "Copy",
       "sgf.export": "Export",
       "sgf.import": "Import",
@@ -680,9 +677,7 @@
       "sgf.continue.title": "Keep playing from the imported position",
 
       "foot.practice": "Practice",
-      "foot.practice.title": "Tactics: find the win / find the defence",
-      "foot.daily": "Daily",
-      "foot.daily.title": "Daily challenge: 5 fixed puzzles, keep the streak",
+      "foot.practice.title": "Practice: today's 5 puzzles, find the win / find the defence",
       "foot.stats": "Stats",
       "foot.stats.title": "Game statistics",
       "foot.clear": "Clear save",
@@ -885,10 +880,7 @@
       "swap2.aiBlack": "Computer takes black",
       "swap2.placing": "Swap2 · laying stones",
       "swap2.choosing": "Swap2 · choosing a side",
-
-      "save.at": "Saved {time}",
       "save.failed": "Save failed",
-      "save.none": "No save",
       "save.cleared": "Save cleared",
       "save.clearConfirm": "Clear the autosave and start a new game?",
       "save.clearTitle": "Clear save",
@@ -1060,6 +1052,7 @@
       "practice.round.nextDue": "{n} due for review today, in Daily.",
       "practice.round.nextTomorrow": "Come back tomorrow for the due reviews; unaided solves are what count as mastered.",
       "practice.skill.aria": "Puzzle type",
+      "practice.skill.daily": "Today",
       "practice.skill.all": "All",
       "practice.skill.win1": "Five",
       "practice.skill.defend": "Defend",

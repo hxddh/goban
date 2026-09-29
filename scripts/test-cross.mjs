@@ -159,9 +159,16 @@ const snap = (page) =>
  * 「被相位藏起来」；而想靠先调 openPanel 来消除这个歧义更糟 —— openPanel 按的
  * 是 `]`，是**开关**，侧栏已开时再调一次就把它关上了（正是下面那段注释警告的坑）。
  */
+/** v1.70 起复制 / 导出 / 导入 / 粘贴住在「存档」弹层里:像人一样先开存档,再点粘贴(它会自己关掉弹层)。 */
+async function pasteViaSlots(page) {
+  await page.evaluate(() => document.getElementById("sgf-slots").click());
+  await page.waitForTimeout(120);
+  await page.click("#sgf-paste");
+}
+
 async function ensureSetupPhase(page) {
   const playing = await page.evaluate(() => {
-    const m = document.getElementById("moves");
+    const m = document.getElementById("replay-pos"); // v1.70:顶栏不再写手数,侧栏的「a / b」是唯一一处
     const parts = ((m && m.textContent) || "").split("/");
     return parts.length === 2 && Number(parts[1]) > 0;
   });
@@ -493,7 +500,7 @@ async function enableSwap2Pvp(page) {
   const mid = await snap(page);
   await page.evaluate(() =>
     navigator.clipboard.writeText("(;FF[4]GM[4]SZ[15];B[hh];W[ii];B[gg];W[jj])"));
-  await page.click("#sgf-paste"); await page.waitForTimeout(300);
+  await pasteViaSlots(page); await page.waitForTimeout(300);
   await dismissConfirm(page);
   await page.waitForTimeout(200);
   const after = await snap(page);
@@ -726,7 +733,7 @@ async function enableSwap2Pvp(page) {
 // v1.33 改成钉住脚栏——断言从"侧栏不滚动"改成"入口在视口内"，因为后者才是
 // 用户真正在乎的事，而且不随内容多寡失效。
 {
-  const FEATS = ["open-practice", "open-daily", "open-stats", "sgf-slots", "sgf-review"];
+  const FEATS = ["open-practice", "open-stats", "sgf-slots", "sgf-review"]; // v1.70:「每日」并进「练习」
   const bad = [];
   for (const [w, h] of [[1280, 720], [1366, 768], [960, 900], [1440, 900]]) {
     const page = await newPage();
@@ -747,7 +754,7 @@ async function enableSwap2Pvp(page) {
     if (page.__errors.length) bad.push(w + "x" + h + ":errs " + page.__errors.join("|"));
     await page.close();
   }
-  report("K 五个功能入口在 720/768/900 高的窗口都在视口内",
+  report("K 四个功能入口在 720/768/900 高的窗口都在视口内",
     bad.length === 0, JSON.stringify({ bad }));
 }
 
@@ -764,7 +771,7 @@ async function enableSwap2Pvp(page) {
     };
     return {
       open: document.getElementById("app").classList.contains("panel-open"),
-      feats: ["open-practice", "open-daily", "sgf-review", "open-stats", "sgf-slots"]
+      feats: ["open-practice", "sgf-review", "open-stats", "sgf-slots"]
         .filter((id) => { const e = document.getElementById(id); return e && inView(e); }).length,
     };
   });
@@ -774,8 +781,8 @@ async function enableSwap2Pvp(page) {
   await page.waitForTimeout(400);
   const remembered = await page.evaluate(() =>
     !document.getElementById("app").classList.contains("panel-open"));
-  report("L 首次运行侧栏展开（5 个功能入口可见）且记住用户关闭",
-    seen.open && seen.feats === 5 && remembered && page.__errors.length === 0,
+  report("L 首次运行侧栏展开（4 个功能入口可见）且记住用户关闭",
+    seen.open && seen.feats === 4 && remembered && page.__errors.length === 0,
     JSON.stringify({ ...seen, remembered, errs: page.__errors }));
   await page.close();
 }
@@ -1171,14 +1178,12 @@ async function enableSwap2Pvp(page) {
         sepEls: m.querySelectorAll(".sep").length,
         rows: Object.keys(rows).sort((a, b) => a - b).map((k) => rows[k]),
         over: +(Math.max(...kids.map((k) => k.getBoundingClientRect().right)) - mb.right).toFixed(1),
-        hint: (document.getElementById("save-hint").textContent || "").trim(),
       };
     });
     if (r.sepEls) bad.push(lang + ":分隔点又成了元素 ×" + r.sepEls);
     const empty = r.rows.filter((row) => row.every((t) => t === ""));
     if (empty.length) bad.push(lang + ":有 " + empty.length + " 行只剩分隔点");
     if (r.over > 0.5) bad.push(lang + ":内容溢出 " + r.over + "px");
-    if (!/\d/.test(r.hint)) bad.push(lang + ":存档提示没带时间戳 " + JSON.stringify(r.hint));
     if (page.__errors.length) bad.push(lang + ":errs " + page.__errors.join("|"));
     await page.close();
   }
@@ -1479,7 +1484,7 @@ async function enableSwap2Pvp(page) {
     await page.waitForTimeout(100);
     await page.evaluate(() => navigator.clipboard.writeText(
       "(;FF[4]GM[1]SZ[15];B[dh];W[aa];B[eh];W[ac];B[fh];W[ae];B[gh];W[ag])"));
-    await page.click("#sgf-paste"); await page.waitForTimeout(350);
+    await pasteViaSlots(page); await page.waitForTimeout(350);
     await dismissConfirm(page); await page.waitForTimeout(250);
     await page.evaluate(() => {
       const b = [...document.querySelectorAll("button")].find((x) => /续下|Resume/.test(x.textContent));
@@ -1506,7 +1511,7 @@ async function enableSwap2Pvp(page) {
     await page.waitForTimeout(100);
     await page.evaluate(() => navigator.clipboard.writeText(
       "(;FF[4]GM[1]SZ[15];B[aa];W[dh];B[ac];W[eh];B[ae];W[fh];B[ag];W[gh];B[ai])"));
-    await page.click("#sgf-paste"); await page.waitForTimeout(350);
+    await pasteViaSlots(page); await page.waitForTimeout(350);
     await dismissConfirm(page); await page.waitForTimeout(250);
     await page.evaluate(() => {
       window.__audio.length = 0;                       // 先清空再点：easy 档 30ms，

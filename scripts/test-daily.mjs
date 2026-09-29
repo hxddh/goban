@@ -147,7 +147,7 @@ async function answerRound(expectAllCorrect) {
   // v1.33 a fresh profile starts with the panel already open.
   await page.keyboard.press("]");
   await page.waitForTimeout(120);
-  await page.click("#open-daily");
+  await page.click("#open-practice"); // v1.70:今天的题没做时,「练习」先给每日
   await page.waitForTimeout(200);
   const title = await modalText("practice-title");
   const prog = await modalText("practice-progress");
@@ -175,15 +175,19 @@ async function answerRound(expectAllCorrect) {
 {
   await page.click("#practice-close");
   await page.waitForTimeout(80);
-  await page.click("#open-daily");
+  // v1.70:做完之后「练习」给的是自由练习;每日在弹层里「今日」一格
+  await page.click("#open-practice");
+  await page.waitForTimeout(150);
+  const freeTitle = await modalText("practice-title");
+  await page.click('#practice-skill [data-skill="daily"]');
   await page.waitForTimeout(150);
   const task = await modalText("practice-task");
   const fb = await modalText("practice-feedback");
   const st = await readDaily();
   const same = JSON.stringify(st.puzzles) === page.__snapshot1;
-  report("3 same-day reopen: identical set + done summary",
-    task === "今日挑战已完成" && /连续打卡 1 天/.test(fb) && same,
-    JSON.stringify({ task, same }));
+  report("3 same-day reopen: 练习 gives free practice; 今日 shows identical set + done summary",
+    freeTitle === "战术练习" && task === "今日挑战已完成" && /连续打卡 1 天/.test(fb) && same,
+    JSON.stringify({ freeTitle, task, same }));
 }
 
 // ---- Test 4: replay never re-counts ----
