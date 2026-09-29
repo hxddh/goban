@@ -852,6 +852,17 @@ const Practice = ctx.GobanPractice;
       assert(Ai.renjuFallbacks() > before, nm + " 走的是出口兜底那条路(计数器涨了)");
       assert(!board[rj.r][rj.c], nm + " 交出去的点是空的");
     }
+    // v1.69:C3 在根上就剔除禁手点 —— 同样想要 (8,8),禁手档下交出合法一手,而且**不经过**
+    // 出口兜底(计数器不涨)。旧代码上这一条失败:C3 选中 (8,8),被出口换掉。
+    {
+      const C3 = ctx.GobanAi3;
+      const free = C3.aiMove({ board: board, side: "b", difficulty: "hard", timeMs: 300, vary: false });
+      assert(free.r === 8 && free.c === 8, "C3 自由式下确实想要那个禁手点(选了 " + free.r + "," + free.c + ")");
+      const before = Ai.renjuFallbacks();
+      const rj = C3.aiMove({ board: board, side: "b", difficulty: "hard", timeMs: 300, vary: false, renju: true });
+      assert(Core.renjuForbidden(board, rj.r, rj.c) === null && !board[rj.r][rj.c], "C3 禁手档下交出合法一手");
+      assert(Ai.renjuFallbacks() === before, "C3 禁手档下不再靠出口兜底(计数器涨了 " + (Ai.renjuFallbacks() - before) + ")");
+    }
     // 白方不受约束:同一盘让白走,出口闸必须原样放行
     const wb = mkb([[8, 6], [8, 7], [6, 8], [7, 8], [0, 1]], WS);
     const wmv = Ai.aiMove({ board: wb, side: "w", difficulty: "normal", nodeBudget: 1500, renju: true });
