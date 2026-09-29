@@ -31,7 +31,7 @@
          win wore two different colours in one app. */
       winGlow: "#ffe08a",
       boardTop: "#e4c294", boardMid: "#d8ad7b", boardBot: "#cb9c66",
-      grain: true, line: "#3d2914", star: "#3d2914",
+      line: "#3d2914", star: "#3d2914",
       style: "stone",
       lastB: "rgba(255,246,230,0.86)",
       lastW: "rgba(58,40,22,0.62)",
@@ -46,7 +46,7 @@
          win wore two different colours in one app. */
       winGlow: "#a8e6cf",
       boardTop: "#1e332c", boardMid: "#172822", boardBot: "#101c18",
-      grain: false, line: "#5a7a6c", star: "#7dcea0",
+      line: "#5a7a6c", star: "#7dcea0",
       style: "stone",
       lastB: "rgba(168,230,207,0.9)",
       lastW: "rgba(16,40,32,0.66)",
@@ -61,7 +61,7 @@
          win wore two different colours in one app. */
       winGlow: "#a65d2e",
       boardTop: "#f6ead4", boardMid: "#ecd9b5", boardBot: "#e2cba0",
-      grain: true, line: "#6b5344", star: "#6b5344",
+      line: "#6b5344", star: "#6b5344",
       style: "stone",
       lastB: "rgba(255,246,230,0.86)",
       lastW: "rgba(110,70,36,0.7)",
@@ -321,7 +321,8 @@
     // on a 788px board sit the same way. Cost of the switch: +0.1ms/113 stones.
     ctx.save();
     if (!ghost) {
-      ctx.shadowColor = themeId === "night" ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.32)";
+      // 夜盘盘面本来就暗(亮度 41),0.5 的投影看不出影子,只会把黑子右下的轮廓压没
+      ctx.shadowColor = themeId === "night" ? "rgba(0,0,0,0.28)" : "rgba(0,0,0,0.32)";
       ctx.shadowBlur = rr * 0.36;
       ctx.shadowOffsetX = rr * 0.05;
       ctx.shadowOffsetY = rr * 0.13;
@@ -352,18 +353,22 @@
       // 边由上面那圈暖灰给出;这里只留一丝极淡的线,浅盘(日间)上才稍重一点
       ctx.beginPath();
       ctx.arc(x, y, rr - 0.25 * dpr, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(60,48,30," + (0.05 + 0.2 * need).toFixed(3) + ")";
+      ctx.strokeStyle = "rgba(60,48,30," + (0.05 + 0.34 * need).toFixed(3) + ")";
       ctx.lineWidth = Math.max(1, dpr * 0.6);
       ctx.stroke();
     } else if (need > 0.02) {
+      // v1.66:夜盘上黑子的轮廓沿边 24 个方向只有 54–71% 看得见 —— 反光只在左上一角,
+      // 而夜盘下半部的盘面亮度只有 25–30,黑子 8,本身差不到 20。反光绕满一圈(左上最亮),
+      // 冷一点的色与白子的暖灰边对称;投影同时减淡(见 shadowColor),别再把右下的盘面压暗。
       const rim = ctx.createLinearGradient(x - rr, y - rr, x + rr, y + rr);
-      rim.addColorStop(0, "rgba(255,255,255," + (0.42 * need).toFixed(3) + ")");
-      rim.addColorStop(0.45, "rgba(255,255,255," + (0.12 * need).toFixed(3) + ")");
-      rim.addColorStop(1, "rgba(255,255,255,0.02)");
+      rim.addColorStop(0, "rgba(214,236,228," + (0.6 * need).toFixed(3) + ")");
+      rim.addColorStop(0.5, "rgba(214,236,228," + (0.36 * need).toFixed(3) + ")");
+      rim.addColorStop(1, "rgba(214,236,228," + (0.3 * need).toFixed(3) + ")");
       ctx.beginPath();
-      ctx.arc(x, y, rr - 0.5, 0, Math.PI * 2);
+      ctx.arc(x, y, rr - 0.75, 0, Math.PI * 2);
       ctx.strokeStyle = rim;
-      ctx.lineWidth = Math.max(1, dpr);
+      // 1x 屏上 1px 的弧被抗锯齿摊成两列半透明,反光减半;至少 1.5px
+      ctx.lineWidth = Math.max(1.5, 1.25 * dpr);
       ctx.stroke();
     }
 
@@ -419,7 +424,7 @@
   }
 
   /**
-   * The whole static layer — board fill, grain, grid, stars, coordinate
+   * The whole static layer — board fill, grid, stars, coordinate
    * labels, stones — painted into ANY context at ANY size, reading no module
    * state whatsoever.
    *
@@ -528,40 +533,7 @@
       g.addColorStop(1, th.boardBot);
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, w);
-
-      if (th.grain) {
-        // Was 48 evenly spaced straight lines, alternating black and white at
-        // 3.5–4%: equal pitch, equal slope, alternating ink — the eye reads
-        // that as banding, not as wood. Real grain is irregular in spacing,
-        // weight and direction. The jitter is hashed from the band index, not
-        // Math.random, so the texture is identical on every repaint (this is
-        // the cached base layer; a re-rolled pattern would shimmer whenever
-        // the board is rebuilt).
-        ctx.save();
-        ctx.lineCap = "round";
-        const hash = (n) => {
-          const v = Math.sin(n * 12.9898) * 43758.5453;
-          return v - Math.floor(v); // 0..1, deterministic
-        };
-        const bands = 34;
-        for (let i = 0; i < bands; i++) {
-          const a = hash(i), b = hash(i + 91), c = hash(i + 173);
-          // uneven pitch: nominal position nudged by up to ±0.6 of a gap
-          const y = ((i + 0.5 + (a - 0.5) * 1.2) / bands) * w;
-          const dark = b < 0.62;                       // more dark than light
-          ctx.strokeStyle = dark ? "#000" : "#fff";
-          ctx.globalAlpha = (themeId === "day" ? 0.030 : 0.038) * (0.45 + c);
-          ctx.lineWidth = Math.max(1, w / 900) * (0.6 + a * 1.9);
-          // a shallow arc rather than a straight rule, drifting up or down
-          const drift = (c - 0.5) * w * 0.05;
-          const bow = (a - 0.5) * w * 0.03;
-          ctx.beginPath();
-          ctx.moveTo(-w * 0.02, y);
-          ctx.quadraticCurveTo(w * 0.5, y + bow, w * 1.02, y + drift);
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
+      // v1.66 起不画木纹:盘面只是一层渐变底色,纹理只会和格线抢视线
 
       ctx.strokeStyle = th.line;
       // Authored in CSS pixels. w/500 drifted with the board — 3 device px on
@@ -826,46 +798,41 @@
     }
 
     if (winLine && winLine.length) {
-      // The win used to be one translucent rule drawn THROUGH the stones:
-      // its colour carried alpha 0.5–0.55 and was then multiplied by a 0.62
-      // globalAlpha, landing at an effective 0.31–0.34 — measured on the wood
-      // board as rgb(88,46,28), a dull scratch across the five stones that
-      // decided the game. The five stones are the subject, not the line
-      // between them, so they get the emphasis: a glow ring around each, in
-      // the same --win the status pill and the frame flash already use.
-      const glow = th.winGlow || th.win;
-      // The ring hugs the stone, so it is the stone's radius — not a copy of
-      // today's value of it.
+      // v1.36 起胜局是五颗子各一圈发光环 + 一条 0.55 透明的细线(此前那条线画在子底下、
+      // 实际不透明度只有 0.31–0.34,像一道划痕)。v1.66:改成一笔描出来的线 —— 从第一颗
+      // 画到第五颗,画在子上面、不透明,只描一次(随 winFlashUntil 的 420ms);五颗子各留
+      // 一圈细环、不再发光,让「这五颗」一眼可数,又不像游戏里的特效。尊重减弱动效。
+      // 线画在子上面,黑白两种子上都要看得见:浅金(木盘的 winGlow)在白子上几乎消失。
+      // 用朱砂 —— 像一方印,对白子 ≈ 4.2:1、对黑子 ≈ 5:1;练习本本来就是红笔。
+      const glow = th.style === "pencil" ? (th.winGlow || th.win) : "#c8452c";
       const rr = step * STONE_R;
+      const now = performance.now();
+      const until = m.winFlashUntil || 0;
+      const prog = prefersReducedMotion() || now >= until ? 1 : easeOutCubic(Math.max(0, Math.min(1, 1 - (until - now) / 420)));
       ctx.save();
       ctx.lineCap = "round";
-      // Connecting thread first, underneath the rings, so it reads as one
-      // group rather than five separate marks.
-      ctx.globalAlpha = 0.55;
-      ctx.strokeStyle = glow;
-      ctx.lineWidth = Math.max(1, step * 0.05);
-      ctx.beginPath();
-      for (let i = 0; i < winLine.length; i++) {
-        const p = winLine[i];
-        if (i === 0) ctx.moveTo(pad + p.c * step, pad + p.r * step);
-        else ctx.lineTo(pad + p.c * step, pad + p.r * step);
-      }
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      ctx.lineJoin = "round";
       for (const p of winLine) {
-        const x = pad + p.c * step;
-        const y = pad + p.r * step;
-        ctx.save();
-        ctx.shadowColor = glow;
-        ctx.shadowBlur = rr * 0.75;
         ctx.beginPath();
-        ctx.arc(x, y, rr + Math.max(1, _dpr), 0, Math.PI * 2);
+        ctx.arc(pad + p.c * step, pad + p.r * step, rr + Math.max(1, _dpr), 0, Math.PI * 2);
         ctx.strokeStyle = glow;
-        ctx.lineWidth = Math.max(1.5, _dpr * 1.4);
+        ctx.lineWidth = Math.max(1.2, _dpr * 1.1);
         ctx.stroke();
-        ctx.stroke();  // second pass deepens the bloom without a wider ring
-        ctx.restore();
       }
+      const pts = winLine.map((p) => [pad + p.c * step, pad + p.r * step]);
+      const segs = pts.length - 1;
+      const reach = prog * segs;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i <= segs; i++) {
+        const k = Math.min(1, reach - (i - 1));
+        if (k <= 0) break;
+        ctx.lineTo(pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * k, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * k);
+      }
+      ctx.strokeStyle = glow;
+      ctx.globalAlpha = 0.92;
+      ctx.lineWidth = Math.max(2, step * 0.075);
+      ctx.stroke();
       ctx.restore();
     }
   }

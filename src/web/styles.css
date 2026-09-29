@@ -420,11 +420,18 @@
       position: absolute; width: 1px; height: 1px; overflow: hidden;
       clip: rect(0 0 0 0); white-space: nowrap;
     }
-    .vs-side { transition: opacity var(--dur-ui) var(--ease); }
-    .vs.has-turn .vs-side:not(.is-turn) { opacity: 0.55; }
-    .vs-side.is-turn .stone { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--accent); }
-    /* 日间侧栏是米色,白子几乎融进去 —— 给它一线暖灰的边 */
-    [data-theme="day"] .vs-side:not(.is-turn) .stone.white { box-shadow: 0 0 0 1px rgba(110,85,50,0.3), 0 1px 2px rgba(0,0,0,0.18); }
+    /* v1.66:不轮到的一方只退后文字,棋子保持原色。v1.65 把整侧调到 0.55,结果深色侧栏上
+       不轮到的黑子几乎消失、木盘上的白子变成一颗灰点(像第三种颜色),日间的白子融进米色。 */
+    .vs-side > div { transition: opacity var(--dur-ui) var(--ease); }
+    .vs.has-turn .vs-side:not(.is-turn) > div { opacity: 0.55; }
+    /* 棋子在侧栏底色上要有轮廓:深色侧栏(木盘 / 夜盘)给黑子一线亮边,日间给白子一线暖灰边 */
+    .vs .stone.black { box-shadow: 0 0 0 1px rgba(255,255,255,0.36), 0 1px 2px rgba(0,0,0,.3); }
+    [data-theme="day"] .vs .stone.black { box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+    [data-theme="day"] .vs .stone.white { box-shadow: 0 0 0 1px rgba(110,85,50,0.72), 0 1px 2px rgba(0,0,0,0.18); }
+    [data-theme="notebook"] .vs .stone { box-shadow: none; }
+    .vs .vs-side.is-turn .stone { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--accent); }
+    /* 日间的强调色在米色上只有 2.5:1,环用深一档的强调文字色 */
+    [data-theme="day"] .vs .vs-side.is-turn .stone { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--accent-text); }
     .vs-right .vs-name { justify-content: flex-end; }
     /* `.vs-mid` 与 `.muted` 同特异性而 `.muted` 在表里更靠后 —— v1.50 把「vs 标记」
        写进 --fs-micro 的角色清单,这条声明却一直没赢过:实测「对」是 12px,而同档的
@@ -704,12 +711,11 @@
       font-weight: 600;
     }
 
+    /* v1.66:翻页条去掉底板与描边 —— 它是棋谱的一部分,不是一张卡片;一道上分隔线够了 */
     .replay-bar {
       display: flex; gap: 4px;
-      padding: 4px;
-      border-radius: var(--radius-md);
-      background: var(--btn-ghost);
-      border: 1px solid var(--card-border);
+      padding: 6px 0 0;
+      border-top: 1px solid var(--card-border);
     }
     .replay-bar button {
       flex: 1;
@@ -977,7 +983,9 @@
       display: grid; grid-template-columns: repeat(4, 1fr);
       gap: 2px 4px; margin-top: 12px;
     }
-    .link-row .text-link { text-align: center; }
+    /* v1.66:四个文件操作是低频的,用中性色,不再比「新局」醒目(强调色只留给主操作) */
+    .link-row .text-link { text-align: center; color: var(--muted); font-weight: 400; }
+    .link-row .text-link:hover { color: var(--text); }
     /* backup/restore sits under the slot list, away from the per-slot rows —
        it acts on everything, not on the slot you happen to be looking at */
     .backup-row {

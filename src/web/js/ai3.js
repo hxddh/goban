@@ -571,22 +571,29 @@
   function profileFor(difficulty, opts) {
     const extreme = difficulty === "extreme";
     const normal = difficulty === "normal";
+    const easy = difficulty === "easy";
     let budget;
     if (typeof opts.nodeBudget === "number" && opts.nodeBudget > 0) budget = 0;
     else if (typeof opts.timeMs === "number") budget = opts.timeMs;
     else if (extreme) budget = opts.think === "fast" ? 2500 : opts.think === "deep" ? 8000 : 5000;
     else if (normal) budget = 400;
+    else if (easy) budget = 240;
     else budget = opts.think === "fast" ? 800 : opts.think === "deep" ? 3500 : 2000;
     return {
       budgetMs: budget,
       nodeBudget: typeof opts.nodeBudget === "number" && opts.nodeBudget > 0 ? opts.nodeBudget : 0,
-      vcfDepth: extreme ? 30 : normal ? 14 : 20,
-      // 极档独有:严格 VCT。难档不给 —— 两档必须分得开(v1.64 实测极 ≈ 难)
-      vctDepth: extreme ? 9 : 0,
-      vctCap: extreme ? 120000 : 0,
-      maxDepth: extreme ? 30 : normal ? 12 : 18,
-      rootWidth: extreme ? 26 : normal ? 20 : 26,
-      inner: extreme ? [14, 10, 8] : normal ? [12, 9, 7] : [14, 10, 8],
+      // v1.66:极档 = 难档的搜索,只多给算力(时间 + 多线程)。REVIEW-v1.65 §2.1 实测:同一难档
+      // ×2.5 时间 +137(p = 0.011),而 v1.65 的极档同样 ×2.5 时间、每手先花至多三成预算找 VCT,
+      // 只有 +29(p = 0.38)。所以极档不再每手跑 VCT,参数与难档一致。
+      // v1.66 入门:同一引擎的浅搜索,不算连续冲四;失误只发生在活三层面(见 aiMoveCore 1b)
+      vcfDepth: easy ? 8 : normal ? 14 : 20,
+      // 入门自己不算连续冲四(承诺:「不算杀」),但对手的连续冲四照样挡 —— 挡冲四是它的承诺
+      vcfAttack: easy ? 0 : normal ? 14 : 20,
+      vctDepth: 0,
+      vctCap: 0,
+      maxDepth: easy ? 6 : normal ? 12 : 18,
+      rootWidth: easy ? 16 : normal ? 20 : 26,
+      inner: easy ? [8, 6, 5] : normal ? [12, 9, 7] : [14, 10, 8],
       // 见 aiMoveCore 3b:开着(根宽 36)时极对难 3/13/8,关掉并收回难档宽度 6/14/4
       denyVct: false,
     };
@@ -594,6 +601,9 @@
 
   let lastStage = "";
   let lastInfo = null;
+  /** 入门档漏掉活三的概率(见 aiMoveCore 1b) */
+  const EASY_MISS = 0.3;
+  let easySkipOwnF4 = false;
 
   function toRC(cell) { return { r: (cell / SZ) | 0, c: cell % SZ }; }
 
@@ -604,7 +614,7 @@
     const side = me2 === "b" ? 0 : 1;
     const op = 1 - side;
     const prof = profileFor(difficulty, opts || {});
-    lastStage = ""; lastInfo = null;
+    lastStage = ""; lastInfo = null; easySkipOwnF4 = false;
 
     resetFrom(board2d);
     h1 = 0; h2 = 0;
@@ -626,9 +636,27 @@
     killers.fill(-1);
     history.fill(0);
 
+    // 1b) 入门的失误只在活三这一层:成五、挡冲四上面已经做完,永远做对;
+    //     对手的活三按概率不挡,自己能走成活四时按概率错过。概率由对「普通」的对局尺定:
+    //     普胜约七成,入门也要赢下至少一成(REVIEW-v1.65 §3 E2)。
+    if (difficulty === "easy") {
+      const rnd = typeof opts.rng === "function" ? opts.rng : Math.random;
+      if (has(op, P_F4) && rnd() < EASY_MISS) {
+        // 没看见那条活三:在不碰它的点里,按自己的棋型分挑一手
+        let best = -1, bestSc = -1;
+        for (let cell = 0; cell < N; cell++) {
+          if (bd[cell] || p4[op * N + cell] >= P_F3 || p4[side * N + cell] >= P_F4) continue;
+          const sc = score[side * N + cell] + (score[op * N + cell] >> 1);
+          if (sc > bestSc) { bestSc = sc; best = cell; }
+        }
+        if (best >= 0) { lastStage = "easy-miss3"; return toRC(best); }
+      }
+      if (has(side, P_F4) && rnd() < EASY_MISS) easySkipOwnF4 = true;
+    }
+
     // 2) 自己的冲四连杀
     vcfNodes = 0;
-    const own = vcf(side, prof.vcfDepth);
+    const own = vcf(side, prof.vcfAttack);
     if (own >= 0) { lastStage = "vcf"; return toRC(own); }
 
     // 2b) 极档:自己的活三连杀(占用至多 30% 的预算)
@@ -702,8 +730,12 @@
       aborted = false;
       deadline = saveDeadline;
     }
+    if (easySkipOwnF4) {
+      easySkipOwnF4 = false;
+      const rest = cands.filter((c) => p4[side * N + c] < P_F4);
+      if (rest.length) { cands = rest; lastStage = "easy-miss4"; }
+    }
     if (cands.length === 1) { lastStage = lastStage || "forced"; return toRC(cands[0]); }
-
     // 4) 搜索
     const res = searchRoot(side, prof.maxDepth, cands);
     lastStage = lastStage || "search";
@@ -716,6 +748,7 @@
   function sane(board2d, mv) {
     if (mv && mv.r >= 0 && mv.r < SZ && mv.c >= 0 && mv.c < SZ && !board2d[mv.r][mv.c]) return mv;
     lastStage = "fallback";
+    resetFrom(board2d); // 兜底按这一盘重算棋型分,不沿用搜索留下的状态
     let best = null, bestSc = -1;
     for (let r = 0; r < SZ; r++) for (let c = 0; c < SZ; c++) {
       if (board2d[r][c]) continue;
@@ -726,9 +759,13 @@
     return best;
   }
 
+  function finishMove(opts, mv) {
+    return C1.legalizeRenju(opts, C1.varyBySymmetry(opts.board, sane(opts.board, mv), opts));
+  }
+
   function aiMove(opts) {
     // 出口闸与 C1 / C2 共用:对称变化只在最外层做一次,禁手合法性在最后验
-    return C1.legalizeRenju(opts, C1.varyBySymmetry(opts.board, sane(opts.board, aiMoveCore(opts)), opts));
+    return finishMove(opts, aiMoveCore(opts));
   }
 
   global.GobanAi3 = {
@@ -750,7 +787,7 @@
 (function (global) {
   global.GobanTier = {
     engineFor: function (difficulty) {
-      if (difficulty === "easy") return global.GobanAi;
+      // v1.66 起四档都走 C3;C1 只剩开局库与禁手出口
       return global.GobanAi3 || global.GobanAi2 || global.GobanAi;
     },
   };

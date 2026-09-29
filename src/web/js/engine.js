@@ -252,7 +252,8 @@
   async function moveAsync(opts) {
     const payload = withDefaults(opts);
     const d = deps.defaults();
-    const useWorker = payload.difficulty !== "easy";
+    // v1.66:入门也是 C3 的搜索(240ms),同样放进后台线程,不在主线程上卡界面
+    const useWorker = true;
     const timeMs =
       typeof (opts && opts.timeMs) === "number" ? opts.timeMs : deps.budgetFor(payload.difficulty);
     const think = (opts && opts.think) || d.think;

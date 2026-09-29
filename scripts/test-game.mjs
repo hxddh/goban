@@ -2767,6 +2767,14 @@ const Practice = ctx.GobanPractice;
   const f1 = C3._debug.sane(pos1, { r: 7, c: 7 }), f2 = C3._debug.sane(pos1, null);
   assert(f1 && !pos1[f1.r][f1.c] && f2 && !pos1[f2.r][f2.c] && C3._debug.sane(pos1, { r: 7, c: 9 }).c === 9,
     "C3 出口兜底:占用点与空结果都换成空点,合法手原样放行");
+  // v1.66:极档 = 难档的搜索,只多给算力。除了预算,两档的每个参数必须一样
+  //(v1.65 的极档多一步每手 VCT,同样 ×2.5 时间只有 +29、p = 0.38;去掉之后 +172、p = 0.0017)
+  {
+    const strip = (p) => { const o = Object.assign({}, p); delete o.budgetMs; delete o.nodeBudget; return JSON.stringify(o); };
+    const pe = C3.profileFor("extreme", {}), ph = C3.profileFor("hard", {});
+    assert(strip(pe) === strip(ph) && pe.budgetMs > ph.budgetMs * 2,
+      "C3 极档与难档搜索参数一致,只多给时间 (极 " + pe.budgetMs + "ms / 难 " + ph.budgetMs + "ms)");
+  }
   // 预算管到 VCF:nodeBudget 2000 的普档在 200 个中盘局面上最多超几个节点(v1.65 评审前 VCF 不查预算,最坏 2622)
   {
     let seed = 7; const rnd2 = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);

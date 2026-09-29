@@ -56,10 +56,10 @@
     if (diff === "extreme") return extremeTimeMs();
     if (diff === "hard") return hardTimeMs();
     if (diff === "normal") return 400; // v1.65:普档换成 C3,预算 250 → 400ms
-    return 30;
+    return 240; // v1.66:入门换成 C3,240ms 让普对入门约七成半(REVIEW-v1.65 §3 E2)
   }
 
-  /** 档位 → 引擎只有一张表:GobanTier(ai3.js)。v1.65 起普 / 难 / 极走 C3,简仍是 C1。 */
+  /** 档位 → 引擎只有一张表:GobanTier(ai3.js)。v1.66 起四档都走 C3。 */
   function engineFor(diff) {
     return window.GobanTier ? window.GobanTier.engineFor(diff) : Ai;
   }

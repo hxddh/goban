@@ -4,6 +4,7 @@
  *   RAPFI=/path/to/pbrain-rapfi node scripts/bench-rapfi.mjs
  *   RAPFI=… TIERS=hard,ext MS=20,100 OPENINGS=12 node scripts/bench-rapfi.mjs
  *   RAPFI=… REF=v1.64.0 node scripts/bench-rapfi.mjs        # 用旧版引擎(从 git 取)
+ *   先跑自检(Rapfi 长时限对短时限,CHECK_MS=2000:100):不单调就不报数;SELFCHECK=0 跳过
  *
  * 为什么要它:`bench-tiers` 只量档与档之间的差,v1.64 评估里「极 ≈ 难」就是它量出来的,
  * 但它回答不了「难到底有多难」。Rapfi 在不同思考时间下是一串稳定的强度刻度,拿各档去对它,
@@ -59,7 +60,7 @@ function engineFor(diff) {
 // 普档发布时限 v1.65 起 400ms(app.js / ai-worker.js);量 v1.64 及更早的 ref 时仍是 250ms
 const NORMAL_MS = process.env.REF ? 250 : 400;
 const TIER = {
-  easy: { diff: "easy", ms: 0 }, normal: { diff: "normal", ms: NORMAL_MS },
+  easy: { diff: "easy", ms: process.env.REF ? 0 : 240 }, normal: { diff: "normal", ms: NORMAL_MS },
   hard: { diff: "hard", ms: 2000 }, ext: { diff: "extreme", ms: 5000 },
 };
 
@@ -152,7 +153,35 @@ const tiers = (process.env.TIERS || "normal,hard,ext").split(",");
 const limits = (process.env.MS || "20,100").split(",").map(Number);
 const book = openingBook(num("OPENINGS", 12));
 const rapfi = new Rapfi(RAPFI);
-console.log(`引擎 ${process.env.REF || "工作区"} · 开局 ${book.length} 个 × 正反 · 各档按发布时限(简 0 / 普 ${NORMAL_MS} / 难 2000 / 极 5000 ms)`);
+
+// ── 自检:Rapfi 自己的时限必须单调 ─────────────────────────────────────────
+// v1.66 评估里「普对 Rapfi@2000 反而比对 @500 高」,说明在这种用法下(单线程、每手整盘重发)
+// 未必发挥出了应有的棋力。先让它长时限对短时限下一轮:长的不显著更强,这把尺就不报数。
+// SELFCHECK=0 跳过(只在排查时用)。
+function logC(n, k) { let s = 0; for (let i = 0; i < k; i++) s += Math.log(n - i) - Math.log(i + 1); return s; }
+function signP(w, l) { const n = w + l; if (!n) return 1; let p = 0; for (let k = w; k <= n; k++) p += Math.exp(logC(n, k) - n * Math.log(2)); return Math.min(1, p); }
+if (process.env.SELFCHECK !== "0") {
+  const [hiMs, loMs] = (process.env.CHECK_MS || "2000:100").split(":").map(Number);
+  const other = new Rapfi(RAPFI);
+  await rapfi.init(hiMs); await other.init(loMs);
+  const HI = (bd, side) => rapfi.move(bd, side), LO = (bd, side) => other.move(bd, side);
+  let w = 0, l = 0, t = 0;
+  for (const op of book) {
+    const g1 = await playGame(HI, LO, op), g2 = await playGame(LO, HI, op);
+    if (g1.w === "err" || g2.w === "err") continue;
+    const a = g1.w === "b", b = g2.w === "w";
+    if (a && b) w++; else if (g1.w === "w" && g2.w === "b") l++; else t++;
+  }
+  other.close();
+  const p = signP(w, l);
+  console.log(`自检 Rapfi@${hiMs} vs Rapfi@${loMs}:${w}胜 ${t}平 ${l}负,p = ${p.toFixed(4)}`);
+  if (!(w > l && p < 0.05)) {
+    console.log("自检不过:Rapfi 在这种用法下时限不单调,这把尺不可信,不报各档的数。");
+    rapfi.close();
+    process.exit(2);
+  }
+}
+console.log(`引擎 ${process.env.REF || "工作区"} · 开局 ${book.length} 个 × 正反 · 各档按发布时限(简 ${TIER.easy.ms} / 普 ${NORMAL_MS} / 难 2000 / 极 5000 ms)`);
 const rows = [];
 for (const ms of limits) {
   await rapfi.init(ms);

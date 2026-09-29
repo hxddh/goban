@@ -4,6 +4,8 @@
  *   node scripts/bench-vs-ref.mjs
  *   REF=v1.64.0 TIERS=normal,hard,ext OPENINGS=12 SCALE=0.25 node scripts/bench-vs-ref.mjs
  *   PAIRS=ext:hard node scripts/bench-vs-ref.mjs        # 工作区内部的相邻档(不取 ref)
+ *   PAIRS=hard@8000:hard@2000 node scripts/bench-vs-ref.mjs   # 同一档给不同时限(发布毫秒数,再乘 SCALE)
+ *   BOOK=openings.json node scripts/bench-vs-ref.mjs     # 指定开局册([[[r,c],…],…]),不用内置的前 N 个
  *
  * v1.65 的验收就是它:「每一档都更难」= **新档对旧同名档,配对计分 p < 0.05**;
  * 「极档不是假的」= **新极对新难 p < 0.05**。
@@ -54,11 +56,13 @@ const SCALE = num("SCALE", 0.25);
 const MS = { easy: 30, normal: 250, hard: 2000, ext: 5000 };
 const DIFF = { easy: "easy", normal: "normal", hard: "hard", ext: "extreme" };
 // v1.65 起普档的发布时限是 400ms(C3);旧版仍按它当时的 250ms
-const MS_NEW = { easy: 30, normal: 400, hard: 2000, ext: 5000 };
+const MS_NEW = { easy: 240, normal: 400, hard: 2000, ext: 5000 };
 
-function player(E, tier, msTable) {
+function player(E, spec, msTable) {
+  // "hard@8000" = 困难档,但按 8000ms(发布口径)思考;再乘 SCALE
+  const [tier, over] = spec.split("@");
   const eng = E.engineFor(DIFF[tier]);
-  const ms = Math.max(20, Math.round(msTable[tier] * SCALE));
+  const ms = Math.max(20, Math.round((over ? Number(over) : msTable[tier]) * SCALE));
   return { name: tier, move: (bd, side) => eng.aiMove({ board: bd, side, difficulty: DIFF[tier], timeMs: ms, vary: false }) };
 }
 
@@ -100,7 +104,7 @@ function playGame(Core, A, B, open) {
 function logC(n, k) { let s = 0; for (let i = 0; i < k; i++) s += Math.log(n - i) - Math.log(i + 1); return s; }
 function signP(w, l) { const n = w + l; if (!n) return 1; let p = 0; for (let k = w; k <= n; k++) p += Math.exp(logC(n, k) - n * Math.log(2)); return Math.min(1, p); }
 
-const book = openingBook(num("OPENINGS", 12));
+const book = process.env.BOOK ? JSON.parse(fs.readFileSync(process.env.BOOK, "utf8")) : openingBook(num("OPENINGS", 12));
 const NEW = loadEngines("");
 const REF = process.env.REF || "v1.64.0";
 let pairs;
@@ -112,11 +116,12 @@ else {
 console.log(`开局 ${book.length} 个 × 正反 · 时限 ×${SCALE}(新:普 ${Math.round(400 * SCALE)} / 难 ${Math.round(2000 * SCALE)} / 极 ${Math.round(5000 * SCALE)} ms)`);
 const rows = [];
 for (const [A, B, label] of pairs) {
-  let pw = 0, pl = 0, pt = 0, a = 0, b = 0, d = 0, errs = 0;
+  let pw = 0, pl = 0, pt = 0, a = 0, b = 0, d = 0, errs = 0, blackWins = 0;
   for (const op of book) {
     const g1 = playGame(NEW.Core, A, B, op), g2 = playGame(NEW.Core, B, A, op);
     const a1 = g1 === "b", a2 = g2 === "w", b1 = g1 === "w", b2 = g2 === "b";
     errs += (g1 === "err") + (g2 === "err");
+    blackWins += (g1 === "b") + (g2 === "b");
     a += a1 + a2; b += b1 + b2; d += (g1 === "draw") + (g2 === "draw");
     if (a1 && a2) pw++; else if (b1 && b2) pl++; else pt++;
   }
@@ -125,7 +130,8 @@ for (const [A, B, label] of pairs) {
   const p = signP(Math.max(pw, pl), Math.min(pw, pl));
   const row = { 对局: label, 配对: `${pw}胜 ${pt}平 ${pl}负`, 逐局: `${a}:${b}${d ? " 和" + d : ""}`,
     Elo: Number.isFinite(elo) ? (elo >= 0 ? "+" : "") + elo.toFixed(0) : (elo > 0 ? "+∞" : "−∞"),
-    p: p.toFixed(4), 判定: p < 0.05 ? (pw > pl ? "显著更强" : "显著更弱") : "不显著", errs };
+    p: p.toFixed(4), 判定: p < 0.05 ? (pw > pl ? "显著更强" : "显著更弱") : "不显著",
+    执黑胜: `${blackWins}/${2 * book.length}`, errs };
   rows.push(row);
   console.log(JSON.stringify(row));
 }

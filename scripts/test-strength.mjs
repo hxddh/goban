@@ -128,8 +128,8 @@ const C2HARD = { eng: Ai2, difficulty: "hard", nodeBudget: 80000 };
   assert(deepW >= shallowW, "MONOTONIC: deep(120k) not weaker than shallow(40k) — deep " + deepW + " shallow " + shallowW);
 }
 
-// easy is randomized: require a win within 2 attempts per side (app routing:
-// hard = C2).
+// easy is randomized: require a win within 2 attempts per side (v1.66: both
+// tiers are C3, as routed by GobanTier).
 {
   const series = (label, cfgB, cfgW, want) => {
     const games = [];
@@ -140,8 +140,8 @@ const C2HARD = { eng: Ai2, difficulty: "hard", nodeBudget: 80000 };
     }
     assert(false, label + " — got " + games.join(" "));
   };
-  const EASY = { eng: Ai, difficulty: "easy", timeMs: 30 };
-  const HARD = { eng: Ai2, difficulty: "hard", timeMs: 600 };
+  const EASY = { eng: Tier.engineFor("easy"), difficulty: "easy", timeMs: 240 };
+  const HARD = { eng: Tier.engineFor("hard"), difficulty: "hard", timeMs: 600 };
   series("hard(B) beats easy(W) within 2 games", HARD, EASY, "b");
   series("hard(W) beats easy(B) within 2 games", EASY, HARD, "w");
 }
@@ -170,9 +170,9 @@ const C2HARD = { eng: Ai2, difficulty: "hard", nodeBudget: 80000 };
     }
     return { n, total: list.length };
   };
-  const eDef = hits(Ai, "easy", 30, "defend");
+  const eDef = hits(Tier.engineFor("easy"), "easy", 240, "defend");
   assert(eDef.n === eDef.total, "入门:挡住每一个冲四/成五威胁 (" + eDef.n + "/" + eDef.total + ")");
-  const eVcf = hits(Ai, "easy", 30, "vcf");
+  const eVcf = hits(Tier.engineFor("easy"), "easy", 240, "vcf");
   assert(eVcf.n < eVcf.total * 0.7, "入门:并不总能算出连续冲四 —— 否则它不是入门 (" + eVcf.n + "/" + eVcf.total + ")");
   const nVcf = hits(Tier.engineFor("normal"), "normal", 400, "vcf");
   assert(nVcf.n >= nVcf.total * 0.9, "普通:会算连续冲四 (" + nVcf.n + "/" + nVcf.total + ")");
@@ -198,7 +198,7 @@ const C2HARD = { eng: Ai2, difficulty: "hard", nodeBudget: 80000 };
     }
     return n;
   };
-  const eThree = blocksThree(Ai, "easy", 30);
+  const eThree = blocksThree(Tier.engineFor("easy"), "easy", 240);
   // 入门是随机化的:40 局面 p≈0.5,±3σ 约 [8, 32]
   assert(eThree >= 6 && eThree <= 34, "入门:常常漏掉活三,但不是从不挡 (" + eThree + "/40)");
   const nThree = blocksThree(Tier.engineFor("normal"), "normal", 400);
