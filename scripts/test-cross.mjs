@@ -1564,6 +1564,9 @@ async function enableSwap2Pvp(page) {
     if (lang === "en") {
       await setLang(page, "en");
     }
+    // v1.74:对局那几行住进「新局」卡片 —— 开着量
+    await page.evaluate(() => document.getElementById("btn-new").click());
+    await page.waitForTimeout(150);
     const r = await page.evaluate(() => {
       const rows = [...document.querySelectorAll(".setting-row")]
         .filter((x) => x.getBoundingClientRect().width > 0);
@@ -1586,6 +1589,7 @@ async function enableSwap2Pvp(page) {
     const rights = [...new Set(r.pills.map((p) => p[1]))];
     const swLefts = [...new Set(r.switches.map((s) => s[0]))];
     seen[lang] = { 行数: r.n, 行宽: r.rowW, 分段控件左: lefts, 分段控件右: rights, 开关左: swLefts, 折行的标签: r.wrapped };
+    await page.keyboard.press("Escape");
     if (!r.pills.length) bad.push(lang + ": 一个分段控件都没量到");
     if (lefts.length !== 1) bad.push(lang + ": 分段控件左边缘有 " + lefts.length + " 个位置 " + JSON.stringify(lefts));
     if (rights.length !== 1) bad.push(lang + ": 分段控件右边缘有 " + rights.length + " 个位置 " + JSON.stringify(rights));
@@ -1693,7 +1697,7 @@ async function enableSwap2Pvp(page) {
     }
     // v1.51：色板随外观搬进设置弹层。setLang 自己开关了一轮，所以每种语言都要
     // 重新打开 —— 关着的时候宽高都是 0，会误读成「色板没画」。
-    await page.click("#settings-btn");
+    await viaMenu(page, "settings-btn");
     await page.waitForTimeout(300);
     const r = await page.evaluate(() => {
       const bs = [...document.querySelectorAll(".theme-row [data-theme]")];
