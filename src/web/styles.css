@@ -173,8 +173,10 @@
       --muted: #6b6358;
       --accent: #b8894a;
       /* v1.32: #b8894a is 2.75:1 on --bg — unreadable as text. Same hue,
-         deepened to 4.84:1 on the sidebar / 5.23:1 on cards. */
-      --accent-text: #8c6026;
+         deepened to 4.84:1 on the sidebar / 5.23:1 on cards.
+         v1.73: in the History modal's game rows (a card on a card) #8c6026 measured 4.44:1 —
+         one notch deeper, same hue: ~5.0:1 there. */
+      --accent-text: #82581f;
       --btn: #e0d9cc;
       --btn-hover: #d2c9b8;
       --win: #a65d2e;
