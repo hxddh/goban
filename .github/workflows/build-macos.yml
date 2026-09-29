@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
       - name: resolve release tag
@@ -59,6 +59,13 @@ jobs:
           cp src/web/js/*.js frontend/dist/js/
           node scripts/gen-worker-src.mjs frontend/dist/js
           node scripts/build-info.mjs
+      # 内置自动更新(Native SDK 0.10+,仅 macOS 系统宿主)。仓库配了公钥变量才打开:
+      # 没配时构建照旧,也就不会出现一个查不到更新源的「检查更新」。
+      # 配置:本机 `native update keygen` → 打印的公钥进仓库变量 NATIVE_UPDATE_PUBLIC_KEY,
+      #       `base64 < native-update.key` 进仓库 Secret NATIVE_UPDATE_KEY。私钥只在 Secret 里。
+      - name: enable auto-update (when configured)
+        if: ${{ vars.NATIVE_UPDATE_PUBLIC_KEY != '' }}
+        run: node scripts/enable-updates.mjs "${{ vars.NATIVE_UPDATE_PUBLIC_KEY }}"
       - name: zig build
         run: zig build -Doptimize=ReleaseFast -Dnative-sdk-path="$SDK_PATH"
       - name: package .app + zip
@@ -77,3 +84,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.value }}
         run: gh release upload "$TAG" dist/Goban-macOS-arm64.zip --clobber
+      # 更新源:用私钥签一份 update-macos.json(版本、压缩包地址、SHA-256),挂在这一版的
+      # 附件里;应用读的是 releases/latest/download/update-macos.json。更新包就是上面那个
+      # zip —— 里面正好一个 Goban.app,SDK 的校验要的就是这个形状。签名失败只警告:这一版
+      # 照样发布,只是不通过自动更新推送。
+      - name: sign + publish update feed (when configured)
+        if: ${{ steps.tag.outputs.value != '' && vars.NATIVE_UPDATE_PUBLIC_KEY != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.value }}
+          UPDATE_KEY: ${{ secrets.NATIVE_UPDATE_KEY }}
+        run: |
+          if [ -z "$UPDATE_KEY" ]; then
+            echo "::warning::有公钥变量但没有 NATIVE_UPDATE_KEY Secret,这一版不发布更新源"
+            exit 0
+          fi
+          key="$RUNNER_TEMP/native-update.key"
+          printf '%s' "$UPDATE_KEY" | base64 --decode > "$key"
+          chmod 600 "$key"
+          notes="$(sed -n '1s/^## *//p' ".github/release-notes/$TAG.md" 2>/dev/null || true)"
+          if native update sign --private-key "$key" --manifest app.zon \
+               --archive dist/Goban-macOS-arm64.zip \
+               --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG/Goban-macOS-arm64.zip" \
+               --target macos-aarch64 --notes "$notes" --output dist/update-macos.json; then
+            gh release upload "$TAG" dist/update-macos.json --clobber
+          else
+            echo "::warning::更新源签名失败,这一版不通过自动更新推送(手动下载不受影响)"
+          fi
+          rm -f "$key"

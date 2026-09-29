@@ -18,8 +18,12 @@
  * @module session
  */
 (function (global) {
-  const DEFAULT_PREFS = Object.freeze({ mode: "ai", difficulty: "normal", humanColor: "b", rule: "free" });
+  // 执子偏好(v1.67):"auto" = 入门 / 普通执黑,困难 / 极限每局轮流;"alt" = 总是轮流;
+  // "b" / "w" = 固定。自由规则下黑方先手优势很大(引擎自对弈黑胜约 77%),低档让玩家执黑
+  // 练进攻,高档轮流 —— 一半的局电脑先手,「更难」才名副其实,又不用学 swap2。
+  const DEFAULT_PREFS = Object.freeze({ mode: "ai", difficulty: "normal", humanColor: "auto", rule: "free" });
   const DIFFS = ["easy", "normal", "hard", "extreme"];
+  const COLORS = ["auto", "b", "w", "alt"];
   const RULES = ["free", "swap2", "renju"];
 
   /**
@@ -31,7 +35,10 @@
     const p = Object.assign({}, DEFAULT_PREFS);
     if (s.mode === "ai" || s.mode === "pvp") p.mode = s.mode;
     if (DIFFS.includes(s.difficulty)) p.difficulty = s.difficulty;
-    if (s.humanColor === "b" || s.humanColor === "w") p.humanColor = s.humanColor;
+    // v1.66 及更早总是把执子写进存储,默认值 "b" 与玩家点过的 "b" 分不开。点过的才有
+    // colorChosen;没有它的 "b" 当作默认 → "auto"。"w" 一定是点出来的(默认从来不是白)。
+    if (COLORS.includes(s.humanColor)) p.humanColor = s.humanColor;
+    if (s.humanColor === "b" && !s.colorChosen) p.humanColor = "auto";
     if (RULES.includes(s.rule)) p.rule = s.rule;
     else p.rule = ruleOf(s.ruleSet, s.openingRule);
     return p;
@@ -40,7 +47,33 @@
   /** 偏好写回存储的形状。两个旧字段照写,降级到 v1.63 的人读得回来。 */
   function prefsToStore(p) {
     const f = ruleFields(p.rule);
-    return { mode: p.mode, difficulty: p.difficulty, humanColor: p.humanColor, rule: p.rule, ruleSet: f.ruleSet, openingRule: f.openingRule };
+    // auto / alt 原样存:v1.66 及更早只认 b / w,读到别的回到默认执黑 —— 降级安全
+    return { mode: p.mode, difficulty: p.difficulty, humanColor: p.humanColor, colorChosen: p.humanColor !== "auto",
+      rule: p.rule, ruleSet: f.ruleSet, openingRule: f.openingRule };
+  }
+
+  /** 这份偏好此刻是不是「轮流」:显式选了轮流,或 auto 落在困难 / 极限上。 */
+  function alternates(p) {
+    return p.humanColor === "alt" || (p.humanColor === "auto" && (p.difficulty === "hard" || p.difficulty === "extreme"));
+  }
+
+  /** 执子那一格该亮哪一个。 */
+  function colorChoice(p) {
+    if (p.humanColor === "auto") return alternates(p) ? "alt" : "b";
+    return p.humanColor;
+  }
+
+  /**
+   * 这一局执哪色。轮流时看上一局:上一局下过子就换,没下过(空盘上调设置、启动恢复)不换。
+   * @param {object} p 偏好
+   * @param {{last?:"b"|"w"|null, prevPlayed?:boolean}} ctx
+   */
+  function colorFor(p, ctx) {
+    if (p.humanColor === "b" || p.humanColor === "w") return p.humanColor;
+    if (!alternates(p)) return "b";
+    const last = ctx && (ctx.last === "b" || ctx.last === "w") ? ctx.last : null;
+    if (!last) return "b";
+    return ctx.prevPlayed ? (last === "b" ? "w" : "b") : last;
   }
 
   /** 侧栏那一格 → 两个内部字段(swap2 的协议与禁手的判定是两套代码)。 */
@@ -58,9 +91,9 @@
    * 新局从偏好开:这一局的五个字段整份来自偏好,不从上一局继承任何东西。
    * @returns {{mode,difficulty,humanColor,ruleSet,openingRule}}
    */
-  function gameFromPrefs(p) {
+  function gameFromPrefs(p, ctx) {
     const f = ruleFields(p.rule);
-    return { mode: p.mode, difficulty: p.difficulty, humanColor: p.humanColor, ruleSet: f.ruleSet, openingRule: f.openingRule };
+    return { mode: p.mode, difficulty: p.difficulty, humanColor: colorFor(p, ctx), ruleSet: f.ruleSet, openingRule: f.openingRule };
   }
 
   /**
@@ -94,7 +127,7 @@
   function undoFloor(st) { return policy(st).undoFloor(st); }
 
   global.GobanSession = {
-    DEFAULT_PREFS, readPrefs, prefsToStore, ruleFields, ruleOf, gameFromPrefs,
+    DEFAULT_PREFS, readPrefs, prefsToStore, ruleFields, ruleOf, gameFromPrefs, colorFor, colorChoice, alternates,
     kindOf, policy, undoFloor, POLICY,
   };
 })(typeof window !== "undefined" ? window : globalThis);

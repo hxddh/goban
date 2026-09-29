@@ -48,6 +48,13 @@ pub const RunOptions = struct {
             info.main_window = windows[0];
             info.windows = windows;
         }
+        // SDK 0.10 的内置更新(仅 macOS 系统宿主):app.zon 有 `.updates` 时,宿主在应用菜单里
+        // 加「检查更新」,并可在启动时查一次。签名更新源由发布流程生成(见 build-macos.yml)。
+        if (comptime @hasField(native_sdk.AppInfo, "update_feed_url")) {
+            info.update_feed_url = manifestUpdateString("feed_url");
+            info.update_public_key = manifestUpdateString("public_key");
+            info.update_check_on_start = manifestUpdateCheckOnStart();
+        }
         return info;
     }
 
@@ -143,6 +150,19 @@ const ShortcutStorage = struct {
     }
 };
 
+fn manifestUpdateString(comptime field: []const u8) []const u8 {
+    if (comptime !@hasField(@TypeOf(app_manifest), "updates")) return "";
+    const updates = app_manifest.updates;
+    if (comptime !@hasField(@TypeOf(updates), field)) return "";
+    return @field(updates, field);
+}
+
+fn manifestUpdateCheckOnStart() bool {
+    if (comptime !@hasField(@TypeOf(app_manifest), "updates")) return false;
+    if (comptime !@hasField(@TypeOf(app_manifest.updates), "check_on_start")) return false;
+    return app_manifest.updates.check_on_start;
+}
+
 fn manifestWindowOptions(buffers: *StateBuffers) []const native_sdk.WindowOptions {
     comptime {
         if (manifest_windows.len > native_sdk.platform.max_windows) {
@@ -157,7 +177,7 @@ fn manifestWindowOptions(buffers: *StateBuffers) []const native_sdk.WindowOption
 }
 
 fn manifestWindow(comptime window: anytype, comptime index: usize) native_sdk.WindowOptions {
-    return .{
+    var options: native_sdk.WindowOptions = .{
         .id = index + 1,
         .label = windowLabel(window, index),
         .title = windowTitle(window),
@@ -172,6 +192,21 @@ fn manifestWindow(comptime window: anytype, comptime index: usize) native_sdk.Wi
         .restore_policy = windowRestorePolicy(window),
         .close_policy = windowClosePolicy(window),
     };
+    // app.zon 的 min_width / min_height 一直写着 520,却从没传给窗口 —— 窗口能被拖到比
+    // 棋盘版式的下限还小。SDK 0.10 起由窗口自己强制(macOS contentMinSize)。字段按
+    // @hasField 取,SDK 不锁版本,旧的也照样编得过。
+    if (comptime @hasField(native_sdk.WindowOptions, "min_width")) {
+        options.min_width = windowFloat(window, "min_width", 0);
+        options.min_height = windowFloat(window, "min_height", 0);
+    }
+    return options;
+}
+
+/// SDK 0.10 起,窗口初始位置由 `initial_placement` 决定,默认 `.default` = 居中到主屏;
+/// 读回了上次的窗口位置就必须标成 `.restored`,否则只恢复了大小,位置每次都回到正中
+/// (v1.65 / v1.66 就是这样:它们都是用 0.10.1 打的包)。
+fn markRestored(window: *native_sdk.WindowOptions) void {
+    if (comptime @hasField(native_sdk.WindowOptions, "initial_placement")) window.initial_placement = .restored;
 }
 
 /// 关窗行为按平台给,因为两个平台的原生习惯正好相反,而 app.zon 的
@@ -545,12 +580,17 @@ fn prepareStateStore(io: std.Io, env_map: *std.process.Environ.Map, app_info: *n
             if (!window.restore_state) continue;
             if (store.loadWindow(window.label, &buffers.read) catch null) |saved| {
                 window.default_frame = saved.frame;
-                if (index == 0) app_info.main_window.default_frame = saved.frame;
+                markRestored(window);
+                if (index == 0) {
+                    app_info.main_window.default_frame = saved.frame;
+                    markRestored(&app_info.main_window);
+                }
             }
         }
     } else if (app_info.main_window.restore_state) {
         if (store.loadWindow(app_info.main_window.label, &buffers.read) catch null) |saved| {
             app_info.main_window.default_frame = saved.frame;
+            markRestored(&app_info.main_window);
         }
     }
     return store;
