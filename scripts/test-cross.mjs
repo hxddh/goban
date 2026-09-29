@@ -2851,6 +2851,8 @@ async function enableSwap2Pvp(page) {
     }
   }
   // 浏览器自己算的无障碍名，和上面的结构判据对一遍（只查结构不查计算值是同义反复）
+  // v1.73 起「回到最新」在最新一手时不显示（也就不在无障碍树里），先退到旧手让它出现
+  await page.evaluate(() => document.getElementById("rep-prev").click()); await page.waitForTimeout(100);
   for (const id of ["rep-prev", "rep-live", "settings-btn", "toggle-panel"]) {
     const snap = await page.locator("#" + id).ariaSnapshot().catch(() => "");
     const m = /button "([^"]*)"/.exec(snap || "");
