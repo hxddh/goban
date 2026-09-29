@@ -2842,14 +2842,14 @@ const Practice = ctx.GobanPractice;
   // 往返:48 种偏好组合存进去读回来一模一样,且照写旧字段(降级读得回)
   let rt = 0, legacy = 0;
   for (const mode of ["ai", "pvp"]) for (const difficulty of ["easy", "normal", "hard", "extreme"])
-    for (const humanColor of ["b", "w"]) for (const rule of ["free", "swap2", "renju"]) {
+    for (const humanColor of ["auto", "b", "w", "alt"]) for (const rule of ["free", "swap2", "renju"]) {
       const p = { mode, difficulty, humanColor, rule };
       const stored = JSON.parse(JSON.stringify(S.prefsToStore(p)));
       if (JSON.stringify(S.readPrefs(stored)) === JSON.stringify(p)) rt++;
       const old = Object.assign({}, stored); delete old.rule;
       if (S.readPrefs(old).rule === rule) legacy++;
     }
-  assert(rt === 48 && legacy === 48, "偏好 48 种组合往返不变,只看旧字段也读得回 (" + rt + "/" + legacy + ")");
+  assert(rt === 96 && legacy === 96, "偏好 96 种组合往返不变,只看旧字段也读得回 (" + rt + "/" + legacy + ")");
   const g = S.gameFromPrefs({ mode: "pvp", difficulty: "hard", humanColor: "w", rule: "swap2" });
   assert(JSON.stringify(g) === JSON.stringify({ mode: "pvp", difficulty: "hard", humanColor: "w", ruleSet: "free", openingRule: "swap2" }),
     "新局的五个字段整份来自偏好");
@@ -2867,6 +2867,30 @@ const Practice = ctx.GobanPractice;
   });
   assert(bad.length === 0, "kind × (终局去向 / 悔棋下限 / 电脑自动走) 逐格如表 (" + JSON.stringify(bad) + ")");
   assert(Object.isFrozen(S.POLICY) && Object.isFrozen(S.POLICY.play), "策略表不可被运行时改写");
+
+  // v1.67 执子:入门 / 普通默认执黑,困难 / 极限默认每局轮流
+  assert(S.DEFAULT_PREFS.humanColor === "auto"
+    && S.readPrefs({ humanColor: "b" }).humanColor === "auto"
+    && S.readPrefs({ humanColor: "b", colorChosen: true }).humanColor === "b"
+    && S.readPrefs({ humanColor: "w" }).humanColor === "w",
+    "旧存储的 \"b\" 分不出是不是点过的:没有 colorChosen 当默认(auto);\"w\" 一定是点过的");
+  const seq = (p, games) => { let last = null, out = ""; for (const played of games) { const c = S.colorFor(p, { last, prevPlayed: played }); out += c; last = c; } return out; };
+  const P = (humanColor, difficulty) => ({ mode: "ai", difficulty, humanColor, rule: "free" });
+  const alt4 = seq(P("auto", "hard"), [false, true, true, true]);
+  const noFlip = seq(P("auto", "extreme"), [false, false, false, true]);
+  const low = seq(P("auto", "normal"), [false, true, true]);
+  const fixed = seq(P("w", "hard"), [false, true, true]);
+  assert(alt4 === "bwbw" && noFlip === "bbbw" && low === "bbb" && fixed === "www"
+    && seq(P("alt", "easy"), [false, true]) === "bw",
+    "执子:困难 / 极限默认每局轮流、空盘重开不换色、低档执黑、固定色不动、显式轮流在任何档都轮流 ("
+    + [alt4, noFlip, low, fixed].join(" ") + ")");
+  // 中途改难度不打乱交替:颜色只看上一局,不看难度
+  let last = S.colorFor(P("auto", "hard"), { last: null, prevPlayed: false });
+  last = S.colorFor(P("auto", "extreme"), { last, prevPlayed: true });
+  const after = S.colorFor(P("auto", "hard"), { last, prevPlayed: true });
+  assert(last === "w" && after === "b", "难度在困难与极限之间换,交替照旧 (" + last + after + ")");
+  assert(S.colorChoice(P("auto", "hard")) === "alt" && S.colorChoice(P("auto", "easy")) === "b" && S.colorChoice(P("w", "hard")) === "w",
+    "执子那一格亮的是偏好:auto 在高档亮「轮流」、低档亮「黑」");
 }
 
 if (failed) {

@@ -183,8 +183,9 @@ async function newGame(page) {
   await page.evaluate(() => document.getElementById("settings-close").click());
   await page.waitForTimeout(150);
   const pref = await settings(page);
-  report("S2 重下时(强制人机、人执白)改设置:偏好里仍是双人、执黑",
-    during.mode === "ai" && during.humanColor === "w" && pref.mode === "pvp" && pref.humanColor === "b",
+  // v1.67 起执子的默认偏好是 "auto"(低档执黑、高档轮流);要验的是重下强制的「白」没漏进偏好
+  report("S2 重下时(强制人机、人执白)改设置:偏好里仍是双人、执子仍是默认",
+    during.mode === "ai" && during.humanColor === "w" && pref.mode === "pvp" && pref.humanColor === "auto",
     JSON.stringify({ during: { mode: during.mode, human: during.humanColor }, pref: { mode: pref.mode, human: pref.humanColor }, errs: page.__errors }));
   await page.close();
 }
@@ -409,6 +410,40 @@ async function newGame(page) {
   const bad = Object.entries(out).flatMap(([th, v]) => Object.entries(v).filter(([, p]) => p < 80).map(([k, p]) => th + "@" + k + "=" + p + "%"));
   report("S8 棋子轮廓:三套实物主题上每颗子至少 80% 的边看得见", bad.length === 0, JSON.stringify({ bad, out, errs: page.__errors }));
   await ctx2.close();
+}
+
+// ---- S9. 执子轮流(v1.67)----
+// 困难 / 极限默认每局轮流:玩家落过子的一局之后新局换色;一子没落(包括执白时电脑已先手)
+// 就点新局,不换;中途在困难与极限之间换难度,不打乱交替;偏好仍是 auto(侧栏亮「轮流」)。
+{
+  const page = await newPage();
+  const click = clicker(page);
+  const role = () => text(page, "black-role");
+  const moves = () => page.evaluate(() => [...window.GobanSgfIo.buildSgf().matchAll(/;[BW]\[/g)].length);
+  const waitMoves = async (n) => { for (let i = 0; i < 60 && (await moves()) < n; i++) await page.waitForTimeout(100); };
+  await page.evaluate(() => document.querySelector('#diff-seg button[data-diff="hard"]').click());
+  await page.waitForTimeout(150);
+  const seen = [];
+  seen.push(await role());                                   // 第 1 局:执黑
+  await click(3, 3); await waitMoves(2);                     // 人落一子,电脑应一手
+  await newGame(page);
+  seen.push(await role());                                   // 第 2 局:换成执白
+  await waitMoves(1);                                        // 电脑先手
+  await newGame(page);                                       // 人一子没落就重开
+  seen.push(await role());                                   // 第 3 局:不换,仍执白
+  await waitMoves(1);
+  await page.evaluate(() => document.querySelector('#diff-seg button[data-diff="extreme"]').click());
+  await page.waitForTimeout(150);
+  await click(3, 3); await waitMoves(3);                     // 执白落一子,中途换到极限
+  await newGame(page);
+  seen.push(await role());                                   // 第 4 局:换回执黑
+  const st = await settings(page);
+  const act = await active(page, "color-seg", "human");
+  const want = ["你", "电脑", "电脑", "你"];
+  const ok = JSON.stringify(seen) === JSON.stringify(want) && st.humanColor === "auto" && st.lastHumanColor === "b" && act === "alt";
+  report("S9 困难 / 极限每局轮流执子:落过子才换色,中途换难度不打乱", ok,
+    JSON.stringify({ seen, want, stored: { humanColor: st.humanColor, last: st.lastHumanColor }, active: act, errs: page.__errors }));
+  await page.close();
 }
 
 await browser.close();

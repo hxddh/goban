@@ -662,6 +662,7 @@
       if (!raw) { firstRun = true; return; }
       const s = JSON.parse(raw);
       prefs = Session.readPrefs(s);
+      if (s.lastHumanColor === "b" || s.lastHumanColor === "w") lastHumanColor = s.lastHumanColor;
       if (typeof s.soundOn === "boolean") soundOn = s.soundOn;
       if (s.themeId && THEMES[s.themeId]) themeId = s.themeId;
       if (s.thinkLevel === "fast" || s.thinkLevel === "normal" || s.thinkLevel === "deep") {
@@ -678,13 +679,22 @@
     // 临时改掉这一局的模式 / 执子 / 规则,但不该顺手改掉玩家在侧栏选的那几格。
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify(Object.assign(Session.prefsToStore(prefs), { soundOn, themeId, thinkLevel, showCoords, analysisOn }))
+      JSON.stringify(Object.assign(Session.prefsToStore(prefs), { soundOn, themeId, thinkLevel, showCoords, analysisOn, lastHumanColor }))
     );
   }
 
-  /** 新局从偏好开:这一局的五个字段整份抄自偏好。 */
-  function gameFromPrefs() {
-    ({ mode, difficulty, humanColor, ruleSet, openingRule } = Session.gameFromPrefs(prefs));
+  /**
+   * 新局从偏好开:这一局的五个字段整份抄自偏好。执子「轮流」时看上一局(v1.67):
+   * prevPlayed = 被替换的那一局玩家落过子;只有落过子才换色,空盘上调设置、启动恢复都不换。
+   */
+  function gameFromPrefs(prevPlayed, prevColor) {
+    ({ mode, difficulty, humanColor, ruleSet, openingRule } =
+      Session.gameFromPrefs(prefs, { last: prevColor || lastHumanColor, prevPlayed: !!prevPlayed }));
+    if (mode === "ai" && humanColor !== lastHumanColor) {
+      lastHumanColor = humanColor;
+      return true;
+    }
+    return false;
   }
 
   function isRenju() { return ruleSet === "renju"; }
@@ -711,6 +721,8 @@
    * 新局一律从这里开,设置存储里也只存这一份。
    */
   let prefs = Object.assign({}, Session.DEFAULT_PREFS);
+  /** 上一局人机对局里玩家执哪色 —— 「轮流」靠它(进设置存储,跨启动)。 */
+  let lastHumanColor = null;
 
   /**
    * 黑在 (r,c) 落子的禁手原因,没有则 null。白方与自由式一律 null。
@@ -2012,7 +2024,11 @@
 
   function reset(opts) {
     gameGen += 1;
-    gameFromPrefs(); // 新局从偏好开;上一局是导入的、旧局、重下还是 swap2 定的执子,都只属于上一局
+    // 新局从偏好开;上一局是导入的、旧局、重下还是 swap2 定的执子,都只属于上一局。
+    // 轮流执子:上一局玩家下过子才换色(见 gameFromPrefs)。数的是人的子 ——
+    // 执白时电脑先手,盘上已有一子,人一手没下就点新局不算下过
+    // 「上一局」就是被替换的这一局:它是人机局时用它实际执的颜色(第一次启动时存储里还没有记录)
+    if (gameFromPrefs(mode === "ai" && humanStones() > 0, mode === "ai" ? humanColor : null)) saveSettings();
     board = emptyBoard();
     turn = "b";
     result = "play";
@@ -2084,16 +2100,19 @@
    * 不损失任何能力。难度是唯一真正的对局中设置 —— 立即生效、不重开 ——
    * 留下。双人模式下难度本来就隐藏(没有电脑),这里不改那条。
    */
+  /** 人落过几子:人机模式下数人那一色,双人模式下两边都是人。 */
+  function humanStones() {
+    return mode === "ai"
+      ? history.filter((_, i) => (i % 2 === 0 ? "b" : "w") === humanColor).length
+      : history.length;
+  }
+
   function syncPhaseFields() {
     // 相位不能按「盘上有没有子」判 —— 人执白时电脑立刻走第一手,history.length
     // 当场就是 1,执白的用户一开局就再也看不到这三个控件。交叉闸门 AU 抓到了这个。
     // 正确的判据是「**人**有没有落过子」:人机模式下数人那一色的子,双人模式下
     // 两边都是人,数总手数。
-    const humanStones =
-      mode === "ai"
-        ? history.filter((_, i) => (i % 2 === 0 ? "b" : "w") === humanColor).length
-        : history.length;
-    const playing = humanStones > 0;
+    const playing = humanStones() > 0;
     for (const id of ["mode-field", "color-field", "rule-field"]) {
       const el = document.getElementById(id);
       if (el) el.hidden = playing;
@@ -2121,8 +2140,9 @@
     document.querySelectorAll("#think-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.think === thinkLevel);
     });
+    // 亮的是偏好(轮流 / 黑 / 白),这一局执哪色由侧栏顶上的黑白两侧说
     document.querySelectorAll("#color-seg button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.human === humanColor);
+      b.classList.toggle("active", b.dataset.human === Session.colorChoice(prefs));
     });
     document.querySelectorAll("#lang-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.lang === I18n.lang());
@@ -2639,13 +2659,15 @@
   document.getElementById("color-seg").onclick = async (ev) => {
     const b = ev.target.closest("button[data-human]");
     if (!b) return;
-    if (b.dataset.human === humanColor) return;
+    if (b.dataset.human === Session.colorChoice(prefs)) return;
     if (mode === "ai" && history.length && !(await confirmNative(t("confirm.changeColor"), t("confirm.changeColorTitle"), { ok: t("confirm.changeColorOk"), cancel: t("dlg.cancel") }))) return;
-    humanColor = prefs.humanColor = b.dataset.human;
+    prefs.humanColor = b.dataset.human;
     saveSettings();
     if (mode === "ai") {
       reset({ keepSettings: true });
-      toast(t(humanColor === "b" ? "toast.playBlack" : "toast.playWhite"));
+      toast(prefs.humanColor === "alt"
+        ? t("toast.playAlt", { side: t(humanColor === "b" ? "side.black" : "side.white") })
+        : t(humanColor === "b" ? "toast.playBlack" : "toast.playWhite"));
     } else {
       syncSettingsUI();
     }
