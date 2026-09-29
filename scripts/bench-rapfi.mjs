@@ -45,7 +45,7 @@ function loadEngines(ref) {
     if (ref) {
       try { src = execFileSync("git", ["show", `${ref}:src/web/js/${f}`], { cwd: root, encoding: "utf8", maxBuffer: 1 << 26 }); }
       catch (_) { continue; } // 旧版本没有这个文件
-    } else src = fs.readFileSync(path.join(root, "src/web/js", f), "utf8");
+    } else src = fs.readFileSync(path.join(root, f === "ai2.js" ? "scripts/reference" : "src/web/js", f), "utf8");
     vm.runInContext(src, ctx, { filename: f });
   }
   return ctx;

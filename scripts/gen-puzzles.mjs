@@ -23,7 +23,7 @@ ctx.globalThis = ctx;
 ctx.window = ctx;
 vm.createContext(ctx);
 for (const f of ["core.js", "ai.js", "ai2.js", "practice.js"]) {
-  vm.runInContext(fs.readFileSync(path.join(root, "src/web/js", f), "utf8"), ctx, { filename: f });
+  vm.runInContext(fs.readFileSync(path.join(root, f === "ai2.js" ? "scripts/reference" : "src/web/js", f), "utf8"), ctx, { filename: f });
 }
 const Core = ctx.GobanCore;
 const Ai = ctx.GobanAi;

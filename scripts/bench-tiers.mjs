@@ -128,7 +128,7 @@ ctx.window = ctx;
 vm.createContext(ctx);
 const load = (rel) => vm.runInContext(fs.readFileSync(path.join(root, rel), "utf8"), ctx, { filename: rel });
 for (const f of ["src/web/js/version.js", "src/web/js/i18n.js", "src/web/js/core.js",
-  "src/web/js/sgf.js", "src/web/js/ai.js", "src/web/js/ai2.js"]) load(f);
+  "src/web/js/sgf.js", "src/web/js/ai.js", "scripts/reference/ai2.js"]) load(f);
 const Core = ctx.GobanCore, Ai = ctx.GobanAi, Ai2 = ctx.GobanAi2;
 
 const num = (k, d) => (process.env[k] ? Number(process.env[k]) : d);

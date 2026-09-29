@@ -446,6 +446,35 @@ async function newGame(page) {
   await page.close();
 }
 
+// ---- S10. 简洁(v1.68)----
+// 全新用户一打开:首次提示不压棋盘;关掉提示后可点的控件 ≤ 22(v1.67 是 34);空棋盘时翻页 / 复制 /
+// 导出不出现;落下第一子后它们都在。规则在设置弹层里,不在侧栏。
+{
+  const page = await newPage();
+  const count = () => page.evaluate(() => [...document.querySelectorAll("button, [role=button], input, select")]
+    .filter((e) => e.offsetParent !== null && e.getBoundingClientRect().width > 0).length);
+  const shown = (id) => page.evaluate((i) => { const e = document.getElementById(i); return !!e && e.offsetParent !== null && e.getBoundingClientRect().height > 0; }, id);
+  const overlap = await page.evaluate(() => {
+    const w = document.getElementById("welcome-bar"), b = document.getElementById("board");
+    if (!w || w.hidden) return "no-welcome";
+    const r1 = w.getBoundingClientRect(), r2 = b.getBoundingClientRect();
+    return r1.left < r2.right && r1.right > r2.left && r1.top < r2.bottom && r1.bottom > r2.top;
+  });
+  const withWelcome = await count();
+  await page.evaluate(() => document.getElementById("welcome-close").click());
+  await page.waitForTimeout(150);
+  const bare = await count();
+  const emptyHidden = !(await shown("rep-start")) && !(await shown("sgf-copy")) && !(await shown("sgf-download"));
+  const ruleInSide = await page.evaluate(() => !!document.querySelector("#side #rule-field"));
+  await clicker(page)(7, 7);
+  await page.waitForTimeout(400);
+  const afterMove = (await shown("rep-start")) && (await shown("sgf-copy")) && (await shown("sgf-download"));
+  report("S10 一打开:提示不压棋盘、可点控件 ≤ 22、空棋盘不显示翻页 / 复制 / 导出,落子后都在",
+    overlap === false && bare <= 22 && emptyHidden && afterMove && !ruleInSide,
+    JSON.stringify({ overlap, withWelcome, bare, emptyHidden, afterMove, ruleInSide, errs: page.__errors }));
+  await page.close();
+}
+
 await browser.close();
 server.close();
 fs.rmSync(WORKER_SRC_DIR, { recursive: true, force: true });

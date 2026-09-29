@@ -61,13 +61,6 @@
         </div>
         <!-- v1.63.1:终局卡在侧栏里;侧栏收着(窄窗口不自动展开)时,棋盘下沿留一扇门 -->
         <button type="button" class="end-nudge" id="end-nudge" hidden></button>
-        <!-- v1.64:初见一句话。只在第一次启动出现、不挡棋盘:点棋盘就是「下一局」,
-             另一个选择是先做今天的题。落第一子、点题、点 × 任一件事之后就不再出现。 -->
-        <div class="welcome-bar" id="welcome-bar" hidden role="note">
-          <span data-i18n="welcome.msg">点棋盘就开始一局，或者</span>
-          <button type="button" class="tool-btn primary" id="welcome-daily" data-i18n="welcome.daily">先做今天的 5 道题</button>
-          <button type="button" class="text-link welcome-x" id="welcome-close" aria-label="收起" title="收起" data-i18n-aria="endcard.close" data-i18n-title="endcard.close">×</button>
-        </div>
       </div>
     </div>
 
@@ -170,16 +163,6 @@
                 <button type="button" data-human="alt" title="每一局交换执子：一局你先手，一局电脑先手" data-i18n="color.alt" data-i18n-title="color.alt.title">轮流</button>
               </div>
             </div>
-            <!-- swap2 与禁手是同一个问题的两个答案:黑先手占优,拿什么补。
-                 所以它们是一个三选一,不是两行 —— 侧栏也因此没有多长出一行。 -->
-            <div class="setting-row" id="rule-field">
-              <span class="setting-k" data-i18n="set.rule">规则</span>
-              <div class="pill" id="rule-seg" role="group" aria-label="对局规则" data-i18n-aria="aria.rule">
-                <button type="button" data-rule="free" class="active" title="自由式：无禁手，标准开局" data-i18n="rule.free" data-i18n-title="rule.free.title">自由</button>
-                <button type="button" data-rule="swap2" title="平衡开局：先手放 3 子，对手选边或加两手。人机下电脑几乎总选黑，你执白" data-i18n-title="rule.swap2.title">swap2</button>
-                <button type="button" data-rule="renju" title="连珠：黑不得长连、双四、双三，且只有恰好五连算胜" data-i18n="rule.renju" data-i18n-title="rule.renju.title">禁手</button>
-              </div>
-            </div>
           </div>
         </section>
 
@@ -193,6 +176,14 @@
           <!-- 一手未落时手数列表是空的。v1.51 之前这块地方被外观设置占着,
                搬走之后不给它一句话就是一片死白 —— 而这句话正好把「点它可跳转」
                这件事说出来(此前只有整局复盘面板里写着)。 -->
+          <!-- v1.64:初见一句话。只在第一次启动出现:点棋盘就是「下一局」,另一个选择是先做
+               今天的题。落第一子、点题、点 × 任一件事之后就不再出现。v1.68 从棋盘上挪到这里 ——
+               此前它压着棋盘最下面一行格线;第一次打开时棋谱区是空的,正好是它的位置。 -->
+          <div class="welcome-bar" id="welcome-bar" hidden role="note">
+            <span data-i18n="welcome.msg">点棋盘就开始一局，或者</span>
+            <button type="button" class="tool-btn primary" id="welcome-daily" data-i18n="welcome.daily">先做今天的 5 道题</button>
+            <button type="button" class="text-link welcome-x" id="welcome-close" aria-label="收起" title="收起" data-i18n-aria="endcard.close" data-i18n-title="endcard.close">×</button>
+          </div>
           <p class="move-empty" id="move-empty" data-i18n="record.empty">落子后这里逐手列出，点任意一手可跳转</p>
           <div class="replay-bar" id="replay-seg">
             <button type="button" id="rep-start" title="开局 (Home)" data-i18n-title="rep.start.title" aria-label="开局" data-i18n-aria="aria.repStart"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-first"/></svg></button>
@@ -279,6 +270,17 @@
       <div class="modal">
         <h3 data-i18n="settings.title">设置</h3>
         <div class="setting-list">
+            <!-- swap2 与禁手是同一个问题的两个答案:黑先手占优,拿什么补。所以是一个三选一。
+                 v1.68 从侧栏挪到这里:它是一次性的偏好,不是每局都换的设置;非「自由」时
+                 侧栏信息行写一个标记,不会忘了自己在什么规则下。对局中改,从下一局起生效。 -->
+            <div class="setting-row" id="rule-field">
+              <span class="setting-k" data-i18n="set.rule">规则</span>
+              <div class="pill" id="rule-seg" role="group" aria-label="对局规则" data-i18n-aria="aria.rule">
+                <button type="button" data-rule="free" class="active" title="自由式：无禁手，标准开局" data-i18n="rule.free" data-i18n-title="rule.free.title">自由</button>
+                <button type="button" data-rule="swap2" title="平衡开局：先手放 3 子，对手选边或加两手。人机下电脑几乎总选黑，你执白" data-i18n="rule.swap2" data-i18n-title="rule.swap2.title">swap2</button>
+                <button type="button" data-rule="renju" title="连珠：黑不得长连、双四、双三，且只有恰好五连算胜" data-i18n="rule.renju" data-i18n-title="rule.renju.title">禁手</button>
+              </div>
+            </div>
             <div class="setting-row">
               <span class="setting-k" data-i18n="set.theme">主题</span>
               <div class="pill theme-row" id="theme-seg" role="group" aria-label="主题" data-i18n-aria="aria.theme">
@@ -429,7 +431,6 @@
   <script src="js/core.js"></script>
   <script src="js/sgf.js"></script>
   <script src="js/ai.js"></script>
-  <script src="js/ai2.js"></script>
   <script src="js/ai3.js"></script>
   <script src="js/host.js"></script>
   <script src="js/state.js"></script>

@@ -68,7 +68,7 @@ ctx.document = {
 vm.createContext(ctx);
 const load = (rel) => vm.runInContext(fs.readFileSync(path.join(root, rel), "utf8"), ctx, { filename: rel });
 for (const f of ["src/web/js/version.js", "src/web/js/i18n.js", "src/web/js/core.js",
-  "src/web/js/sgf.js", "src/web/js/ai.js", "src/web/js/ai2.js", "src/web/js/practice.js"]) load(f);
+  "src/web/js/sgf.js", "src/web/js/ai.js", "scripts/reference/ai2.js", "src/web/js/practice.js"]) load(f);
 const Ai = ctx.GobanAi, Ai2 = ctx.GobanAi2, P = ctx.GobanPractice.puzzles;
 
 const PROFILES = {

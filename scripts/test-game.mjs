@@ -29,7 +29,7 @@ load("src/web/js/i18n.js");
 load("src/web/js/core.js");
 load("src/web/js/sgf.js");
 load("src/web/js/ai.js");
-load("src/web/js/ai2.js");
+load("scripts/reference/ai2.js"); // C2:v1.68 起不随应用发布,只在这里当参照对手
 load("src/web/js/ai3.js");
 load("src/web/js/state.js");
 load("src/web/js/session.js");
@@ -1906,8 +1906,9 @@ const Practice = ctx.GobanPractice;
 
   // Exactly what ai-worker.js's ping reports as `engines`: engine.js treats a
   // false there as a dead worker and degrades to the capped main-thread path.
-  assert(!!(w.GobanAi && w.GobanAi2), "bundle boots both engines (what the ping checks)");
-  assert(typeof w.GobanAi.aiMove === "function" && typeof w.GobanAi2.aiMove === "function",
+  // v1.68 起 worker 里是 C1(开局库 / 禁手出口)+ C3(四档);C2 只留在仓库里给强度测试当参照
+  assert(!!(w.GobanAi && w.GobanAi3 && w.GobanTier) && !w.GobanAi2, "bundle boots C1 + C3, and no longer ships C2 (what the ping checks)");
+  assert(typeof w.GobanAi.aiMove === "function" && typeof w.GobanAi3.aiMove === "function",
     "both engines expose aiMove");
   assert(typeof w.onmessage === "function", "bundle installs the worker message handler");
 
@@ -2775,6 +2776,10 @@ const Practice = ctx.GobanPractice;
     assert(strip(pe) === strip(ph) && pe.budgetMs > ph.budgetMs * 2,
       "C3 极档与难档搜索参数一致,只多给时间 (极 " + pe.budgetMs + "ms / 难 " + ph.budgetMs + "ms)");
   }
+  // v1.68:困难 / 极限按「搜不完的层不开、最佳手稳定就落子」提前结束;入门 / 普通不用(按时间校准)
+  assert(C3.profileFor("hard", {}).timeManaged && C3.profileFor("extreme", {}).timeManaged
+    && !C3.profileFor("normal", {}).timeManaged && !C3.profileFor("easy", {}).timeManaged,
+    "C3 时间管理只用于困难 / 极限");
   // 预算管到 VCF:nodeBudget 2000 的普档在 200 个中盘局面上最多超几个节点(v1.65 评审前 VCF 不查预算,最坏 2622)
   {
     let seed = 7; const rnd2 = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);

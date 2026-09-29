@@ -209,7 +209,8 @@ const GAME = [[7, 7], [8, 7], [7, 8], [8, 8], [7, 9], [8, 9], [7, 10], [8, 10], 
   const P = (r, c) => String.fromCharCode(97 + c) + String.fromCharCode(97 + r);
   const sgfOf = (ru, moves) => "(;GM[4]FF[4]SZ[15]RU[" + ru + "]" +
     moves.map(([r, c], i) => ";" + (i % 2 === 0 ? "B" : "W") + "[" + P(r, c) + "]").join("") + ")";
-  const ruleNow = () => page.evaluate(() => (document.querySelector("#rule-seg button.active") || {}).dataset.rule);
+  // 这一局的规则(设置里亮的是偏好;导入的棋谱只改这一局)
+  const ruleNow = () => page.evaluate(() => document.getElementById("app").dataset.rule);
   const paste = async (s) => {
     await page.evaluate(async (x) => { await navigator.clipboard.writeText(x); }, s);
     await page.evaluate(() => document.getElementById("sgf-paste").click());

@@ -36,7 +36,8 @@ function loadEngines(ref) {
       try { src = execFileSync("git", ["show", `${ref}:src/web/js/${f}`], { cwd: root, encoding: "utf8", maxBuffer: 1 << 26, stdio: ["ignore", "pipe", "ignore"] }); }
       catch (_) { continue; }
     } else {
-      const p = path.join(root, "src/web/js", f);
+      // C2 v1.68 起挪到 scripts/reference(只当参照,不随应用发布)
+      const p = path.join(root, f === "ai2.js" ? "scripts/reference" : "src/web/js", f);
       if (!fs.existsSync(p)) continue;
       src = fs.readFileSync(p, "utf8");
     }
@@ -63,7 +64,13 @@ function player(E, spec, msTable) {
   const [tier, over] = spec.split("@");
   const eng = E.engineFor(DIFF[tier]);
   const ms = Math.max(20, Math.round((over ? Number(over) : msTable[tier]) * SCALE));
-  return { name: tier, move: (bd, side) => eng.aiMove({ board: bd, side, difficulty: DIFF[tier], timeMs: ms, vary: false }) };
+  const p = { name: tier, ms: 0, moves: 0, move: (bd, side) => {
+    const t = performance.now();
+    const m = eng.aiMove({ board: bd, side, difficulty: DIFF[tier], timeMs: ms, vary: false });
+    p.ms += performance.now() - t; p.moves++;
+    return m;
+  } };
+  return p;
 }
 
 // ── 开局册(同 bench-tiers)──
@@ -131,7 +138,9 @@ for (const [A, B, label] of pairs) {
   const row = { 对局: label, 配对: `${pw}胜 ${pt}平 ${pl}负`, 逐局: `${a}:${b}${d ? " 和" + d : ""}`,
     Elo: Number.isFinite(elo) ? (elo >= 0 ? "+" : "") + elo.toFixed(0) : (elo > 0 ? "+∞" : "−∞"),
     p: p.toFixed(4), 判定: p < 0.05 ? (pw > pl ? "显著更强" : "显著更弱") : "不显著",
-    执黑胜: `${blackWins}/${2 * book.length}`, errs };
+    执黑胜: `${blackWins}/${2 * book.length}`,
+    // 每手平均用时(毫秒,时限已按 SCALE 缩放):时间管理省了多少,看这一列
+    均时: `${Math.round(A.ms / Math.max(1, A.moves))}/${Math.round(B.ms / Math.max(1, B.moves))}`, errs };
   rows.push(row);
   console.log(JSON.stringify(row));
 }

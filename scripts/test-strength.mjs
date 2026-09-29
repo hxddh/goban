@@ -18,9 +18,10 @@ const ctx = { console, Date, performance };
 ctx.globalThis = ctx;
 ctx.window = ctx;
 vm.createContext(ctx);
+// C2(ai2.js)v1.68 起不随应用发布,只放在 scripts/reference 里当参照对手
 for (const f of ["core.js", "ai.js", "ai2.js", "ai3.js"]) {
   vm.runInContext(
-    fs.readFileSync(path.join(root, "src/web/js", f), "utf8"),
+    fs.readFileSync(path.join(root, f === "ai2.js" ? "scripts/reference" : "src/web/js", f), "utf8"),
     ctx,
     { filename: f }
   );

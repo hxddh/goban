@@ -265,6 +265,16 @@ async function newAudioPage() {
 const notes = (audio) =>
   audio.filter((a) => a.node === "osc" && a.freq > 0).map((a) => Math.round(a.freq * 100) / 100);
 
+/** v1.68 起规则在设置弹层里:打开设置 → 点规则 → 关。只在空棋盘上调用(对局中改规则从下一局起生效)。 */
+async function pickRule(page, rule) {
+  await page.evaluate(() => document.getElementById("settings-btn").click());
+  await page.waitForTimeout(120);
+  await page.click('#rule-seg button[data-rule="' + rule + '"]');
+  await page.waitForTimeout(120);
+  await page.evaluate(() => document.getElementById("settings-close").click());
+  await page.waitForTimeout(150);
+}
+
 async function enableSwap2Pvp(page) {
   await openPanel(page);
   await ensureSetupPhase(page);
@@ -272,7 +282,7 @@ async function enableSwap2Pvp(page) {
   await page.waitForTimeout(100);
   await dismissConfirm(page);
   await ensureSetupPhase(page);
-  await page.click('button[data-rule="swap2"]');
+  await pickRule(page, "swap2");
   await page.waitForTimeout(120);
   await dismissConfirm(page);
 }
@@ -431,7 +441,7 @@ async function enableSwap2Pvp(page) {
   await page.click("#slot-save-current"); await page.waitForTimeout(120);
   await page.click("#slots-close"); await page.waitForTimeout(80);
   await ensureSetupPhase(page);
-  await page.click('button[data-rule="swap2"]');
+  await pickRule(page, "swap2");
   await page.waitForTimeout(120);
   await dismissConfirm(page);
   await click(10, 10); await page.waitForTimeout(120);
@@ -500,7 +510,7 @@ async function enableSwap2Pvp(page) {
   await openPanel(page);
   await page.waitForTimeout(80);
   await ensureSetupPhase(page);
-  await page.click('button[data-rule="swap2"]');
+  await pickRule(page, "swap2");
   await page.waitForTimeout(120);
   await dismissConfirm(page);
   await click(7, 7); await page.waitForTimeout(80);
@@ -2781,6 +2791,9 @@ async function enableSwap2Pvp(page) {
   const seen = {};
   const page = await newPage();
   await openPanel(page);
+  // v1.68 起空棋盘不显示翻页条(没有可翻的):先落一子,让它出来再量
+  await clicker(page)(7, 7);
+  await page.waitForTimeout(300);
   for (const lang of ["zh", "en"]) {
     if (lang === "en") {
       await setLang(page, "en");
@@ -3142,11 +3155,11 @@ async function enableSwap2Pvp(page) {
   const click = clicker(page);
   const pick = async (rule) => {
     await ensureSetupPhase(page);
-    await page.click('#rule-seg button[data-rule="' + rule + '"]');
+    await pickRule(page, rule);
     await page.waitForTimeout(200);
   };
   const st = () => page.evaluate(() => ({
-    rule: (document.querySelector("#rule-seg button.active") || {}).dataset?.rule || null,
+    rule: document.getElementById("app").dataset.rule || null, // 这一局的规则(设置里亮的是偏好)
     mode: (document.querySelector("#mode-seg button.active") || {}).dataset?.mode || null,
   }));
   const stoneCount = () => page.evaluate(() =>
@@ -3219,7 +3232,7 @@ async function enableSwap2Pvp(page) {
   await openPanel(page2);
   const click2 = clicker(page2);
   await ensureSetupPhase(page2);
-  await page2.click('#rule-seg button[data-rule="renju"]');
+  await pickRule(page2, "renju");
   await page2.waitForTimeout(200);
   await click2(8, 6); await page2.waitForTimeout(80);
   await click2(0, 0); await page2.waitForTimeout(250);
@@ -3302,7 +3315,7 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const seen = {};
   const state = (pg) => pg.evaluate(() => ({
-    rule: (document.querySelector("#rule-seg button.active") || {}).dataset?.rule || null,
+    rule: document.getElementById("app").dataset.rule || null, // 这一局的规则(设置里亮的是偏好)
     mode: (document.querySelector("#mode-seg button.active") || {}).dataset?.mode || null,
     moves: Number((document.getElementById("replay-pos").textContent.split("/")[1] || "0").trim()),
   }));
@@ -3330,7 +3343,7 @@ async function enableSwap2Pvp(page) {
     await openPanel(page);
     const click = clicker(page);
     await ensureSetupPhase(page);
-    await page.click('#rule-seg button[data-rule="renju"]');
+    await pickRule(page, "renju");
     await page.waitForTimeout(200);
     await ensureSetupPhase(page);
     await page.click('#mode-seg button[data-mode="pvp"]');
@@ -3340,7 +3353,7 @@ async function enableSwap2Pvp(page) {
     await saveSlot(page);
     // v1.55 起规则不再跟着模式走,所以要显式换规则,才造得出「载入时的规则与存档不同」
     await ensureSetupPhase(page);
-    await segClick(page, '#rule-seg button[data-rule="free"]');
+    await pickRule(page, "free");
     seen.between = await state(page);
     if (seen.between.rule !== "free") bad.push("没能把规则切到自由:" + seen.between.rule);
     await loadSlot(page);
@@ -3367,7 +3380,7 @@ async function enableSwap2Pvp(page) {
     if (seen.free.mode !== "ai") bad.push("②的前置没摆成人机:" + seen.free.mode);
     if (seen.free.moves !== 2) bad.push("②的前置手数不是 2:" + seen.free.moves);
     await ensureSetupPhase(page);
-    await segClick(page, '#rule-seg button[data-rule="renju"]');
+    await pickRule(page, "renju");
     seen.freeBetween = await state(page);
     if (seen.freeBetween.mode !== "ai") bad.push("切禁手把模式改掉了:" + seen.freeBetween.mode);
     await loadSlot(page);
@@ -3407,7 +3420,7 @@ async function enableSwap2Pvp(page) {
     await dismissConfirm(page);
     await page.waitForTimeout(200);
     await ensureSetupPhase(page);
-    await page.click('#rule-seg button[data-rule="renju"]'); await page.waitForTimeout(150);
+    await pickRule(page, "renju"); await page.waitForTimeout(150);
     await dismissConfirm(page); await page.waitForTimeout(150);
     await ensureSetupPhase(page);
     await page.click('#mode-seg button[data-mode="ai"]'); await page.waitForTimeout(150);
@@ -3525,7 +3538,7 @@ async function enableSwap2Pvp(page) {
 
   // ── 禁手档:双人,自己摆几手就够(这条闸门量的是复盘,不是引擎)
   await ensureSetupPhase(page);
-  await page.click('#rule-seg button[data-rule="renju"]'); await page.waitForTimeout(150);
+  await pickRule(page, "renju"); await page.waitForTimeout(150);
   await dismissConfirm(page); await page.waitForTimeout(150);
   await ensureSetupPhase(page);
   await page.click('#mode-seg button[data-mode="pvp"]'); await page.waitForTimeout(150);
@@ -3543,7 +3556,7 @@ async function enableSwap2Pvp(page) {
   await page.waitForTimeout(150);
   await dismissConfirm(page); await page.waitForTimeout(150);
   await ensureSetupPhase(page);
-  await page.click('#rule-seg button[data-rule="free"]'); await page.waitForTimeout(150);
+  await pickRule(page, "free"); await page.waitForTimeout(150);
   await dismissConfirm(page); await page.waitForTimeout(300);
   await playAFew();
   const fr = await probe("free");
@@ -3557,6 +3570,7 @@ async function enableSwap2Pvp(page) {
 }
 
 // AW 开局设置只在开局态出现，且侧栏在最矮支持窗口下仍然不用滚（v1.61）。
+// v1.68：规则挪进了设置弹层（一次性的偏好，不是每局都换），这里改为守「它不许回到侧栏」。
 //
 // 模式 / 执子 / 规则三个控件在对局中改，**本来就会弹确认再 reset() 重开一局**
 // （mode-seg / color-seg / rule-seg 三个 onclick 都是 confirm → reset）——
@@ -3583,7 +3597,9 @@ async function enableSwap2Pvp(page) {
     const sc = document.getElementById("side-scroll");
     return {
       模式: q("mode-field"), 难度: q("diff-field"),
-      执子: q("color-field"), 规则: q("rule-field"),
+      执子: q("color-field"),
+      // v1.68 起规则在设置弹层里:它不许回到侧栏
+      规则: document.querySelector("#side #rule-field") ? "在侧栏" : document.querySelector("#settings-modal #rule-field") ? "在设置" : "缺失",
       溢出: sc ? Math.max(0, sc.scrollHeight - sc.clientHeight) : -1,
     };
   });
@@ -3596,8 +3612,8 @@ async function enableSwap2Pvp(page) {
 
     const before = await vis(page);
     if (h === 800) seen.开局态 = before;
-    if (before.模式 !== "显示" || before.执子 !== "显示" || before.规则 !== "显示")
-      bad.push(h + "高 开局态:模式/执子/规则应当都在(得到 " + JSON.stringify(before) + ")");
+    if (before.模式 !== "显示" || before.执子 !== "显示" || before.规则 !== "在设置")
+      bad.push(h + "高 开局态:模式/执子应当在侧栏、规则在设置弹层(得到 " + JSON.stringify(before) + ")");
     if (before.溢出 !== 0) bad.push(h + "高 开局态:侧栏溢出 " + before.溢出 + "px —— 设置区不许要滚");
 
     // 落一子进入对局态
@@ -3615,7 +3631,7 @@ async function enableSwap2Pvp(page) {
     if (h === 800) seen.对局中 = after;
     if (after.模式 !== "隐藏") bad.push(h + "高 对局中:模式还在 —— 相位切换没生效");
     if (after.执子 !== "隐藏") bad.push(h + "高 对局中:执子还在(syncSettingsUI 可能覆盖了相位)");
-    if (after.规则 !== "隐藏") bad.push(h + "高 对局中:规则还在");
+    if (after.规则 !== "在设置") bad.push(h + "高 对局中:规则不在设置弹层里");
     if (after.难度 !== "显示") bad.push(h + "高 对局中:难度不见了 —— 它是唯一该留下的对局中设置");
     if (after.溢出 !== 0) bad.push(h + "高 对局中:侧栏溢出 " + after.溢出 + "px");
 

@@ -44,9 +44,11 @@ function checkoutEngine(ref) {
   for (const f of ENGINE_FILES) {
     let src;
     try {
-      src = execFileSync("git", ["show", `${ref}:src/web/js/${f}`], {
-        cwd: root, encoding: "utf8", maxBuffer: 1 << 26,
+      // C2 在 v1.68 挪到了 scripts/reference;更早的版本里它还在 src/web/js
+      const at = (p) => execFileSync("git", ["show", `${ref}:${p}/${f}`], {
+        cwd: root, encoding: "utf8", maxBuffer: 1 << 26, stdio: ["ignore", "pipe", "pipe"],
       });
+      try { src = at("src/web/js"); } catch (e1) { if (f !== "ai2.js") throw e1; src = at("scripts/reference"); }
     } catch (e) {
       // CI and fresh session clones are shallow — old refs need fetching first.
       console.error(
@@ -66,7 +68,8 @@ function loadEngine(dir) {
   ctx.window = ctx;
   vm.createContext(ctx);
   for (const f of ENGINE_FILES) {
-    vm.runInContext(fs.readFileSync(path.join(dir, f), "utf8"), ctx, { filename: f });
+    const p = fs.existsSync(path.join(dir, f)) ? path.join(dir, f) : path.join(root, "scripts/reference", f);
+    vm.runInContext(fs.readFileSync(p, "utf8"), ctx, { filename: f });
   }
   return ctx;
 }

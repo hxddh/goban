@@ -1,17 +1,17 @@
 /**
  * Web Worker tail: C1/C2 engine dispatch.
  *
- * Normally this file is CONCATENATED after core.js + ai.js + ai2.js into a
+ * Normally this file is CONCATENATED after core.js + ai.js + ai3.js into a
  * Blob worker (see app.js initAiWorker) — WKWebView cannot load worker
  * scripts through the zero:// custom-scheme handler, so classic
  * `new Worker(url)` + importScripts never worked in the packaged app.
  * The importScripts below only runs when this file is loaded standalone
  * (e.g. plain HTTP during development).
  */
-/* global GobanAi, GobanAi2, GobanAi3, GobanTier */
+/* global GobanAi, GobanAi3, GobanTier */
 if (!self.GobanAi && typeof importScripts === "function") {
   try {
-    importScripts("core.js", "ai.js", "ai2.js", "ai3.js");
+    importScripts("core.js", "ai.js", "ai3.js");
   } catch (e) {
     self.postMessage({ type: "error", error: String(e && e.message ? e.message : e) });
   }
@@ -22,7 +22,7 @@ self.onmessage = function (ev) {
   const id = data.id;
   // health check: lets the app verify the worker actually booted
   if (data.ping) {
-    self.postMessage({ pong: true, engines: !!(self.GobanAi && self.GobanAi2 && self.GobanAi3 && self.GobanTier) });
+    self.postMessage({ pong: true, engines: !!(self.GobanAi && self.GobanAi3 && self.GobanTier) });
     return;
   }
   try {
