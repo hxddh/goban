@@ -387,8 +387,12 @@ fn linkPlatform(b: *std.Build, target: std.Build.ResolvedTarget, app_mod: *std.B
         // appkit_host.m 都可能悄悄多要一个框架。scripts/check-frameworks.mjs 就是
         // 为这件事写的:比对 .m 里的 #import 与这里的 linkFramework,少了当场报,
         // 而不是等发布日的构建。
-        app_mod.linkFramework("ScreenCaptureKit", .{});
+        // 弱链接,与 SDK 0.10 的模板一致:ScreenCaptureKit 是 macOS 12.3 才有的框架,
+        // 强链接会让应用在更早的 macOS 上直接启动失败(五子棋用不到录屏,只是宿主代码引用了它)
+        app_mod.linkFramework("ScreenCaptureKit", .{ .weak = true });
         app_mod.linkFramework("CoreMedia", .{});
+        // appkit_host.m 调用了 CVPixelBuffer*;模板显式链接 CoreVideo,这里跟上
+        app_mod.linkFramework("CoreVideo", .{});
         app_mod.linkSystemLibrary("c", .{});
         if (web_engine == .chromium) app_mod.linkSystemLibrary("c++", .{});
     } else if (platform == .linux) {

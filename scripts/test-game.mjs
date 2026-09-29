@@ -2893,6 +2893,23 @@ const Practice = ctx.GobanPractice;
     "执子那一格亮的是偏好:auto 在高档亮「轮流」、低档亮「黑」");
 }
 
+// --- v1.67 自动更新:发布流程往 app.zon 写 .updates 的脚本 ---
+{
+  const tmp = path.join(os.tmpdir(), "goban-zon-" + process.pid + ".zon");
+  fs.copyFileSync(path.join(root, "app.zon"), tmp);
+  const pub = Buffer.alloc(32, 7).toString("base64");
+  const run = (k) => { try { execFileSync(process.execPath, [path.join(root, "scripts/enable-updates.mjs"), k, tmp], { stdio: "pipe" }); return 0; } catch (e) { return e.status || 1; } };
+  const ok1 = run(pub), after1 = fs.readFileSync(tmp, "utf8");
+  const ok2 = run(pub), after2 = fs.readFileSync(tmp, "utf8");
+  const bad = run("not-a-key");
+  fs.rmSync(tmp, { force: true });
+  const repoZon = fs.readFileSync(path.join(root, "app.zon"), "utf8");
+  assert(ok1 === 0 && ok2 === 0 && bad !== 0 && after1 === after2
+    && after1.includes('.public_key = "' + pub + '"') && after1.includes("releases/latest/download/update-macos.json")
+    && !/\.updates\s*=/.test(repoZon),
+    "enable-updates:写一次、不重写、坏公钥拒绝;仓库里的 app.zon 本身不带 .updates");
+}
+
 if (failed) {
   console.error("\n" + failed + " failed");
   process.exit(1);

@@ -1,8 +1,8 @@
 # 五子棋 Goban
 
-五子棋 / Gomoku — macOS 与 Windows 桌面应用。Native SDK WebView + Canvas，**完全离线**：不联网、不要账号、没有任何外部请求。
+五子棋 / Gomoku — macOS 与 Windows 桌面应用。Native SDK WebView + Canvas，**完全离线**：不联网、不要账号、没有任何外部请求——唯一的例外是 macOS 菜单里的「检查更新」（Check for Updates…），只在你点它时联网。
 
-*A Gomoku (Five in a Row) desktop app for macOS and Windows. Offline, no account, no network. Renju forbidden moves, swap2 opening, game review with proven / engine-compared blunders, replay-the-key-move, spaced tactics practice. Chinese / English.*
+*A Gomoku (Five in a Row) desktop app for macOS and Windows. Offline, no account, no network — except the optional “Check for Updates…” on macOS, and only when you click it. Renju forbidden moves, swap2 opening, game review with proven / engine-compared blunders, replay-the-key-move, spaced tactics practice. Chinese / English.*
 
 ![对局中：人机 · 普通难度 · 执黑](docs/screenshots/board.png)
 
