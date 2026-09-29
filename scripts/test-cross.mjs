@@ -282,6 +282,14 @@ async function pickRule(page, rule) {
   await page.waitForTimeout(150);
 }
 
+/** v1.70 起人机 · 自由时信息行是空的(档名不再重复);它最长的形态是「双人 · 禁手」 */
+async function longestMeta(page) {
+  await page.evaluate(() => document.querySelector('#mode-seg button[data-mode="pvp"]').click());
+  await page.waitForTimeout(120);
+  await dismissConfirm(page);
+  await pickRule(page, "renju");
+}
+
 async function enableSwap2Pvp(page) {
   await openPanel(page);
   await ensureSetupPhase(page);
@@ -1156,7 +1164,8 @@ async function enableSwap2Pvp(page) {
         try { localStorage.setItem(k, v); return true; } catch (_) { return false; }
       };
     });
-    // 先落一子，让存档提示带上时间戳（它最长的形态）
+    // v1.70:存档提示没了;信息行最长的形态是「双人 · 禁手」
+    await longestMeta(page);
     await page.evaluate(() => {
       const c = document.getElementById("board"); const b = c.getBoundingClientRect();
       const g = window.GobanDraw.geometry(); const sc = b.width / g.w;
@@ -1201,7 +1210,9 @@ async function enableSwap2Pvp(page) {
   // v1.51：外观搬进设置弹层后侧栏矮了 260px，默认窗口下滚动区不再溢出 —— 这条闸门
   // 自己的覆盖判据当场报了「测不到东西」。把窗口压矮，让它回到有溢出的处境；
   // 判据本身（该淡出时淡出、到底了就别再压暗）一个字没动。
-  await page.setViewportSize({ width: 1024, height: 540 });
+  // v1.70：棋谱文件与「每日」挪走后侧栏又矮了一截，540 高不再溢出（实测 470 高才溢出 19px）。
+  // 同样只把它放回「有溢出」的处境：压到 440（溢出 49px）；判据一个字没动。
+  await page.setViewportSize({ width: 1024, height: 440 });
   await page.waitForTimeout(250);
   // v1.61：模式/执子/规则搬进开局态后，**对局中**的侧栏不再溢出 —— 棋谱是
   // grow-sec，挤压全被它内部的滚动吸收了，实测 540/500/470/440/420 五档全是 0px。
@@ -1317,6 +1328,7 @@ async function enableSwap2Pvp(page) {
           `body,.side,.modal,.chrome{font-size:${Math.round(14 * scale)}px}` +
           `.side-meta,.setting-row,.tool-btn,.text-link,.pill button{font-size:${Math.round(12 * scale)}px}` });
       }
+      await longestMeta(page);
       await page.waitForTimeout(350);
       const r = await page.evaluate(() => {
         const H = innerHeight, W = innerWidth;
@@ -1597,7 +1609,10 @@ async function enableSwap2Pvp(page) {
     const b = [...document.querySelectorAll("button")].find((x) => /^练习$|^Practice$/.test(x.textContent.trim()));
     if (b) b.click();
   });
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(400);
+  // v1.70:今天的题没做时「练习」先给每日(每日不记错题本);这条测答题声音,切到「全部」
+  await page.evaluate(() => { const a = document.querySelector('#practice-skill [data-skill="all"]'); if (a) a.click(); });
+  await page.waitForTimeout(500);
   const r = await page.evaluate(async () => {
     const cv = document.getElementById("practice-board");
     if (!cv) return { err: "没有练习棋盘" };
@@ -2965,7 +2980,7 @@ async function enableSwap2Pvp(page) {
       };
     });
     seen[lang + "/底栏"] = foot;
-    if (foot.n < 5) bad.push(lang + ": 底栏只量到 " + foot.n + " 个入口 —— 覆盖不足");
+    if (foot.n < 4) bad.push(lang + ": 底栏只量到 " + foot.n + " 个入口 —— 覆盖不足"); // v1.70:复盘 · 练习 + 存档 · 统计
     if (foot.groupRows.length !== 2 || foot.groupRows.some((r) => r !== 1))
       bad.push(lang + ": 底栏某一层折行了 " + JSON.stringify(foot.groupRows) + "（高 " + foot.h + "）");
     // 24px 是 v1.32 定的最小命中尺寸，省宽度不许省到这条线以下
