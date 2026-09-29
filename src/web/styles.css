@@ -691,6 +691,10 @@
       text-align: left;
       white-space: nowrap;
     }
+    /* v1.71:浅色两套里「正文 60%」只有 3.9 / 3.7:1,不到 AA 的 4.5(此前闸门在空棋盘上量,量不到棋谱);
+       改用为 AA 定过的 --muted。深色两套里 60% 本来就过线,保留更轻的那一档。 */
+    [data-theme="day"] .move-list button,
+    [data-theme="notebook"] .move-list button { color: var(--muted); }
     .move-list button:hover { background: var(--btn); color: var(--text); }
     .move-list button.cur {
       background: var(--btn-hover);

@@ -343,6 +343,9 @@ async function enableSwap2Pvp(page) {
 {
   const page = await newPage();
   const IDS = ["undo", "btn-hint", "btn-new", "settings-btn", "toggle-panel"]; // v1.71:快捷键挪进设置
+  // v1.71:空棋盘不显示悔棋 / 提示 —— 先落一子,让顶栏五个按钮都在场
+  await clicker(page)(7, 7);
+  await page.waitForTimeout(900);
   const hitTest = () =>
     page.evaluate((ids) => {
       const bar = document.querySelector(".chrome").getBoundingClientRect();
@@ -729,10 +732,14 @@ async function enableSwap2Pvp(page) {
     await page.keyboard.press("Tab");
     if (!(await page.evaluate(() => !!(document.activeElement && document.activeElement.closest(".modal-bg"))))) escaped++;
   }
-  const okJ = seen.size >= 15 && inSettings.size >= 8 && escaped === 0 && page.__errors.length === 0;
-  report("J Tab 走得进侧栏（≥15）与设置弹层（≥8）且走不出弹层",
+  // v1.71:侧栏的控件又少了(复盘不足两手不显示、统计并进「记录」)。判据从固定的「≥ 15」改成更强的
+  // 「侧栏里看得见的每一个控件都 Tab 得到」—— 数字跟着界面走,但一个都不许漏。
+  const sideCount = await page.evaluate(() => [...document.querySelectorAll("#side button, #side input, #side select")]
+    .filter((e) => e.offsetParent !== null && !e.disabled && e.getBoundingClientRect().width > 0).length);
+  const okJ = seen.size >= sideCount && sideCount >= 10 && inSettings.size >= 8 && escaped === 0 && page.__errors.length === 0;
+  report("J Tab 走得进侧栏（看得见的每一个）与设置弹层（≥8）且走不出弹层",
     okJ,
-    JSON.stringify({ reachable: seen.size, settings: inSettings.size, escaped, errs: page.__errors }));
+    JSON.stringify({ reachable: seen.size, sideCount, settings: inSettings.size, escaped, errs: page.__errors }));
   await page.close();
 }
 
@@ -1798,6 +1805,8 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const page = await newPage();
   await openPanel(page);
+  // v1.71:空棋盘不显示提示 —— 先落一子(合成事件,不切换指针模态)
+  await clicker(page)(7, 7); await page.waitForTimeout(900);
   // v1.51：色板随外观搬进设置弹层，得开着量 —— 藏起来的元素聚不了焦，那会读成
   // 「焦点样式没了」，而真相只是它换了地方。
   // 用 JS 的 .click() 而不是 page.click()：真实指针事件会把浏览器的交互模态切成
@@ -1819,7 +1828,8 @@ async function enableSwap2Pvp(page) {
       el.blur();
     }
     // 分段控件与色板各取一个
-    for (const [sel, name] of [[".setting-row .pill button", "分段控件"],
+    // v1.71:落子后侧栏的「模式」行隐藏了 —— 取设置弹层里那一个(弹层开着)
+    for (const [sel, name] of [["#settings-modal .setting-row .pill button", "分段控件"],
                                [".theme-row [data-theme]", "色板"]]) {
       const el = document.querySelector(sel);
       if (!el) { out.push({ id: name, skip: "没找到" }); continue; }
@@ -2302,6 +2312,9 @@ async function enableSwap2Pvp(page) {
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(300);
   await openPanel(page);
+  // v1.71:空棋盘不显示悔棋 / 提示 / 复盘 —— 先落两子,让这条闸门量到的东西在场
+  await clicker(page)(7, 7); await page.waitForTimeout(900);
+  await clicker(page)(6, 6); await page.waitForTimeout(900);
 
   const computed = () => page.evaluate(() => {
     const lum = (r, g, b) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
@@ -2466,6 +2479,9 @@ async function enableSwap2Pvp(page) {
   const page = await newPage();
   await openPanel(page);
   await page.waitForTimeout(300);
+  // v1.71:空棋盘不显示悔棋 / 提示 / 复盘 —— 先落两子,让这条闸门量到的东西在场
+  await clicker(page)(7, 7); await page.waitForTimeout(900);
+  await clicker(page)(6, 6); await page.waitForTimeout(900);
   for (const th of ["wood", "night", "day", "notebook"]) {
     await page.evaluate((t) => { const x = document.querySelector('.theme-row [data-theme="' + t + '"]'); if (x) x.click(); }, th);
     await page.waitForTimeout(420);
@@ -2566,7 +2582,8 @@ async function enableSwap2Pvp(page) {
       return out;
     });
     seen[lang] = r;
-    if (r.length < 4) bad.push(lang + ": 只量到 " + r.length + " 个按钮网格，覆盖太少");
+    // v1.71:空棋盘上学习区只有「练习」一个按钮(复盘不足两手不显示),它不再算一个网格
+    if (r.length < 3) bad.push(lang + ": 只量到 " + r.length + " 个按钮网格，覆盖太少");
     for (const g of r) {
       // 放得下一行，或者正好铺满整数行 —— 否则末行必有孤儿
       if (g.按钮数 > g.列数 && g.按钮数 % g.列数 !== 0) {
@@ -2872,8 +2889,9 @@ async function enableSwap2Pvp(page) {
     seen[lang] = r;
 
     // 覆盖:量不到东西的闸门永远是绿的
-    if (r.symbols.length < 7) bad.push(lang + ": 只找到 " + r.symbols.length + " 个图标定义 —— 覆盖不足");
-    if (r.buttons.length < 7) bad.push(lang + ": 只找到 " + r.buttons.length + " 个图标按钮 —— 覆盖不足");
+    // v1.71:翻页 5 → 3、快捷键挪进设置,图标从 8 个减到 5 个(开局 / 终局 / 问号的定义一并删掉)
+    if (r.symbols.length < 5) bad.push(lang + ": 只找到 " + r.symbols.length + " 个图标定义 —— 覆盖不足");
+    if (r.buttons.length < 5) bad.push(lang + ": 只找到 " + r.buttons.length + " 个图标按钮 —— 覆盖不足");
 
     const vbs = [...new Set(r.symbols.map((x) => x.vb))];
     if (vbs.length !== 1) bad.push(lang + ": 图标定义有 " + vbs.length + " 种 viewBox " + JSON.stringify(vbs));
@@ -2941,6 +2959,9 @@ async function enableSwap2Pvp(page) {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.waitForTimeout(200);
   await openPanel(page);
+  // v1.71:空棋盘不显示悔棋 / 提示 / 复盘 —— 先落两子,让这条闸门量到的东西在场
+  await clicker(page)(7, 7); await page.waitForTimeout(900);
+  await clicker(page)(6, 6); await page.waitForTimeout(900);
 
   const readHelp = () =>
     page.evaluate(() => {
@@ -2974,13 +2995,14 @@ async function enableSwap2Pvp(page) {
         rows: [...new Set(bs.map((x) => Math.round(x.getBoundingClientRect().top)))].length,
         // v1.64:底栏分两层(学习入口一排按钮 + 存档 / 统计一排文字),每一层各自不许折行
         groupRows: [...f.querySelectorAll(".learn-row, .foot-links")].map((g) =>
-          [...new Set([...g.querySelectorAll("button")].map((x) => Math.round(x.getBoundingClientRect().top)))].length),
+          [...new Set([...g.querySelectorAll("button")].filter((x) => x.getBoundingClientRect().height > 0)
+            .map((x) => Math.round(x.getBoundingClientRect().top)))].length),
         minW: +Math.min(...bs.map((x) => x.getBoundingClientRect().width)).toFixed(1),
         minH: +Math.min(...bs.map((x) => x.getBoundingClientRect().height)).toFixed(1),
       };
     });
     seen[lang + "/底栏"] = foot;
-    if (foot.n < 4) bad.push(lang + ": 底栏只量到 " + foot.n + " 个入口 —— 覆盖不足"); // v1.70:复盘 · 练习 + 存档 · 统计
+    if (foot.n < 3) bad.push(lang + ": 底栏只量到 " + foot.n + " 个入口 —— 覆盖不足"); // v1.71:复盘 · 练习 + 记录
     if (foot.groupRows.length !== 2 || foot.groupRows.some((r) => r !== 1))
       bad.push(lang + ": 底栏某一层折行了 " + JSON.stringify(foot.groupRows) + "（高 " + foot.h + "）");
     // 24px 是 v1.32 定的最小命中尺寸，省宽度不许省到这条线以下
@@ -2992,7 +3014,7 @@ async function enableSwap2Pvp(page) {
     await page.waitForTimeout(300);
     const at = await readHelp();
     seen[lang + "/说明弹层"] = at;
-    if (at.rows < 13) bad.push(lang + ": 快捷键表只量到 " + at.rows + " 行 —— 覆盖不足");
+    if (at.rows < 11) bad.push(lang + ": 快捷键表只量到 " + at.rows + " 行 —— 覆盖不足"); // v1.71 删了「点击」「Tab」两行
     if (at.need > at.avail + 1) {
       bad.push(lang + ": 1280×720 下说明弹层要滚（need " + at.need + " > avail " + at.avail + "）");
     }
