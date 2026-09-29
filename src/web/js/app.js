@@ -12,7 +12,6 @@
   const Ui = window.GobanUi;
   const SgfIo = window.GobanSgfIo;
   const Engine = window.GobanEngine;
-  const Slots = window.GobanSlots;
   const Review = window.GobanReview;
   const Stats = window.GobanStats;
   const Backup = window.GobanBackup;
@@ -298,32 +297,15 @@
   let hintCell = null;
   let hintBusy = false;
 
-  // --- replay coach analysis ---
-  /** Show move-quality verdicts + a better-move marker while browsing replay. */
-  let analysisOn = false;
-  /** @type {{r:number,c:number}|null} engine's better move at the viewed position */
-  let analysisCell = null;
-  /** @type {{grade:string, text:string}|null} verdict for the move that led here */
-  let analysisVerdict = null;
-  /** viewIndex -> {cell, verdict} cache so revisiting a position is instant */
-  const analysisCache = new Map();
-  let analysisGen = 0;
-  let analysisTimer = null;
-
   function hasZero() { return Host.hasZero(); }
 
   function clearHint() {
     hintCell = null;
   }
 
+  // v1.72:「复盘分析」开关连同它的逐手评语一起退役(复盘面板已逐手解释失着)。
+  // 名字留着:每一处改棋盘的地方都经过这里,整局复盘的缓存跟着失效。
   function clearAnalysis() {
-    analysisCell = null;
-    analysisVerdict = null;
-    if (analysisTimer) { clearTimeout(analysisTimer); analysisTimer = null; }
-    analysisGen++;
-    analysisCache.clear();
-    // Whole-game review shares the same lifetime: every board mutation runs
-    // through here, and (gameGen, length) alone would collide after undo+replay.
     Review.invalidate();
   }
 
@@ -355,86 +337,6 @@
     after[played.r][played.c] = sColor;
     if (winCellsRule(after, oppC).length) return { grade: "blunder", kind: "missedBlock", key: "coach.missedBlock" };
     return null;
-  }
-
-  /** Analyze the move that led to the currently-viewed replay position. */
-  function scheduleAnalysis() {
-    if (analysisTimer) { clearTimeout(analysisTimer); analysisTimer = null; }
-    analysisCell = null;
-    analysisVerdict = null;
-    // Never kick off analysis while the live AI is thinking — aiMoveAsync
-    // rebuilds a busy worker and would resolve the game move as null.
-    if (!analysisOn || viewIndex < 1 || aiThinking) return;
-    // 只在**棋还在下**的时候封住头部那一手 —— 那时候评它等于给提示。
-    //
-    // 此前的判据是光秃秃的 isLive()，它不区分「棋还在下」和「棋已经下完」，于是
-    // 终局之后、以及导入的纯复盘里，最后一手也被一并封了口 —— 而那一手往往正是
-    // 最该有评语的：要么是制胜一手，要么是葬送全局的那一步。
-    //
-    // 更糟的是两处视图会自相矛盾：review.js 的循环是 `for (i = 1; i <= N; i++)`，
-    // **包含**最后一手，所以整局复盘照列不误。实测走过一遍：面板列出「第 9 手
-    // 黑错失胜着」，面板自己写着「点下方失着可跳转」，点下去跳到 9/9 —— 然后这一栏
-    // 一片空白。同一个功能，两套说法。
-    //
-    // importPaused 是导入 SGF 后的纯复盘态（落第一子即清除）：那不是在对局，而且
-    // 整局复盘早就把同样的评语公示了，谈不上剧透。
-    if (isLive() && result === "play" && !importPaused) return;
-    const i = viewIndex;
-    if (analysisCache.has(i)) {
-      const c = analysisCache.get(i);
-      analysisCell = c.cell;
-      analysisVerdict = c.verdict;
-      return;
-    }
-    const played = history[i - 1];
-    const sColor = (i - 1) % 2 === 0 ? "b" : "w";
-    const preBoard = boardAfter(i - 1);
-    const hard = coachFacts(preBoard, sColor, played);
-    // show the instant verdict right away; the better-move marker fills in async
-    analysisVerdict = hard || { grade: "pending", key: "coach.pending" };
-    analysisCell = hard && hard.best ? hard.best : null;
-    const gen = ++analysisGen;
-    const diff = difficulty === "easy" ? "normal" : difficulty === "extreme" ? "hard" : difficulty;
-    analysisTimer = setTimeout(() => {
-      analysisTimer = null;
-      aiMoveAsync({ board: preBoard, side: sColor, difficulty: diff, timeMs: 600 })
-        .then((best) => {
-          if (gen !== analysisGen || viewIndex !== i) return; // stale
-          let verdict = hard;
-          let cell = analysisCell;
-          if (!hard) {
-            if (!best) {
-              // Worker cancel/timeout → null; do not cache as "最佳一手".
-              analysisVerdict = { grade: "ok", key: "coach.incomplete" };
-              analysisCell = null;
-              sync();
-              return;
-            }
-            if (best.r !== played.r || best.c !== played.c) {
-              cell = best;
-              verdict = { grade: "ok", key: "coach.better" };
-            } else {
-              cell = null;
-              verdict = { grade: "best", key: "coach.best" };
-            }
-          } else if (!hard.best && best && (best.r !== played.r || best.c !== played.c)) {
-            cell = best; // pair a blunder verdict with the recommended move
-          }
-          analysisVerdict = verdict;
-          analysisCell = cell;
-          analysisCache.set(i, { cell: cell, verdict: verdict });
-          sync();
-        })
-        .catch(() => {
-          if (gen !== analysisGen || viewIndex !== i) return;
-          // Don't leave the UI wedged on「分析中…」when the engine path fails
-          if (!hard) {
-            analysisVerdict = { grade: "ok", key: "coach.incomplete" };
-            analysisCell = null;
-            sync();
-          }
-        });
-    }, 220);
   }
 
   let confirmResolver = null;
@@ -539,7 +441,6 @@
     hoverCell = null;
     clearHint();
     clearVariation();
-    scheduleAnalysis();
     sync();
     // 复盘面板打开时棋谱只剩几行高;跳到哪一手,棋谱就得跟到哪一手
     scrollMoveListToCurrent();
@@ -557,7 +458,6 @@
     hoverCell = null;
     clearHint();
     clearVariation();
-    scheduleAnalysis();
     sync();
   }
 
@@ -667,7 +567,7 @@
         thinkLevel = s.thinkLevel;
       }
       if (typeof s.showCoords === "boolean") showCoords = s.showCoords;
-      if (typeof s.analysisOn === "boolean") analysisOn = s.analysisOn;
+      /* v1.72:analysisOn 已退役,旧设置里的这一项忽略 */
     } catch (_) {}
     gameFromPrefs();
   }
@@ -677,7 +577,7 @@
     // 临时改掉这一局的模式 / 执子 / 规则,但不该顺手改掉玩家在侧栏选的那几格。
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify(Object.assign(Session.prefsToStore(prefs), { soundOn, themeId, thinkLevel, showCoords, analysisOn, lastHumanColor }))
+      JSON.stringify(Object.assign(Session.prefsToStore(prefs), { soundOn, themeId, thinkLevel, showCoords, lastHumanColor }))
     );
   }
 
@@ -868,11 +768,6 @@
     } catch (_) {}
   }
 
-  function clearSave() {
-    Host.storageRemove(SAVE_KEY);
-    Host.storageRemove("goban.v11.save");
-  }
-
   /**
    * Load a parsed snapshot (from autosave or a named slot) into live game
    * state. Recomputes result/win-line from history — stale save fields are
@@ -970,66 +865,35 @@
     }
   }
 
-  // --- named save slots: store/render in GobanSlots, game-flow glue here ---
-  async function saveCurrentAsSlot() {
-    if (!history.length) { toast(t("slot.nothing")); return; }
-    // 存档满了再存,会把最早的那个挤掉。此前这一步是静默的:列表仍是 30 条,
-    // 最老的那个不见了,而 toast 照说「已保存」。这些存档是用户亲手命名的,
-    // 清除存档和恢复备份都要确认,挤掉一个存档是同一类动作。
-    const doomed = Slots.wouldEvict();
-    if (doomed) {
-      const ok = await confirmNative(
-        t("slot.fullConfirm", { max: Slots.MAX, name: doomed.name }),
-        t("slot.fullTitle"),
-        { ok: t("slot.fullOk"), cancel: t("dlg.cancel") });
-      if (!ok) { toast(t("slot.fullCancelled")); return; }
+  // v1.72:命名存档退役 —— 没下完的棋自动存档,下完的自动进「最近对局」。老用户存过的
+  // 命名存档在启动时并进「最近对局」(一次性,并入成功才删原键;备份里的旧键恢复后照样会并入)。
+  function migrateSlots() {
+    const KEY = "goban.v12.slots";
+    let arr = [];
+    try { arr = JSON.parse(Host.storageGet(KEY) || "[]"); } catch (_) { arr = []; }
+    if (!Array.isArray(arr) || !arr.length) return;
+    let ok = true;
+    for (const sl of arr.slice().reverse()) { // 最旧的先进,最新的留在最上面
+      const sn = sl && sl.snap;
+      if (!sn || !Array.isArray(sn.history) || !sn.history.length) continue;
+      const id = Archive.add({
+        history: sn.history, ruleSet: sn.ruleSet, mode: sn.mode, difficulty: sn.difficulty,
+        humanColor: sn.humanColor, result: sn.result || "play",
+        startedAt: sn.originalStartedAt || sn.startedAt, endedAt: sl.savedAt || Date.now(),
+        durationMs: sn.elapsedBaseMs || 0,
+      });
+      if (!id) ok = false;
     }
-    const ok = Slots.add(serialize());
-    Slots.render();
-    toast(t(ok ? "slot.saved" : "slot.saveFail"));
-  }
-
-  async function loadSlotById(id) {
-    const slot = Slots.get(id);
-    if (!slot) return;
-    if (history.length &&
-        !(await confirmNative(t("slot.loadConfirm"), t("slot.loadTitle"), { ok: t("slot.loadOk"), cancel: t("dlg.cancel") }))) {
-      return;
-    }
-    abortThinking();
-    retry = null;
-    hideEndCard();
-    Review.setSideOpen(false);
-    if (!applySnapshot(slot.snap)) { toast(t("slot.corrupt")); return; }
-    gameGen += 1;
-    if (result !== "play" && lastStatsEndedAt) statsRecordedGen = gameGen;
-    clearAnalysis();
-    closeSlots();
-    sync();
-    saveGame();
-    maybeAiTurn();
-    toast(t("slot.loaded"));
-  }
-
-  async function deleteSlotById(id) {
-    const slot = Slots.get(id);
-    if (!slot) return;
-    if (!(await confirmNative(t("slot.delConfirm", { name: slot.name }), t("slot.delTitle"), { ok: t("slot.delOk"), cancel: t("dlg.cancel") }))) {
-      return;
-    }
-    const ok = Slots.remove(id);
-    Slots.render();
-    toast(t(ok ? "slot.deleted" : "slot.delFail"));
+    if (ok) Host.storageRemove(KEY);
   }
 
   function openSlots() {
     renderStatsIn();
-    Slots.render();
     renderGamesList();
     const m = document.getElementById("slots-modal");
     if (m) {
       m.classList.add("show");
-      const focusEl = document.getElementById("slot-save-current") || document.getElementById("slots-close");
+      const focusEl = document.getElementById("slots-close");
       if (focusEl) setTimeout(() => focusEl.focus(), 0);
     }
   }
@@ -1461,7 +1325,7 @@
       const d = new Date(g.endedAt || Date.now());
       const p = (n) => String(n).padStart(2, "0");
       const when = p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
-      const res = g.mode === "ai"
+      const res = g.result === "play" ? t("result.playing") : g.mode === "ai"
         ? t(g.result === "draw" ? "result.draw" : g.result === g.humanColor ? "games.win" : "games.loss")
         : t(g.result === "b" ? "result.blackWin" : g.result === "w" ? "result.whiteWin" : "result.draw");
       name.textContent = t("games.row", {
@@ -1625,7 +1489,6 @@
     winFlashUntil: winFlashUntil,
     hover: hoverCell,
     hint: hintCell,
-    analysis: analysisCell,
     variation: variationCells,
     forbidden: forbiddenPoints(),
     cursor: kbCursor,
@@ -2176,11 +2039,6 @@
       cdOn.classList.toggle("active", showCoords);
       cdOn.setAttribute("aria-pressed", showCoords ? "true" : "false");
     }
-    const anOn = document.getElementById("opt-analysis");
-    if (anOn) {
-      anOn.classList.toggle("active", analysisOn);
-      anOn.setAttribute("aria-pressed", analysisOn ? "true" : "false");
-    }
   }
 
   /**
@@ -2227,18 +2085,6 @@
       if (metaEl) metaEl.hidden = !parts.length;
     }
     document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
-    const verdictEl = document.getElementById("coach-verdict");
-    if (verdictEl) {
-      // 与 scheduleAnalysis 的判据必须同一套 —— 否则会算了却不显示，或显示一条
-      // 陈旧的。封口只封「棋还在下、且停在头部」。
-      const show = analysisOn && analysisVerdict && !(live && result === "play" && !importPaused);
-      verdictEl.hidden = !show;
-      if (show) {
-        const who = t((viewIndex - 1) % 2 === 0 ? "side.black" : "side.white");
-        verdictEl.textContent = t("coach.line", { n: viewIndex, who: who, text: t(analysisVerdict.key) });
-        verdictEl.className = "coach-verdict grade-" + (analysisVerdict.grade || "ok");
-      }
-    }
     renderMoveList();
     updateClock();
 
@@ -2345,7 +2191,8 @@
     }
     // v1.71:没有可复盘的(不足两手)就不显示「复盘」,不再是一个只会说「先下几手」的按钮
     const reviewBtn = document.getElementById("sgf-review");
-    if (reviewBtn) reviewBtn.hidden = history.length < 2;
+    // v1.72:复盘面板开着时也不显示 —— 再点它什么也不做
+    if (reviewBtn) reviewBtn.hidden = history.length < 2 || !document.getElementById("review-side").hidden;
     syncRetryBar();
     syncEndCard();
     syncWelcome();
@@ -2387,12 +2234,6 @@
   if (hintBtnEl) hintBtnEl.onclick = () => { requestHint(); };
   const reset2 = document.getElementById("reset2");
   if (reset2) reset2.onclick = () => { requestNewGame(); };
-  document.getElementById("clear-save").onclick = async () => {
-    if (!(await confirmNative(t("save.clearConfirm"), t("save.clearTitle"), { ok: t("save.clearOk"), cancel: t("dlg.cancel") }))) return;
-    clearSave();
-    reset();
-    toast(t("save.cleared"));
-  };
   document.getElementById("toggle-panel").onclick = togglePanel;
   document.getElementById("scrim").onclick = () => setPanelOpen(false);
 
@@ -2457,7 +2298,6 @@
       };
       if (!retry) push({ id: lastArchiveId, history: history, renju: isRenju() });
       for (const g of Archive.load()) push({ id: g.id, history: g.history, renju: g.ruleSet === "renju" });
-      for (const s of Slots.load()) if (s.snap) push({ id: null, history: s.snap.history, renju: s.snap.ruleSet === "renju" });
       return out;
     },
     openSource: (id, ply) => { openArchivedGame(id, ply); },
@@ -2494,21 +2334,10 @@
       setViewIndex(i);
     });
   }
-  const slotSaveEl = document.getElementById("slot-save-current");
-  if (slotSaveEl) slotSaveEl.onclick = () => { saveCurrentAsSlot(); };
   const slotsCloseEl = document.getElementById("slots-close");
   if (slotsCloseEl) slotsCloseEl.onclick = () => { closeSlots(); };
   const slotsModalEl = document.getElementById("slots-modal");
   if (slotsModalEl) slotsModalEl.onclick = (ev) => { if (ev.target === slotsModalEl) closeSlots(); };
-  const slotsListEl = document.getElementById("slots-list");
-  if (slotsListEl) {
-    slotsListEl.addEventListener("click", (ev) => {
-      const b = ev.target.closest("button[data-id]");
-      if (!b) return;
-      if (b.classList.contains("slot-load")) loadSlotById(b.dataset.id);
-      else if (b.classList.contains("slot-del")) deleteSlotById(b.dataset.id);
-    });
-  }
   const gamesListEl = document.getElementById("games-list");
   if (gamesListEl) {
     gamesListEl.addEventListener("click", async (ev) => {
@@ -2519,23 +2348,6 @@
         if (!(await confirmNative(t("games.delConfirm"), t("slot.delTitle"), { ok: t("slot.delOk"), cancel: t("dlg.cancel") }))) return;
         Archive.remove(b.dataset.id);
         renderGamesList();
-      }
-    });
-    // rename persists on commit (Enter / blur), not on every keystroke
-    const commitRename = (ev) => {
-      const inp = ev.target.closest(".slot-name");
-      if (!inp) return;
-      const row = inp.closest(".slot-row");
-      // Every other write path reports a failed persist; this one used to
-      // swallow it, so a rename that hit the storage quota looked applied
-      // until the next launch put the old name back.
-      if (row && !Slots.rename(row.dataset.id, inp.value)) toast(t("slot.saveFail"));
-    };
-    slotsListEl.addEventListener("change", commitRename);
-    slotsListEl.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" && ev.target.classList.contains("slot-name")) {
-        ev.preventDefault();
-        ev.target.blur();
       }
     });
   }
@@ -2634,18 +2446,6 @@
       syncSettingsUI();
       draw();
       toast(t(showCoords ? "toast.coordsOn" : "toast.coordsOff"));
-    };
-  }
-  const analysisBtn = document.getElementById("opt-analysis");
-  if (analysisBtn) {
-    analysisBtn.onclick = () => {
-      analysisOn = !analysisOn;
-      saveSettings();
-      syncSettingsUI();
-      if (!analysisOn) clearAnalysis();
-      else scheduleAnalysis();
-      sync();
-      toast(t(analysisOn ? "toast.analysisOn" : "toast.analysisOff"));
     };
   }
   document.getElementById("color-seg").onclick = async (ev) => {
@@ -2858,6 +2658,7 @@
   // a worse first impression than an entry the user has not found yet.
   setPanelOpen(savedPanel == null ? window.innerWidth >= 900 : savedPanel === "1");
 
+  try { migrateSlots(); } catch (_) {}
   const resumed = tryLoadSave();
   welcomeOn = firstRun && !resumed;
   if (resumed) {

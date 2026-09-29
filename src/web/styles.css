@@ -726,49 +726,11 @@
     }
     .replay-bar button:disabled { opacity: 0.28; cursor: default; }
 
-    .coach-verdict {
-      margin-top: 8px;
-      padding: 8px 12px;
-      border-radius: var(--radius-sm);
-      font-size: var(--fs-body); font-weight: 600;
-      line-height: 1.35;
-      border: 1px solid var(--card-border);
-      background: var(--btn-ghost);
-      color: var(--fg);
-    }
-    .coach-verdict.grade-best {
-      color: #2f9e5e;
-      color: color-mix(in srgb, #2f9e5e 82%, var(--fg));
-      border-color: var(--card-border);
-      border-color: color-mix(in srgb, #2f9e5e 40%, var(--card-border));
-      background: var(--btn-ghost);
-      background: color-mix(in srgb, #2f9e5e 10%, transparent);
-    }
-    .coach-verdict.grade-ok {
-      color: #c9911e;
-      color: color-mix(in srgb, #c9911e 85%, var(--fg));
-      border-color: var(--card-border);
-      border-color: color-mix(in srgb, #c9911e 40%, var(--card-border));
-      background: var(--btn-ghost);
-      background: color-mix(in srgb, #c9911e 10%, transparent);
-    }
-    .coach-verdict.grade-blunder {
-      color: var(--win);
-      color: color-mix(in srgb, var(--win) 88%, var(--fg));
-      border-color: var(--card-border);
-      border-color: color-mix(in srgb, var(--win) 42%, var(--card-border));
-      background: var(--btn-ghost);
-      background: color-mix(in srgb, var(--win) 10%, transparent);
-    }
-    .coach-verdict.grade-pending { opacity: 0.72; font-weight: 500; }
 
-    .slots-head {
-      display: flex; align-items: center; gap: 8px;
-      margin: 4px 0 12px;
-    }
+    /* v1.72:命名存档退役,这个类只剩「最近对局」在用(高度由 .games-list 定) */
     .slots-list {
       display: flex; flex-direction: column; gap: 8px;
-      max-height: 46vh; overflow-y: auto;
+      overflow-y: auto;
       margin-bottom: 12px;
     }
     .slot-row {
@@ -782,18 +744,7 @@
       border-radius: var(--radius-md);
       background: var(--btn-ghost);
     }
-    .slot-name {
-      grid-area: name;
-      -webkit-appearance: none; appearance: none;
-      border: 1px solid transparent;
-      background: transparent;
-      color: var(--fg);
-      font: inherit; font-size: var(--fs-body); font-weight: 600;
-      padding: 2px 4px; border-radius: var(--radius-sm);
-      width: 100%;
-    }
-    .slot-name:hover { border-color: var(--card-border); }
-    /* 焦点。改之前整张表里唯一一条 focus 规则是下面那个改名输入框 —— 也就是说
+    /* 焦点。改之前整张表里唯一一条 focus 规则是命名存档的改名输入框(v1.72 已随命名存档退役)—— 也就是说
        按钮、分段控件、开关、文字链聚焦时长什么样,**完全由引擎的默认值决定**。
        v1.32 花了一整版把 Tab 可达做起来(侧栏 0 → 26 项、主界面 38 个按钮),
        却从没定义过「走到哪里」看不看得出来。而这个应用跑 WKWebView / WebView2、
@@ -812,16 +763,6 @@
        accent —— v1.32 和 v1.34 都在这里栽过。焦点环要用当前界面的 accent。 */
     .theme-row [data-theme]:focus-visible {
       outline-color: var(--sw-accent);
-    }
-    .slot-name:focus {
-      outline: none;
-      border-color: var(--accent);
-      background: var(--bg);
-    }
-    .slot-meta {
-      grid-area: meta;
-      font-size: var(--fs-ui); color: var(--muted);
-      padding-left: 4px;
     }
     .slot-ops {
       grid-area: ops;
@@ -963,6 +904,7 @@
     #app.is-empty #clock,
     #app.is-empty #undo,
     #app.is-empty #btn-hint,
+    #app.is-empty #btn-new,
     #app.is-empty #replay-pos { display: none; }
     /* v1.70:棋谱文件挪进存档弹层,与备份同一行式;行间不再画第二条分隔线 */
     .backup-row.sgf-row { border-top: 0; margin-top: 8px; padding-top: 0; }
