@@ -233,8 +233,8 @@ async function newGame(page) {
     const h = (id) => Math.round(document.getElementById(id).getBoundingClientRect().height);
     const b = document.getElementById("daily-badge");
     return {
-      tool: ["sgf-review", "open-practice", "open-daily"].every((id) => document.getElementById(id).classList.contains("tool-btn")),
-      h: [h("sgf-review"), h("open-practice"), h("open-daily"), h("btn-new")],
+      tool: ["sgf-review", "open-practice"].every((id) => document.getElementById(id).classList.contains("tool-btn")),
+      h: [h("sgf-review"), h("open-practice"), h("btn-new")],
       quiet: ["sgf-slots", "open-stats"].every((id) => document.getElementById(id).classList.contains("text-link")),
       badge: b && !b.hidden ? b.textContent : null,
     };
@@ -249,8 +249,8 @@ async function newGame(page) {
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(300);
   const one = await look();
-  report("S4 复盘 / 练习 / 每日是按钮(与新局等高),存档 / 统计是文字;到期数是徽标,0 时不出现",
-    zero.tool && zero.quiet && zero.h.every((x) => x === zero.h[3]) && zero.badge === null && one.badge === "1",
+  report("S4 复盘 / 练习是按钮(与新局等高),存档 / 统计是文字;到期数是「练习」上的徽标,0 时不出现",
+    zero.tool && zero.quiet && zero.h.every((x) => x === zero.h[2]) && zero.badge === null && one.badge === "1",
     JSON.stringify({ zero, one, errs: page.__errors }));
   await page.close();
 }
@@ -464,14 +464,56 @@ async function newGame(page) {
   await page.evaluate(() => document.getElementById("welcome-close").click());
   await page.waitForTimeout(150);
   const bare = await count();
-  const emptyHidden = !(await shown("rep-start")) && !(await shown("sgf-copy")) && !(await shown("sgf-download"));
+  const emptyHidden = !(await shown("rep-start"));
   const ruleInSide = await page.evaluate(() => !!document.querySelector("#side #rule-field"));
   await clicker(page)(7, 7);
   await page.waitForTimeout(400);
-  const afterMove = (await shown("rep-start")) && (await shown("sgf-copy")) && (await shown("sgf-download"));
-  report("S10 一打开:提示不压棋盘、可点控件 ≤ 22、空棋盘不显示翻页 / 复制 / 导出,落子后都在",
+  const afterMove = await shown("rep-start");
+  report("S10 一打开:提示不压棋盘、可点控件 ≤ 22、空棋盘不显示翻页,落子后在",
     overlap === false && bare <= 22 && emptyHidden && afterMove && !ruleInSide,
     JSON.stringify({ overlap, withWelcome, bare, emptyHidden, afterMove, ruleInSide, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- S11. 侧栏只留下棋要用的(v1.70)----
+// 首次打开(提示还在)可点控件 ≤ 21(v1.69 是 24);对局中除棋谱每一手外 ≤ 19(v1.69 是 24)。
+// 挪走的都还在、两步之内够得着:存档 → 复制 / 导出 / 导入 / 粘贴;练习 → 今日。
+// 一件信息只说一遍:顶栏没有手数、侧栏没有「已存」、人机时信息行不写档名。
+{
+  const page = await newPage();
+  const count = () => page.evaluate(() => [...document.querySelectorAll("button, [role=button], input, select")]
+    .filter((e) => e.offsetParent !== null && e.getBoundingClientRect().width > 0 && !e.closest("#move-list")).length);
+  const first = await count();
+  const click = clicker(page);
+  for (const [r, c] of [[7, 7], [6, 8], [8, 6]]) { await click(r, c); await page.waitForTimeout(900); }
+  const mid = await count();
+  const dup = await page.evaluate(() => ({
+    movesChip: !!document.getElementById("moves"),
+    saved: /已存|自动存档/.test(document.getElementById("side").innerText),
+    diffInInfo: /普通|入门|困难|极限/.test((document.getElementById("info-mode") || {}).textContent || ""),
+  }));
+  await page.evaluate(() => document.getElementById("sgf-slots").click());
+  await page.waitForTimeout(150);
+  const inSlots = await page.evaluate(() => ["sgf-copy", "sgf-download", "sgf-import", "sgf-paste"]
+    .every((id) => { const e = document.getElementById(id); return !!e && !!e.closest("#slots-modal") && e.offsetParent !== null; }));
+  let copied = "";
+  if (inSlots) {   // 旧布局里它们不在弹层里:判失败,而不是让点击超时把整套测试带崩
+    await page.click("#sgf-copy");
+    await page.waitForTimeout(150);
+    copied = await page.evaluate(() => navigator.clipboard.readText());
+  }
+  await page.evaluate(() => document.getElementById("slots-close").click());
+  await page.click("#open-practice");
+  await page.waitForTimeout(200);
+  const pTitle = await page.evaluate(() => document.getElementById("practice-title").textContent.trim());
+  const dailyChip = await page.evaluate(() => { const b = document.querySelector('#practice-skill [data-skill="daily"]'); return !!b && b.offsetParent !== null && b.classList.contains("active"); });
+  await page.click('#practice-skill [data-skill="all"]');
+  await page.waitForTimeout(150);
+  const freeTitle = await page.evaluate(() => document.getElementById("practice-title").textContent.trim());
+  const ok = first <= 21 && mid <= 19 && !dup.movesChip && !dup.saved && !dup.diffInInfo &&
+    inSlots && /^\(;/.test(copied) && pTitle === "每日挑战" && dailyChip && freeTitle === "战术练习";
+  report("S11 侧栏只留下棋要用的:控件 ≤ 21 / ≤ 19;文件操作在存档里、每日在练习里;信息不重复", ok,
+    JSON.stringify({ first, mid, dup, inSlots, copied: copied.slice(0, 12), pTitle, dailyChip, freeTitle, errs: page.__errors }));
   await page.close();
 }
 

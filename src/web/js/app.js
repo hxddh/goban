@@ -641,7 +641,6 @@
   // presentation helpers live in GobanUi (v1.28 split)
   function toast(msg) { Ui.toast(msg); }
   function formatDuration(ms) { return Ui.formatDuration(ms); }
-  function formatTime(ts) { return Ui.formatTime(ts); }
 
   /**
    * 用时从**第一颗子**算起,不从打开应用算起(v1.63)。此前 startedAt 在开局态就
@@ -860,19 +859,19 @@
     };
   }
 
+  let saveOk = true;
   function saveGame() {
     try {
       const ok = Host.storageSet(SAVE_KEY, JSON.stringify(serialize()));
-      const hint = document.getElementById("save-hint");
-      if (hint) hint.textContent = ok ? t("save.at", { time: formatTime(Date.now()) }) : t("save.failed");
+      // v1.70:自动保存不再在侧栏报时间(它本该是看不见的);只在由好转坏的那一次说一声
+      if (!ok && saveOk) toast(t("save.failed"));
+      saveOk = ok;
     } catch (_) {}
   }
 
   function clearSave() {
     Host.storageRemove(SAVE_KEY);
     Host.storageRemove("goban.v11.save");
-    const hint = document.getElementById("save-hint");
-    if (hint) hint.textContent = t("save.none");
   }
 
   /**
@@ -2220,14 +2219,12 @@
     syncPhaseFields();
     syncScrollEdges();
     const status = document.getElementById("status");
-    const moves = document.getElementById("moves");
     const blackTurn = document.getElementById("black-turn");
     const whiteTurn = document.getElementById("white-turn");
     const undoBtns = [document.getElementById("undo"), document.getElementById("undo2")].filter(Boolean);
     const live = isLive();
 
-    moves.textContent = viewIndex + "/" + history.length;
-    // v1.68:空棋盘时,翻页、复制、导出、手数 / 用时、「已存」都没有意义 —— 不显示(见 styles.css)
+    // v1.68:空棋盘时,翻页、用时都没有意义 —— 不显示(见 styles.css)
     const appEl0 = document.getElementById("app");
     appEl0.classList.toggle("is-empty", history.length === 0);
     // 这一局的规则(设置里亮的是偏好,可能是「下一局起」):给读屏之外的东西(测试、样式)一个稳定的钩子
@@ -2235,9 +2232,14 @@
     const modeEl = document.getElementById("info-mode");
     if (modeEl) {
       // 规则挪进设置之后,非「自由」时在这里留一个标记,不会忘了自己在什么规则下
+      // v1.70:人机时不再写档名 —— 下面的难度选择已经标着它;一件信息只说一遍
       const rc = ruleChoice();
-      modeEl.textContent = (mode === "pvp" ? t("mode.pvp") : t("diff." + difficulty + ".full"))
-        + (rc === "free" ? "" : " · " + t("rule." + rc));
+      const parts = [];
+      if (mode === "pvp") parts.push(t("mode.pvp"));
+      if (rc !== "free") parts.push(t("rule." + rc));
+      modeEl.textContent = parts.join(" · ");
+      const metaEl = modeEl.closest(".side-meta");
+      if (metaEl) metaEl.hidden = !parts.length;
     }
     document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
     const verdictEl = document.getElementById("coach-verdict");
@@ -2419,8 +2421,9 @@
   document.getElementById("sgf-download").onclick = () => { downloadSgf(); };
   const contEl = document.getElementById("sgf-continue");
   if (contEl) contEl.onclick = () => { continueFromImport(); };
+  // v1.70:这四个住在存档弹层里。导入 / 粘贴会换掉当前对局,先关弹层,让人看见换上来的棋
   const pasteEl = document.getElementById("sgf-paste");
-  if (pasteEl) pasteEl.onclick = () => { pasteSgfFromClipboard(); };
+  if (pasteEl) pasteEl.onclick = () => { closeSlots(); pasteSgfFromClipboard(); };
 
   const slotsEl = document.getElementById("sgf-slots");
   if (slotsEl) slotsEl.onclick = () => { openSlots(); };
@@ -2473,8 +2476,6 @@
   Practice.wire();
   const practiceEl = document.getElementById("open-practice");
   if (practiceEl) practiceEl.onclick = () => { Practice.open(); };
-  const dailyEl = document.getElementById("open-daily");
-  if (dailyEl) dailyEl.onclick = () => { Practice.openDaily(); };
   const statsCloseEl = document.getElementById("stats-close");
   if (statsCloseEl) statsCloseEl.onclick = () => { closeStats(); };
   const statsModalEl = document.getElementById("stats-modal");
@@ -2910,7 +2911,7 @@
 
 
   const sgfImport = document.getElementById("sgf-import");
-  if (sgfImport) sgfImport.onclick = () => { pickAndImportSgf(); };
+  if (sgfImport) sgfImport.onclick = () => { closeSlots(); pickAndImportSgf(); };
 
   // --- whole-app backup / restore ---
   const backupExport = document.getElementById("backup-export");

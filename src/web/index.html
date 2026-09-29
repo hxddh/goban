@@ -34,7 +34,6 @@
     <header class="chrome">
       <span class="brand" data-i18n="app.name">五子棋</span>
       <span class="status-pill" id="status" role="status" aria-live="polite" data-i18n="status.blackTurn">黑棋落子</span>
-      <span class="meta-chip num" id="moves">0/0</span>
       <span class="meta-chip num" id="clock">00:00</span>
       <span class="spacer"></span>
       <div class="chrome-actions">
@@ -101,7 +100,6 @@
             <div class="meta-stats">
               <span id="info-mode"></span>
             </div>
-            <span id="save-hint" class="save-hint" data-i18n="side.autosave">自动存档</span>
           </div>
         </section>
 
@@ -218,12 +216,6 @@
               <button type="button" class="tool-btn" id="review-side-pv" title="从这一手起，引擎推演后续着法（虚影）" data-i18n="review.side.pv" data-i18n-title="review.pv.title">推演</button>
             </div>
           </section>
-          <div class="link-row">
-            <button type="button" class="text-link" id="sgf-copy" data-i18n="sgf.copy">复制</button>
-            <button type="button" class="text-link" id="sgf-download" data-i18n="sgf.export">导出</button>
-            <button type="button" class="text-link" id="sgf-import" data-i18n="sgf.import">导入</button>
-            <button type="button" class="text-link" id="sgf-paste" title="从剪贴板粘贴 SGF" data-i18n="sgf.paste" data-i18n-title="sgf.paste.title">粘贴</button>
-          </div>
           <button type="button" class="continue-btn" id="sgf-continue" hidden title="从导入局面继续对局" data-i18n="sgf.continue" data-i18n-title="sgf.continue.title">续下</button>
         </section>
 
@@ -238,8 +230,8 @@
       <div class="side-foot">
         <div class="learn-row">
           <button type="button" class="tool-btn learn-btn" id="sgf-review" title="复盘：曲线、失着与解释" data-i18n="sgf.review" data-i18n-title="sgf.review.title">复盘</button>
-          <button type="button" class="tool-btn learn-btn" id="open-practice" title="战术练习：找制胜一手 / 找防守点" data-i18n="foot.practice" data-i18n-title="foot.practice.title">练习</button>
-          <button type="button" class="tool-btn learn-btn" id="open-daily" title="每日挑战：每天固定 5 题，连续打卡" data-i18n-title="foot.daily.title"><span id="open-daily-label" data-i18n="foot.daily">每日</span><span class="badge learn-badge" id="daily-badge" hidden></span></button>
+          <!-- v1.70:「每日」并进「练习」—— 今天的 5 题还没做时,点「练习」先看到它们;弹层里「今日」一格随时切回 -->
+          <button type="button" class="tool-btn learn-btn" id="open-practice" title="练习：今天的 5 题、找制胜一手 / 找防守点" data-i18n-title="foot.practice.title"><span data-i18n="foot.practice">练习</span><span class="badge learn-badge" id="daily-badge" hidden></span></button>
         </div>
         <div class="foot-links">
           <button type="button" class="text-link" id="sgf-slots" title="命名存档与历史对局" data-i18n="sgf.slots" data-i18n-title="sgf.slots.title">存档</button>
@@ -354,6 +346,14 @@
           <button type="button" class="tool-btn primary" id="slot-save-current" data-i18n="slots.saveCurrent">另存当前对局</button>
           <span class="muted" id="slots-empty" hidden data-i18n="slots.empty">还没有存档</span>
         </div>
+        <!-- v1.70:棋谱文件从侧栏挪到这里 —— 它们是「文件」,和存档、备份住在一起;侧栏只留下棋要用的 -->
+        <div class="backup-row sgf-row">
+          <span class="muted" data-i18n="sgf.label">棋谱文件</span>
+          <button type="button" class="text-link" id="sgf-copy" data-i18n="sgf.copy">复制</button>
+          <button type="button" class="text-link" id="sgf-download" data-i18n="sgf.export">导出</button>
+          <button type="button" class="text-link" id="sgf-import" data-i18n="sgf.import">导入</button>
+          <button type="button" class="text-link" id="sgf-paste" title="从剪贴板粘贴 SGF" data-i18n="sgf.paste" data-i18n-title="sgf.paste.title">粘贴</button>
+        </div>
         <div class="slots-list" id="slots-list"></div>
         <!-- v1.63:对局库。每一局下完自动留存,不用手动存档;这里列最近 20 局,
              点「复盘」以纯复盘态打开并停在终局。 -->
@@ -379,6 +379,7 @@
         <h3 id="practice-title" data-i18n="practice.title">战术练习</h3>
         <!-- v1.63:题型筛选 —— 随机题库变成技能训练:成五 / 防守 / VCF / 禁手 -->
         <div class="pill practice-skill" id="practice-skill" role="group" aria-label="题型" data-i18n-aria="practice.skill.aria">
+          <button type="button" data-skill="daily" data-i18n="practice.skill.daily">今日</button>
           <button type="button" data-skill="all" class="active" data-i18n="practice.skill.all">全部</button>
           <button type="button" data-skill="win1" data-i18n="practice.skill.win1">成五</button>
           <button type="button" data-skill="defend" data-i18n="practice.skill.defend">防守</button>

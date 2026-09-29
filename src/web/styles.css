@@ -474,7 +474,6 @@
       margin: 0 8px; vertical-align: middle;
     }
     .side-meta .num { color: var(--text); font-weight: 600; }
-    .save-hint { opacity: 0.8; }
 
     .side-section {
       padding: 12px 0;
@@ -965,32 +964,13 @@
     .stats-line.muted2 { color: var(--muted); }
 
 
-    /* Fixed 3-column grid rather than a wrapping flex row: with English labels
-       the six links wrap, and space-between then flings the last two to the
-       panel edges. A grid lays out identically whatever the language. */
-    /* 四个按钮、四列。三列是 v1.29 为**六个**链接定的(那时的注释原话:"with English
-       labels the six links wrap"),六个正好两行三列;v1.33 把 存档/复盘/练习/每日/统计
-       挪进 .side-foot 之后只剩四个,而这个 3 没人改 —— 于是「粘贴」独自掉在第二行,
-       一直这样过了 14 个版本。
-       四列放得下:行宽 243、列间距 4、按钮内边距 8,每格文字可用 49.8px,而中文最宽 24、
-       英文最宽 Import 39.8 —— 余 10px。 */
-    /* 列数跟着显示出来的按钮走(空棋盘时只有导入、粘贴两个,见下) */
-    .link-row {
-      display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
-      gap: 2px 4px; margin-top: 12px;
-    }
     /* v1.68:空棋盘时没有意义的控件不显示 —— 没有可翻的棋谱、没有可复制导出的对局、
-       手数与用时都是 0、也没有「已存」。落下第一子即出现。 */
+       用时是 0。落下第一子即出现。 */
     #app.is-empty #replay-seg,
-    #app.is-empty #sgf-copy,
-    #app.is-empty #sgf-download,
-    #app.is-empty #moves,
     #app.is-empty #clock,
-    #app.is-empty #save-hint,
     #app.is-empty #replay-pos { display: none; }
-    /* v1.66:四个文件操作是低频的,用中性色,不再比「新局」醒目(强调色只留给主操作) */
-    .link-row .text-link { text-align: center; color: var(--muted); font-weight: 400; }
-    .link-row .text-link:hover { color: var(--text); }
+    /* v1.70:棋谱文件挪进存档弹层,与备份同一行式;行间不再画第二条分隔线 */
+    .backup-row.sgf-row { border-top: 0; margin-top: 8px; padding-top: 0; }
     /* backup/restore sits under the slot list, away from the per-slot rows —
        it acts on everything, not on the slot you happen to be looking at */
     .backup-row {
@@ -1055,7 +1035,7 @@
       display: flex; flex-direction: column; gap: 4px;
     }
     /* v1.64:三个学习入口等宽一排,与顶栏同一套 .tool-btn;存档 / 统计退成一行小字 */
-    .learn-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .learn-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
     .learn-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 6px; min-width: 0; }
     .learn-badge { font-variant-numeric: tabular-nums; line-height: 1; }
     .foot-links { display: flex; gap: 6px; }

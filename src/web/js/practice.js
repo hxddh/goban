@@ -1667,9 +1667,10 @@
   function syncSkillButtons() {
     const seg = document.getElementById("practice-skill");
     if (!seg) return;
-    seg.hidden = runMode !== "free";
+    // v1.70:「今日」是这排里的第一格 —— 每日与自由练习在同一个弹层里切换(错题本时整排收起)
+    seg.hidden = runMode === "wrong";
     seg.querySelectorAll("button[data-skill]").forEach((b) => {
-      b.classList.toggle("active", b.dataset.skill === skill);
+      b.classList.toggle("active", runMode === "daily" ? b.dataset.skill === "daily" : b.dataset.skill === skill);
     });
   }
 
@@ -1724,7 +1725,15 @@
     showPuzzle();
   }
 
+  /** 今天的 5 题做完了没有(v1.70:「练习」据此决定先给哪一套)。 */
+  function dailyDoneToday() {
+    const st = loadDaily();
+    return !!(st && st.lastDoneDate === todayStr());
+  }
+
   function open(opts) {
+    // v1.70:侧栏不再有单独的「每日」—— 今天的题没做时,点「练习」先看到它们
+    if (!(opts && (opts.skill || opts.free)) && !dailyDoneToday()) { openDaily(); return; }
     const m = document.getElementById("practice-modal");
     if (m) m.classList.add("show");
     setTitle(t("practice.title"));
@@ -1744,7 +1753,7 @@
   function openFor(gameId, ply) {
     const cands = buildCandidates();
     const hit = cands.filter((p) => p.gameId === gameId && p.ply === ply);
-    if (!hit.length) { open(); return false; }
+    if (!hit.length) { open({ free: true }); return false; }
     const m = document.getElementById("practice-modal");
     if (m) m.classList.add("show");
     setTitle(t("practice.title"));
@@ -1812,9 +1821,21 @@
     const skillSeg = document.getElementById("practice-skill");
     if (skillSeg) skillSeg.addEventListener("click", (ev) => {
       const b = ev.target.closest("button[data-skill]");
-      if (!b || b.dataset.skill === skill) return;
+      if (!b) return;
+      const wrongBtn = document.getElementById("practice-wrong");
+      if (b.dataset.skill === "daily") {
+        if (runMode === "daily") return;
+        setTitle(t("daily.title")); setModalLabel(t("daily.title"));
+        if (wrongBtn) wrongBtn.hidden = true;
+        startDaily();
+        return;
+      }
+      if (runMode === "free" && b.dataset.skill === skill) return;
       skill = b.dataset.skill;
+      setTitle(t("practice.title")); setModalLabel(t("practice.title"));
+      if (wrongBtn) wrongBtn.hidden = false;
       start();
+      syncWrongButton();
     });
     const wrongBtn = document.getElementById("practice-wrong");
     if (wrongBtn) wrongBtn.addEventListener("click", () => {
