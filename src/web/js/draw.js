@@ -307,7 +307,9 @@
       sg.addColorStop(0, mute("#fffefb"));
       sg.addColorStop(0.45, mute("#f4f2ec"));
       sg.addColorStop(0.82, mute("#e2ded6"));
-      sg.addColorStop(1, mute(themeId === "day" ? "#aba699" : themeId === "night" ? "#cdc8bd" : "#bab4a8"));
+      // v1.74:木盘的外圈从 #bab4a8 提到 #d9d4ca。旧的暖灰与木盘受光的左上半边几乎同亮
+      // (亮度 ≈180 对 ≈170),白子的边只在个别棋盘尺寸下量得出来;亮一档的边在五种尺寸下都 ≥ 96%
+      sg.addColorStop(1, mute(themeId === "day" ? "#aba699" : themeId === "night" ? "#cdc8bd" : "#d9d4ca"));
     }
     // A real shadow, cast by the stone itself. What was here before was a
     // second disc of the same radius offset by a flat 1.2/1.8 bitmap px

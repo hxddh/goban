@@ -18,31 +18,29 @@
        currentColor 跟着按钮的文字色走(四套主题不必各写一份)。
        <use> 引用而不是七份内联副本 —— 一个图标一处定义,改一次全改。 -->
   <svg class="icon-defs" aria-hidden="true" focusable="false"><defs>
-    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M15 6 9 12l6 6"/></symbol>
-    <!-- 「回到最新」不是一颗项目符号:靶心才读得出「当前这一手在这里」 -->
-    <symbol id="i-live" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/></symbol>
-    <symbol id="i-next" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
-    <!-- ☰ 是「菜单」,这个按钮开的是右侧栏 —— 画成带右栏的窗口,说的是实话 -->
-    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="3.5" width="18" height="17" rx="2.5"/><path d="M14.5 3.5v17"/></symbol>
-    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M18.5 14.4a1.4 1.4 0 0 0 .28 1.54l.05.05a1.65 1.65 0 1 1-2.34 2.34l-.05-.05a1.4 1.4 0 0 0-1.54-.28 1.4 1.4 0 0 0-.85 1.28v.14a1.65 1.65 0 0 1-3.3 0v-.07a1.4 1.4 0 0 0-.92-1.28 1.4 1.4 0 0 0-1.54.28l-.05.05a1.65 1.65 0 1 1-2.34-2.34l.05-.05a1.4 1.4 0 0 0 .28-1.54 1.4 1.4 0 0 0-1.28-.85H4.8a1.65 1.65 0 0 1 0-3.3h.07a1.4 1.4 0 0 0 1.28-.92 1.4 1.4 0 0 0-.28-1.54l-.05-.05a1.65 1.65 0 1 1 2.34-2.34l.05.05a1.4 1.4 0 0 0 1.54.28h.07a1.4 1.4 0 0 0 .85-1.28V4.8a1.65 1.65 0 0 1 3.3 0v.07a1.4 1.4 0 0 0 .85 1.28h.07a1.4 1.4 0 0 0 1.54-.28l.05-.05a1.65 1.65 0 1 1 2.34 2.34l-.05.05a1.4 1.4 0 0 0-.28 1.54v.07a1.4 1.4 0 0 0 1.28.85h.14a1.65 1.65 0 0 1 0 3.3h-.07a1.4 1.4 0 0 0-1.28.85z"/></symbol>
+    <!-- v1.74:侧栏与翻页退役,只剩「⋯」一个图标按钮 -->
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
   </defs></svg>
 
   <div id="app">
     <header class="chrome">
       <span class="status-pill" id="status" role="status" aria-live="polite" data-i18n="status.blackTurn">黑棋落子</span>
+      <!-- v1.74:侧栏顶上的对阵行并进顶栏 —— 你执哪色、对哪一档,一句话 -->
+      <span class="meta-chip" id="match"></span>
       <span class="meta-chip num" id="clock">00:00</span>
       <span class="spacer"></span>
       <div class="chrome-actions">
         <button type="button" class="tool-btn" id="undo" disabled title="悔棋 (Z)" data-i18n="btn.undo" data-i18n-title="btn.undo.title">悔棋</button>
         <button type="button" class="tool-btn" id="btn-hint" title="提示一手 (H)" data-i18n="btn.hint" data-i18n-title="btn.hint.title">提示</button>
-        <button type="button" class="tool-btn" id="btn-new" title="新局 (N)" data-i18n="btn.new" data-i18n-title="btn.new.title">新局</button>
-        <button type="button" class="icon-btn" id="settings-btn" title="设置" aria-label="设置" data-i18n-title="btn.settings.title" data-i18n-aria="aria.settings"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-settings"/></svg></button>
-        <button type="button" class="icon-btn" id="toggle-panel" title="侧栏 ([ ])" aria-label="侧栏" data-i18n-title="btn.panel.title" data-i18n-aria="aria.panel"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-panel"/></svg></button>
+        <button type="button" class="tool-btn" id="btn-new" title="新局 (N)" aria-haspopup="dialog" aria-expanded="false" data-i18n="btn.new" data-i18n-title="btn.new.title">新局</button>
+        <button type="button" class="icon-btn" id="more-btn" title="更多" aria-label="更多" aria-haspopup="menu" aria-expanded="false" data-i18n-title="btn.more" data-i18n-aria="btn.more"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-more"/></svg><span class="badge more-badge" id="more-badge" hidden></span></button>
       </div>
     </header>
 
-    <div class="scrim" id="scrim"></div>
-    <div class="stage">
+    <!-- v1.74:只剩一块棋盘。棋盘下方一条时间线(代替手数列表与三个翻页按钮);
+         终局卡、重下、复盘、初见一句话都在「坞」里 —— 宽窗口放在棋盘右侧的空白里,
+         窄窗口放在棋盘下方。侧栏整个退役。 -->
+    <div class="stage" id="stage">
       <div id="board-wrap">
         <!-- v1.63:棋盘可聚焦。方向键移动交叉点、Enter 落子、Esc 离开;下面的 live
              region 播报坐标、占用与禁手原因 —— 此前 AX 树里棋盘只是一张图。 -->
@@ -53,181 +51,112 @@
           <span class="swap2-msg" id="swap2-msg" role="status" aria-live="polite"></span>
           <div class="swap2-btns" id="swap2-btns"></div>
         </div>
-        <!-- v1.63.1:终局卡在侧栏里;侧栏收着(窄窗口不自动展开)时,棋盘下沿留一扇门 -->
-        <button type="button" class="end-nudge" id="end-nudge" hidden></button>
+      </div>
+      <div class="timeline" id="timeline-row">
+        <input type="range" id="timeline" min="0" max="0" value="0" step="1" aria-label="手数" data-i18n-aria="aria.timeline" />
+        <!-- v1.74:复盘时,时间线就是局势曲线 —— 同一行长高,失着是线上的红点,点哪儿跳到哪一手 -->
+        <canvas id="review-curve" class="review-curve" role="img"
+                aria-label="评分曲线，逐手优劣；具体失着见下方" data-i18n-aria="aria.reviewCurve"
+                title="点击跳到对应手" data-i18n-title="review.curve.title"></canvas>
+        <span class="timeline-pos num" id="replay-pos">0 / 0</span>
       </div>
     </div>
 
-    <aside class="side" id="side" aria-label="对局面板" data-i18n-aria="aria.side">
-      <!-- 本局摘要：无折叠、无重复主按钮（顶栏已有悔棋/新局） -->
-      <!-- v1.34: the panel itself no longer scrolls; this does. The pinned
-           foot is its sibling, so content cannot pass underneath it — which
-           is why the foot needs no background of its own and shows exactly
-           the panel it lives in. v1.33.0 stacked a second translucent layer
-           there instead and 导入/复制 could be read straight through it. -->
-      <div class="side-scroll" id="side-scroll">
-        <section class="side-head">
-          <div class="vs">
-            <div class="vs-side">
-              <span class="stone black" aria-hidden="true"></span>
-              <div>
-                <div class="vs-name">
-                  <span data-i18n="side.black">黑</span>
-                  <span class="badge" id="black-turn" hidden data-i18n="side.turnBadge">行</span>
-                </div>
-                <div class="vs-role muted" id="black-role" data-i18n="role.you">你</div>
-              </div>
-            </div>
-            <div class="vs-side vs-right">
-              <div>
-                <div class="vs-name">
-                  <span class="badge" id="white-turn" hidden data-i18n="side.turnBadge">行</span>
-                  <span data-i18n="side.white">白</span>
-                </div>
-                <div class="vs-role muted" id="white-role" data-i18n="role.computer">电脑</div>
-              </div>
-              <span class="stone white" aria-hidden="true"></span>
-            </div>
-          </div>
-          <div class="side-meta">
-            <!-- v1.64:手数与用时只在顶栏写一次(此前顶栏、这里、棋谱表头、状态胶囊四处) -->
-            <div class="meta-stats">
-              <span id="info-mode"></span>
-            </div>
-          </div>
-        </section>
-
-        <!-- v1.63:终局总结卡。不弹层、不挡棋盘;一句结果、一个值得记住的地方、
-             最多三个关键手,主行动「重下关键一手」,次行动「再来一局」。 -->
-        <section class="end-card" id="end-card" hidden aria-live="polite">
-          <div class="end-card-head">
-            <strong id="end-card-title"></strong>
-            <button type="button" class="text-link end-card-x" id="end-card-close" aria-label="收起" data-i18n-aria="endcard.close" title="收起" data-i18n-title="endcard.close">×</button>
-          </div>
-          <div id="end-card-body" class="end-card-body"></div>
-          <div class="end-card-actions">
-            <button type="button" class="tool-btn primary" id="end-card-retry" hidden data-i18n="endcard.retryBtn">重下</button>
-            <button type="button" class="tool-btn" id="end-card-back" hidden data-i18n="retry.backBtn">回到原局</button>
-            <button type="button" class="tool-btn" id="end-card-review" data-i18n="endcard.review">看复盘</button>
-            <button type="button" class="tool-btn" id="end-card-again" hidden data-i18n="endcard.retryAgain">再试一次</button>
-          </div>
-        </section>
-
-        <!-- v1.63:重下关键一手进行中。原局一手不改地存着,随时回去。 -->
-        <div class="retry-bar" id="retry-bar" hidden role="status">
-          <span id="retry-msg"></span>
-          <button type="button" class="text-link" id="retry-back" data-i18n="retry.backBtn">回到原局</button>
-        </div>
-
-        <section class="side-section">
-          <h2 class="side-h" data-i18n="sec.game">对局</h2>
-          <div class="setting-list">
-            <div class="setting-row" id="mode-field">
-              <span class="setting-k" data-i18n="set.mode">模式</span>
-              <div class="pill" id="mode-seg" role="group" aria-label="模式" data-i18n-aria="aria.mode">
-                <button type="button" data-mode="ai" class="active" data-i18n="mode.ai">人机</button>
-                <button type="button" data-mode="pvp" data-i18n="mode.pvp">双人</button>
-              </div>
-            </div>
-            <div class="setting-row" id="diff-field">
-              <span class="setting-k" data-i18n="set.difficulty">难度</span>
-              <div class="pill" id="diff-seg" role="group" aria-label="难度" data-i18n-aria="aria.difficulty">
-                <button type="button" data-diff="easy" title="入门：会挡住你的冲四，但常常漏掉活三——给你做杀的机会" data-i18n="diff.easy" data-i18n-title="diff.easy.title">简</button>
-                <button type="button" data-diff="normal" class="active" title="普通：必挡直接威胁，会算连续冲四，也会用棋型组织进攻；每手约 0.4 秒" data-i18n="diff.normal" data-i18n-title="diff.normal.title">普</button>
-                <button type="button" data-diff="hard" title="困难：看得懂四三、双三的棋型引擎，会做杀、会防杀，每手约 2 秒" data-i18n="diff.hard" data-i18n-title="diff.hard.title">难</button>
-                <button type="button" data-diff="extreme" title="极限：与困难同一套搜索，多给两倍半的时间——实测明显强于困难；难局最多算 5–8 秒" data-i18n="diff.extreme" data-i18n-title="diff.extreme.title">极</button>
-              </div>
-            </div>
-            <div class="setting-row" id="think-field" hidden>
-              <span class="setting-k" data-i18n="set.think">思考</span>
-              <div class="pill" id="think-seg" role="group" aria-label="困难思考时间" data-i18n-aria="aria.think">
-                <button type="button" data-think="fast" title="约 0.8 秒" data-i18n="think.fast" data-i18n-title="think.fast.hard.title">快</button>
-                <button type="button" data-think="normal" class="active" title="约 2 秒" data-i18n="think.normal" data-i18n-title="think.normal.hard.title">标</button>
-                <button type="button" data-think="deep" title="约 3.5 秒" data-i18n="think.deep" data-i18n-title="think.deep.hard.title">深</button>
-              </div>
-            </div>
-            <div class="setting-row" id="color-field">
-              <span class="setting-k" data-i18n="set.color">执子</span>
-              <div class="pill" id="color-seg" role="group" aria-label="执子" data-i18n-aria="aria.color">
-                <button type="button" data-human="b" class="active" data-i18n="side.black">黑</button>
-                <button type="button" data-human="w" data-i18n="side.white">白</button>
-                <button type="button" data-human="alt" title="每一局交换执子：一局你先手，一局电脑先手" data-i18n="color.alt" data-i18n-title="color.alt.title">轮流</button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-
-        <section class="side-section grow-sec">
-          <div class="side-h-row">
-            <h2 class="side-h" data-i18n="sec.record">棋谱</h2>
-            <span class="side-h-meta num" id="replay-pos">0 / 0</span>
-          </div>
-          <div class="move-list" id="move-list" aria-label="手数列表" data-i18n-aria="aria.moveList"></div>
-          <!-- 一手未落时手数列表是空的。v1.51 之前这块地方被外观设置占着,
-               搬走之后不给它一句话就是一片死白 —— 而这句话正好把「点它可跳转」
-               这件事说出来(此前只有整局复盘面板里写着)。 -->
-          <!-- v1.64:初见一句话。只在第一次启动出现:点棋盘就是「下一局」,另一个选择是先做
-               今天的题。落第一子、点题、点 × 任一件事之后就不再出现。v1.68 从棋盘上挪到这里 ——
-               此前它压着棋盘最下面一行格线;第一次打开时棋谱区是空的,正好是它的位置。 -->
-          <div class="welcome-bar" id="welcome-bar" hidden role="note">
-            <span data-i18n="welcome.msg">点棋盘就开始一局，或者</span>
-            <button type="button" class="tool-btn primary" id="welcome-daily" data-i18n="welcome.daily">先做今天的 5 道题</button>
-            <button type="button" class="text-link welcome-x" id="welcome-close" aria-label="收起" title="收起" data-i18n-aria="endcard.close" data-i18n-title="endcard.close">×</button>
-          </div>
-          <p class="move-empty" id="move-empty" data-i18n="record.empty">落子后这里逐手列出，点任意一手可跳转</p>
-          <div class="replay-bar" id="replay-seg">
-            <button type="button" id="rep-prev" title="上一手 (←)" data-i18n-title="rep.prev.title" aria-label="上一手" data-i18n-aria="aria.repPrev"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-prev"/></svg></button>
-            <button type="button" id="rep-live" disabled title="回到最新" data-i18n-title="rep.live.title" aria-label="回到最新" data-i18n-aria="aria.repLive"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-live"/></svg></button>
-            <button type="button" id="rep-next" title="下一手 (→)" data-i18n-title="rep.next.title" aria-label="下一手" data-i18n-aria="aria.repNext"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-next"/></svg></button>
-          </div>
-          <!-- v1.64:复盘只有这一个面。v1.63 时它是弹层(曲线 + 总览)与这里(跟着查看的
-               那一手走)两处,用户得先知道那条隐含分工。现在曲线、失着、解释、重下 / 练 /
-               推演 / 导出都在这里;弹层退役。只有静态分差的「局势波动」默认折叠。 -->
-          <section class="review-side" id="review-side" hidden aria-label="复盘面板" data-i18n-aria="review.side.aria">
-            <div class="review-side-head">
-              <span class="side-h" data-i18n="review.side.title">复盘</span>
-              <span class="review-stat muted" id="review-stat"></span>
-              <span class="spacer"></span>
-              <button type="button" class="text-link" id="review-export" title="导出带评注 SGF" data-i18n="review.side.export" data-i18n-title="review.exportSgf">导出</button>
-              <button type="button" class="text-link" id="review-side-close" data-i18n="dlg.close">关闭</button>
-            </div>
-            <canvas id="review-curve" class="review-curve" role="img"
-                    aria-label="评分曲线，逐手优劣；具体失着见下方" data-i18n-aria="aria.reviewCurve"
-                    title="点击跳到对应手" data-i18n-title="review.curve.title"></canvas>
-            <p class="review-hint" id="review-progress" hidden data-i18n="review.deepening">引擎正在逐条比较失着…</p>
-            <!-- v1.56:禁手档下曲线仍按无禁手估(实测黑方 3.5% 的手偏乐观),说在它旁边 -->
-            <p class="review-hint" id="review-renju-note" hidden data-i18n="review.renjuNote">禁手档：胜负判定与更优点已按规则算；优劣曲线仍按无禁手估，黑方略偏乐观</p>
-            <div class="review-chips" id="review-side-chips"></div>
-            <div class="review-explain" id="review-side-explain"></div>
-            <div class="review-side-actions" id="review-side-actions" hidden>
-              <button type="button" class="tool-btn primary" id="review-side-retry" data-i18n="review.side.retry">重下这一手</button>
-              <button type="button" class="tool-btn" id="review-side-practice" data-i18n="review.side.practice">练这一手</button>
-              <button type="button" class="tool-btn" id="review-side-pv" title="从这一手起，引擎推演后续着法（虚影）" data-i18n="review.side.pv" data-i18n-title="review.pv.title">推演</button>
-            </div>
-          </section>
-          <button type="button" class="continue-btn" id="sgf-continue" hidden title="从导入局面继续对局" data-i18n="sgf.continue" data-i18n-title="sgf.continue.title">续下</button>
-        </section>
-
-        <!-- One rule decides what lives here: entries that OPEN something get
-             pinned, actions that operate on the current game (复制/导出/导入/粘贴)
-             stay with 棋谱 above. The foot is sticky, so these five are reachable
-             at any window height — 1280×720 used to bury 存档/复盘 below the fold. -->
+    <div class="dock" id="dock">
+      <div class="welcome-bar" id="welcome-bar" hidden role="note">
+        <span data-i18n="welcome.msg">点棋盘就开始一局，或者</span>
+        <button type="button" class="tool-btn primary" id="welcome-daily" data-i18n="welcome.daily">先做今天的 5 道题</button>
       </div>
-      <!-- v1.64:学习是这款产品的定位,它的入口却曾是侧栏最底下五个同样大小的小字。
-           现在分两层:复盘 / 练习 / 每日是按钮,与「新局」同一套控件;存档与统计是
-           「看过去」的,留作文字链接。每日的到期数是一枚徽标,不再是字后面的一个数字。 -->
-      <div class="side-foot">
-        <div class="learn-row">
-          <button type="button" class="tool-btn learn-btn" id="sgf-review" title="复盘：曲线、失着与解释" data-i18n="sgf.review" data-i18n-title="sgf.review.title">复盘</button>
-          <!-- v1.70:「每日」并进「练习」—— 今天的 5 题还没做时,点「练习」先看到它们;弹层里「今日」一格随时切回 -->
-          <button type="button" class="tool-btn learn-btn" id="open-practice" title="练习：今天的 5 题、找制胜一手 / 找防守点" data-i18n-title="foot.practice.title"><span data-i18n="foot.practice">练习</span><span class="badge learn-badge" id="daily-badge" hidden></span></button>
+      <section class="end-card" id="end-card" hidden aria-live="polite">
+        <div class="end-card-head">
+          <strong id="end-card-title"></strong>
+          <button type="button" class="text-link end-card-x" id="end-card-close" aria-label="收起" data-i18n-aria="endcard.close" title="收起" data-i18n-title="endcard.close">×</button>
         </div>
-        <div class="foot-links">
-          <button type="button" class="text-link" id="sgf-slots" title="命名存档与历史对局" data-i18n="sgf.slots" data-i18n-title="sgf.slots.title">存档</button>
+        <div id="end-card-body" class="end-card-body"></div>
+        <div class="end-card-actions">
+          <button type="button" class="tool-btn primary" id="end-card-retry" hidden data-i18n="endcard.retryBtn">重下</button>
+          <button type="button" class="tool-btn" id="end-card-back" hidden data-i18n="retry.backBtn">回到原局</button>
+          <button type="button" class="tool-btn" id="end-card-review" data-i18n="endcard.review">看复盘</button>
+          <button type="button" class="tool-btn" id="end-card-again" hidden data-i18n="endcard.retryAgain">再试一次</button>
+        </div>
+      </section>
+      <div class="retry-bar" id="retry-bar" hidden role="status">
+        <span id="retry-msg"></span>
+        <button type="button" class="text-link" id="retry-back" data-i18n="retry.backBtn">回到原局</button>
+      </div>
+      <section class="review-side" id="review-side" hidden aria-label="复盘面板" data-i18n-aria="review.side.aria">
+        <div class="review-side-head">
+          <span class="side-h" data-i18n="review.side.title">复盘</span>
+          <span class="review-stat muted" id="review-stat"></span>
+          <span class="spacer"></span>
+          <button type="button" class="text-link" id="review-export" title="导出带评注 SGF" data-i18n="review.side.export" data-i18n-title="review.exportSgf">导出</button>
+          <button type="button" class="text-link" id="review-side-close" data-i18n="dlg.close">关闭</button>
+        </div>
+        <p class="review-hint" id="review-progress" hidden data-i18n="review.deepening">引擎正在逐条比较失着…</p>
+        <!-- v1.56:禁手档下曲线仍按无禁手估(实测黑方 3.5% 的手偏乐观),说在它旁边 -->
+        <p class="review-hint" id="review-renju-note" hidden data-i18n="review.renjuNote">禁手档：胜负判定与更优点已按规则算；优劣曲线仍按无禁手估，黑方略偏乐观</p>
+        <div class="review-chips" id="review-side-chips"></div>
+        <div class="review-explain" id="review-side-explain"></div>
+        <div class="review-side-actions" id="review-side-actions" hidden>
+          <button type="button" class="tool-btn primary" id="review-side-retry" data-i18n="review.side.retry">重下这一手</button>
+          <button type="button" class="tool-btn" id="review-side-practice" data-i18n="review.side.practice">练这一手</button>
+          <button type="button" class="tool-btn" id="review-side-pv" title="从这一手起，引擎推演后续着法（虚影）" data-i18n="review.side.pv" data-i18n-title="review.pv.title">推演</button>
+        </div>
+      </section>
+      <button type="button" class="continue-btn" id="sgf-continue" hidden title="从导入局面继续对局" data-i18n="sgf.continue" data-i18n-title="sgf.continue.title">续下</button>
+    </div>
+
+    <!-- v1.74:「新局」是一张小卡片:对手 · 难度 · 执子(困难 / 极限另有思考时长)。
+         选择先记在卡片里,点「开始」或回车才生效 —— 对局中改模式不再是一次确认弹窗。 -->
+    <div class="popover" id="new-sheet" role="dialog" aria-modal="false" aria-labelledby="new-sheet-title" hidden>
+      <h3 class="popover-h" id="new-sheet-title" data-i18n="btn.new">新局</h3>
+      <div class="setting-list">
+        <div class="setting-row" id="mode-field">
+          <span class="setting-k" data-i18n="set.mode">模式</span>
+          <div class="pill" id="mode-seg" role="group" aria-label="模式" data-i18n-aria="aria.mode">
+            <button type="button" data-mode="ai" class="active" data-i18n="mode.ai">人机</button>
+            <button type="button" data-mode="pvp" data-i18n="mode.pvp">双人</button>
+          </div>
+        </div>
+        <div class="setting-row" id="diff-field">
+          <span class="setting-k" data-i18n="set.difficulty">难度</span>
+          <div class="pill" id="diff-seg" role="group" aria-label="难度" data-i18n-aria="aria.difficulty">
+            <button type="button" data-diff="easy" title="入门：会挡住你的冲四，但常常漏掉活三——给你做杀的机会" data-i18n="diff.easy" data-i18n-title="diff.easy.title">简</button>
+            <button type="button" data-diff="normal" class="active" title="普通：必挡直接威胁，会算连续冲四，也会用棋型组织进攻；每手约 0.4 秒" data-i18n="diff.normal" data-i18n-title="diff.normal.title">普</button>
+            <button type="button" data-diff="hard" title="困难：看得懂四三、双三的棋型引擎，会做杀、会防杀，每手约 2 秒" data-i18n="diff.hard" data-i18n-title="diff.hard.title">难</button>
+            <button type="button" data-diff="extreme" title="极限：与困难同一套搜索，多给两倍半的时间——实测明显强于困难；难局最多算 5–8 秒" data-i18n="diff.extreme" data-i18n-title="diff.extreme.title">极</button>
+          </div>
+        </div>
+        <div class="setting-row" id="think-field" hidden>
+          <span class="setting-k" data-i18n="set.think">思考</span>
+          <div class="pill" id="think-seg" role="group" aria-label="困难思考时间" data-i18n-aria="aria.think">
+            <button type="button" data-think="fast" title="约 0.8 秒" data-i18n="think.fast" data-i18n-title="think.fast.hard.title">快</button>
+            <button type="button" data-think="normal" class="active" title="约 2 秒" data-i18n="think.normal" data-i18n-title="think.normal.hard.title">标</button>
+            <button type="button" data-think="deep" title="约 3.5 秒" data-i18n="think.deep" data-i18n-title="think.deep.hard.title">深</button>
+          </div>
+        </div>
+        <div class="setting-row" id="color-field">
+          <span class="setting-k" data-i18n="set.color">执子</span>
+          <div class="pill" id="color-seg" role="group" aria-label="执子" data-i18n-aria="aria.color">
+            <button type="button" data-human="b" class="active" data-i18n="side.black">黑</button>
+            <button type="button" data-human="w" data-i18n="side.white">白</button>
+            <button type="button" data-human="alt" title="每一局交换执子：一局你先手，一局电脑先手" data-i18n="color.alt" data-i18n-title="color.alt.title">轮流</button>
+          </div>
         </div>
       </div>
-    </aside>
+      <div class="popover-actions">
+        <button type="button" class="tool-btn primary" id="new-start" data-i18n="newsheet.start">开始</button>
+      </div>
+    </div>
+
+    <!-- v1.74:其余入口收进「⋯」。到期题数的徽标挂在「⋯」上。 -->
+    <div class="popover menu" id="more-menu" role="menu" hidden>
+      <button type="button" class="menu-item" role="menuitem" id="sgf-review" data-i18n="sgf.review">复盘</button>
+      <button type="button" class="menu-item" role="menuitem" id="open-practice"><span data-i18n="foot.practice">练习</span><span class="badge learn-badge" id="daily-badge" hidden></span></button>
+      <button type="button" class="menu-item" role="menuitem" id="sgf-slots" data-i18n="sgf.slots">存档</button>
+      <button type="button" class="menu-item" role="menuitem" id="settings-btn" data-i18n="menu.settings">设置</button>
+      <button type="button" class="menu-item" role="menuitem" id="open-help"><span data-i18n="menu.help">快捷键</span><kbd>?</kbd></button>
+    </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
@@ -291,9 +220,8 @@
               </button>
             </div>
         </div>
-        <!-- v1.71:快捷键从顶栏挪到这里(按 ? 仍直接打开)—— 一年用不了几次的东西不和「新局」并排常驻 -->
-        <div class="close-row" style="display:flex;gap:8px;justify-content:space-between;align-items:center">
-          <button type="button" class="text-link" id="open-help" data-i18n="help.title">快捷键</button>
+        <!-- v1.74:快捷键挪进「⋯」(按 ? 仍直接打开) -->
+        <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
           <button type="button" class="tool-btn primary" id="settings-close" data-i18n="dlg.done">完成</button>
         </div>
       </div>
@@ -308,7 +236,6 @@
           <tr><td data-i18n="help.kb">棋盘聚焦 · 方向键</td><td data-i18n="help.kb.d">方向键移动交叉点，Enter 落子，Esc 离开；播报坐标与禁手</td></tr>
           <tr><td data-i18n="help.undo">Z / ⌘Z</td><td data-i18n="help.undo.d">悔棋（以本应用为准）</td></tr>
           <tr><td data-i18n="help.new">N / ⌘N</td><td data-i18n="help.new.d">新局</td></tr>
-          <tr><td data-i18n="help.panel">[ ]</td><td data-i18n="help.panel.d">切换 / 收起 / 展开侧栏</td></tr>
           <tr><td data-i18n="help.modes">⌘1 / ⌘2</td><td data-i18n="help.modes.d">双人 / 人机（确认后新局）</td></tr>
           <tr><td data-i18n="help.sgf">棋谱</td><td data-i18n="help.sgf.d">「记录」里复制 / 导出 / 导入 / 粘贴 SGF；也可把 .sgf 直接拖进窗口；导入后可「续下」</td></tr>
           <tr><td data-i18n="help.fullscreen">⌘⌃F</td><td data-i18n="help.fullscreen.d">系统全屏 / 窗口 Zoom / 提示入口</td></tr>

@@ -428,7 +428,9 @@
         const head = document.createElement("div");
         head.className = "rs-head";
         const who = t(info.color === "b" ? "side.black" : "side.white");
-        head.textContent = t("review.blunderRow", { n: info.i, color: who }) + " · " + info.reason;
+        // v1.74(B10):「第 11 手」不从数字后面断开
+        head.textContent = (t("review.blunderRow", { n: info.i, color: who }) + " · " + info.reason)
+          .replace(/\u7b2c (\d+) \u624b/g, "\u7b2c\u00a0$1\u00a0\u624b").replace(/\b(move|Move) (\d+)/g, "$1\u00a0$2");
         const tier = document.createElement("span");
         tier.className = "rb-tier";
         tier.textContent = info.label;

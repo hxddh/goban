@@ -143,11 +143,7 @@ async function answerRound(expectAllCorrect) {
 
 // ---- Test 1: open daily → titled, 5 questions, snapshot stored ----
 {
-  // "]" is idempotent (setPanelOpen(true)); #toggle-panel flips, and since
-  // v1.33 a fresh profile starts with the panel already open.
-  await page.keyboard.press("]");
-  await page.waitForTimeout(120);
-  await page.click("#open-practice"); // v1.70:今天的题没做时,「练习」先给每日
+  await page.click("#more-btn"); await page.click("#open-practice"); // v1.74:入口在「⋯」里 // v1.70:今天的题没做时,「练习」先给每日
   await page.waitForTimeout(200);
   const title = await modalText("practice-title");
   const prog = await modalText("practice-progress");
@@ -176,7 +172,7 @@ async function answerRound(expectAllCorrect) {
   await page.click("#practice-close");
   await page.waitForTimeout(80);
   // v1.70:做完之后「练习」给的是自由练习;每日在弹层里「今日」一格
-  await page.click("#open-practice");
+  await page.click("#more-btn"); await page.click("#open-practice"); // v1.74:入口在「⋯」里
   await page.waitForTimeout(150);
   const freeTitle = await modalText("practice-title");
   await page.click('#practice-skill [data-skill="daily"]');
@@ -207,7 +203,7 @@ async function answerRound(expectAllCorrect) {
 
 // ---- Test 5: stats panel shows the daily line (no finished games yet) ----
 {
-  await page.click("#sgf-slots"); // v1.71:战绩并进「记录」
+  await page.click("#more-btn"); await page.click("#sgf-slots"); // v1.74:入口在「⋯」里 // v1.71:战绩并进「记录」
   await page.waitForTimeout(120);
   const body = await modalText("stats-body");
   const emptyHidden = await page.evaluate(
@@ -221,7 +217,7 @@ async function answerRound(expectAllCorrect) {
 
 // ---- Test 6: free practice untouched (own title, own round) ----
 {
-  await page.click("#open-practice");
+  await page.click("#more-btn"); await page.click("#open-practice"); // v1.74:入口在「⋯」里
   await page.waitForTimeout(150);
   const title = await modalText("practice-title");
   const prog = await modalText("practice-progress");
@@ -235,7 +231,7 @@ async function answerRound(expectAllCorrect) {
 // ---- Test 7: 错题本 — a missed puzzle is collected, and leaves once solved ----
 {
   await page.evaluate(() => localStorage.removeItem("goban.v12.practice"));
-  await page.click("#open-practice");
+  await page.click("#more-btn"); await page.click("#open-practice"); // v1.74:入口在「⋯」里
   await page.waitForTimeout(250);
 
   // answer the current puzzle wrong (a far corner is never the solution)
