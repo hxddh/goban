@@ -1315,6 +1315,10 @@
       background: color-mix(in srgb, var(--accent) 32%, transparent);
     }
     .review-explain { font-size: var(--fs-ui); line-height: var(--lh-text); color: var(--text); }
+    /* v1.73:按词均衡换行,关键一句不再单字掉到下一行 */
+    .end-card-body, .review-explain, .rs-head { text-wrap: balance; }
+    /* v1.73:在最新一手时「回到最新」「下一手」不显示,位置保留 */
+    #replay-seg.at-live #rep-live, #replay-seg.at-live #rep-next { visibility: hidden; }
     .rs-head { font-weight: 600; font-size: var(--fs-body); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
     .rs-lines { margin: 6px 0 0; padding-left: 18px; }
     .rs-lines li { margin: 2px 0; }
