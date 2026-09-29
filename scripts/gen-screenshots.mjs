@@ -78,8 +78,6 @@ async function fresh() {
   });
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(400);
-  await page.keyboard.press("]");
-  await page.waitForTimeout(200);
   return page;
 }
 
@@ -138,7 +136,7 @@ async function play(page, r, c) {
   console.log("✓ board.png");
 
   for (const th of ["wood", "night", "day", "notebook"]) {
-    await page.click("#settings-btn"); await page.waitForTimeout(350);
+    await page.click("#more-btn"); await page.click("#settings-btn"); await page.waitForTimeout(350); // v1.74:设置在「⋯」里
     await page.click(`#theme-seg button[data-theme="${th}"]`); await page.waitForTimeout(300);
     await page.keyboard.press("Escape"); await page.waitForTimeout(500);
     await page.mouse.move(5, 5); await page.waitForTimeout(300);
@@ -156,7 +154,7 @@ async function play(page, r, c) {
   const sloppy = [[7, 7], [2, 2], [12, 12], [2, 12], [12, 2], [0, 7], [14, 7], [7, 0], [7, 14], [0, 0]];
   for (const [r, c] of sloppy) if ((await play(page, r, c)) === "over") break;
   await page.evaluate(() => document.getElementById("sgf-review").click());
-  // v1.64:复盘是侧栏面板。等引擎比较跑完(进度那一行消失)再拍
+  // v1.74:复盘是棋盘旁的卡片 + 时间线那一行的曲线。等引擎比较跑完(进度那一行消失)再拍
   let txt = "";
   for (let i = 0; i < 100; i++) {
     await page.waitForTimeout(250);
