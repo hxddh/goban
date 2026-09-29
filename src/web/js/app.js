@@ -22,11 +22,15 @@
   const WIN = Core.WIN;
   const SAVE_KEY = "goban.v12.save";
   const SETTINGS_KEY = "goban.v11.settings";
-  const PANEL_KEY = "goban.panelOpen";
 
   const canvas = document.getElementById("board");
   const ctx = canvas.getContext("2d");
   const appEl = document.getElementById("app");
+  // v1.74:「新局」卡片与「⋯」菜单(接线在 wireMenus)
+  const sheetEl = document.getElementById("new-sheet");
+  const menuEl = document.getElementById("more-menu");
+  /** 卡片里还没生效的选择;null = 卡片关着(四格显示偏好)。 */
+  let sheet = null;
   const THEMES = Draw.THEMES;
 
   function emptyBoard() { return Core.emptyBoard(); }
@@ -442,8 +446,6 @@
     clearHint();
     clearVariation();
     sync();
-    // 复盘面板打开时棋谱只剩几行高;跳到哪一手,棋谱就得跟到哪一手
-    scrollMoveListToCurrent();
   }
 
   function goLive() {
@@ -948,7 +950,13 @@
     Review.setSideOpen(true);
     Review.compute();
     startDeepen();
-    if (!isPanelOpen()) setPanelOpen(true);
+    // v1.74(B11):打开复盘就停在最值得看的那一手,解释直接在 —— 此前面板里只有
+    // 一枚手数和一句「点上面的手数看解释」,整局只有一手失着也要再点一下
+    if (!Review.explain(viewIndex)) {
+      const focus = mode === "ai" ? humanColor : (result === "b" ? "w" : result === "w" ? "b" : null);
+      const key = Review.keyMoves(focus)[0] || Review.keyMoves(null)[0];
+      if (key) { setViewIndex(key.i); return; }
+    }
     sync();
   }
 
@@ -1127,13 +1135,17 @@
     if (msg) msg.textContent = t("retry.bar", { n: retry.ply, who: t(humanColor === "b" ? "side.black" : "side.white") });
   }
 
+  /** v1.74(B10):「第 11 手」「move 11」内部用不断行空格粘住,换行不会把数字和「手」拆开 */
+  function glueMove(text) {
+    return String(text).replace(/\u7b2c (\d+) \u624b/g, "\u7b2c\u00a0$1\u00a0\u624b").replace(/\b(move|Move) (\d+)/g, "$1\u00a0$2");
+  }
+
   // --- v1.63: 终局总结卡 ---
   let endCardOn = false;
   function showEndCard() {
     endCardOn = true;
     Review.compute();
     startDeepen();
-    if (!isPanelOpen() && window.innerWidth >= 900) setPanelOpen(true);
     syncEndCard();
   }
   function hideEndCard() { endCardOn = false; syncEndCard(); }
@@ -1143,7 +1155,6 @@
     if (!card) return;
     const show = endCardOn && result !== "play" && history.length > 0;
     card.hidden = !show;
-    syncEndNudge();
     if (!show) return;
     const title = document.getElementById("end-card-title");
     const body = document.getElementById("end-card-body");
@@ -1178,7 +1189,7 @@
         const info = Review.explain(key.i);
         const p = document.createElement("div");
         p.className = "endcard-key";
-        p.textContent = t("endcard.key", { n: key.i, color: t(key.color === "b" ? "side.black" : "side.white"), reason: key.reason });
+        p.textContent = glueMove(t("endcard.key", { n: key.i, color: t(key.color === "b" ? "side.black" : "side.white"), reason: key.reason }));
         body.appendChild(p);
         if (info && info.lines.length) {
           const q = document.createElement("div");
@@ -1205,19 +1216,6 @@
     if (againBtn) againBtn.hidden = !retry;
   }
 
-  /**
-   * 终局卡住在侧栏里。窗口窄于 900 时侧栏不自动展开(展开就是一层盖住棋盘的抽屉),
-   * 于是 v1.63 的整条学习闭环在窄窗口下没有入口:一局下完只剩状态胶囊里的「白棋胜」。
-   * 侧栏收着时,在棋盘下沿放一扇门;侧栏一开,门就撤。
-   */
-  function syncEndNudge() {
-    const el = document.getElementById("end-nudge");
-    if (!el) return;
-    const card = document.getElementById("end-card");
-    const show = !!card && !card.hidden && !isPanelOpen();
-    el.hidden = !show;
-    if (show) el.textContent = t("endcard.nudge", { head: document.getElementById("end-card-title").textContent });
-  }
 
   // --- v1.64: 初见一句话 ---
   let welcomeOn = false;
@@ -1236,8 +1234,6 @@
   }
 
   function wireEndCard() {
-    const nudge = document.getElementById("end-nudge");
-    if (nudge) nudge.onclick = () => { setPanelOpen(true); };
     const retryBtn = document.getElementById("end-card-retry");
     if (retryBtn) retryBtn.onclick = () => { startRetry(Number(retryBtn.dataset.ply)); };
     const backBtn = document.getElementById("end-card-back");
@@ -1308,7 +1304,6 @@
       startDeepen();
     }
     setViewIndex(typeof ply === "number" ? Math.max(0, Math.min(ply, history.length)) : history.length);
-    if (!resume && !isPanelOpen()) setPanelOpen(true);
     saveGame();
     toast(t(resume ? "games.resumed" : "games.opened"));
     if (resume) maybeAiTurn();
@@ -1365,6 +1360,9 @@
     badge.hidden = !n;
     badge.textContent = n ? String(n) : "";
     badge.setAttribute("aria-label", n ? t("foot.daily.due", { n: n }) : "");
+    // v1.74:「练习」收进「⋯」,到期数同时挂在「⋯」上 —— 菜单关着也看得见
+    const more = document.getElementById("more-badge");
+    if (more) { more.hidden = !n; more.textContent = n ? String(n) : ""; }
   }
 
   // --- v1.63: 键盘落子 ---
@@ -1421,68 +1419,6 @@
   canvas.addEventListener("blur", () => { kbCursor = null; kbCell = null; if (hoverCell) { hoverCell = null; draw(); } });
   canvas.addEventListener("focus", () => { announce(t("kb.focus")); });
 
-  let panelAnimUntil = 0;
-  let panelAnimActive = false;
-
-  function isPanelOpen() {
-    return appEl.classList.contains("panel-open");
-  }
-
-  function setPanelOpen(open) {
-    const want = !!open;
-    const was = isPanelOpen();
-    appEl.classList.toggle("panel-open", want);
-    appEl.classList.toggle("scrim-on", want && window.innerWidth < 900);
-    Host.storageSet(PANEL_KEY, want ? "1" : "0");
-    // Keep closed sidebar out of tab order / a11y tree (also stops focus-driven reveals).
-    const side = document.getElementById("side");
-    if (side) {
-      if (want) {
-        side.removeAttribute("inert");
-        side.setAttribute("aria-hidden", "false");
-      } else {
-        side.setAttribute("inert", "");
-        side.setAttribute("aria-hidden", "true");
-        // Drop focus that may sit on a control inside the off-screen panel.
-        if (side.contains(document.activeElement) && document.activeElement.blur) {
-          document.activeElement.blur();
-        }
-      }
-    }
-    syncEndNudge();
-    // Follow the .28s CSS layout transition frame-by-frame, then settle —
-    // a single mid-transition resize left the canvas at a stale size.
-    panelAnimUntil = performance.now() + 340;
-    if (!panelAnimActive) {
-      panelAnimActive = true;
-      const tick = () => {
-        resizeCanvas();
-        draw();
-        if (performance.now() < panelAnimUntil) requestAnimationFrame(tick);
-        else {
-          panelAnimActive = false;
-          // After open animation, scroll move list without using scrollIntoView on page.
-          if (want) scrollMoveListToCurrent();
-          syncScrollEdges();
-        }
-      };
-      requestAnimationFrame(tick);
-    } else if (want && !was) {
-      // Already animating; still schedule list scroll after settle.
-      setTimeout(() => {
-        if (isPanelOpen()) scrollMoveListToCurrent();
-      }, 320);
-    }
-  }
-
-  function togglePanel() {
-    setPanelOpen(!isPanelOpen());
-  }
-
-  function scrollMoveListToCurrent() {
-    if (!isPanelOpen()) return;
-    Ui.scrollMoveListToCurrent();
-  }
 
   Draw.attach(canvas, ctx, () => ({
     board: board,
@@ -1502,6 +1438,45 @@
   }));
 
   function resizeCanvas() { Draw.resizeCanvas(); }
+
+  /**
+   * v1.74:坞(终局卡 / 重下 / 复盘 / 初见一句话)放在哪。棋盘在横向窗口里是被高度限住的,
+   * 左右各空着一大块 —— 放得下就放在棋盘右侧的空白里,棋盘不动;放不下(窄窗口、竖窗口)
+   * 就放在棋盘下方,棋盘让出坞的高度。
+   */
+  const DOCK_W = 280;
+  let dockAnimUntil = 0;
+  let dockAnimActive = false;
+  function layoutDock() {
+    const dock = document.getElementById("dock");
+    const side = window.innerWidth - window.innerHeight >= 2 * DOCK_W - 80;
+    appEl.classList.toggle("dock-side", side);
+    const empty = !dock || ![...dock.children].some((c) => !c.hidden);
+    appEl.classList.toggle("dock-empty", empty);
+    const h = side || empty ? 0 : Math.ceil(dock.getBoundingClientRect().height);
+    const prev = document.documentElement.style.getPropertyValue("--dock-h");
+    document.documentElement.style.setProperty("--dock-h", h + "px");
+    // 棋盘尺寸带 .28s 过渡:逐帧跟着重画,停下再定一次(一次性 resize 会停在半路的尺寸)
+    if (prev === h + "px" && dockAnimActive) return;
+    dockAnimUntil = performance.now() + 340;
+    if (dockAnimActive) return;
+    dockAnimActive = true;
+    const tick = () => {
+      resizeCanvas();
+      draw();
+      if (performance.now() < dockAnimUntil) requestAnimationFrame(tick);
+      else dockAnimActive = false;
+    };
+    requestAnimationFrame(tick);
+  }
+  if (typeof ResizeObserver !== "undefined") {
+    let lastDockH = -1;
+    new ResizeObserver(() => {
+      const d = document.getElementById("dock");
+      const h = d ? Math.ceil(d.getBoundingClientRect().height) : 0;
+      if (h !== lastDockH) { lastDockH = h; layoutDock(); }
+    }).observe(document.getElementById("dock"));
+  }
   function cellAt(x, y) { return Draw.cellAt(x, y); }
   function draw() { Draw.draw(); }
   function ensureAnimLoop() { Draw.ensureAnimLoop(); }
@@ -1917,15 +1892,6 @@
     maybeAiTurn();
   }
 
-  /** Sidebar move list: rebuilt when moves change, highlight follows view. */
-  let mlSig = "";
-  function renderMoveList() {
-    Ui.renderMoveList(history, viewIndex, gameGen);
-    // Only adjust scroll when the panel is actually open. scrollIntoView on an
-    // off-screen (translateX(100%)) button makes WKWebView yank the sidebar
-    // partially into view every move — the "auto pop incomplete panel" bug.
-    if (isPanelOpen()) scrollMoveListToCurrent();
-  }
 
   /** Static text for the first second, then a live count so a long 极限 think
    *  reads as progress rather than a hang. 实测极档中位每手只有 10ms，但预算内
@@ -1948,15 +1914,6 @@
     }
   }
 
-  /**
-   * 模式 / 执子 / 规则只在**开局态**出现;难度常驻。
-   *
-   * 依据不是审美,是这三个控件的既有行为:对局中改它们**本来就会弹确认再
-   * reset() 重开一局**(mode-seg / color-seg / rule-seg 三个 onclick 都是
-   * confirm → reset)。它们是「开新局」动作,只是长得像设置,所以放进开局态
-   * 不损失任何能力。难度是唯一真正的对局中设置 —— 立即生效、不重开 ——
-   * 留下。双人模式下难度本来就隐藏(没有电脑),这里不改那条。
-   */
   /** 人落过几子:人机模式下数人那一色,双人模式下两边都是人。 */
   function humanStones() {
     return mode === "ai"
@@ -1964,43 +1921,21 @@
       : history.length;
   }
 
-  function syncPhaseFields() {
-    // 相位不能按「盘上有没有子」判 —— 人执白时电脑立刻走第一手,history.length
-    // 当场就是 1,执白的用户一开局就再也看不到这三个控件。交叉闸门 AU 抓到了这个。
-    // 正确的判据是「**人**有没有落过子」:人机模式下数人那一色的子,双人模式下
-    // 两边都是人,数总手数。
-    const playing = humanStones() > 0;
-    // 规则(v1.68 起在设置弹层里)不参与:对局中改它从下一局起生效,不需要藏
-    for (const id of ["mode-field", "color-field"]) {
-      const el = document.getElementById(id);
-      if (el) el.hidden = playing;
-    }
-    // 对局中这一组只剩难度一行,标题「对局」就文不对题,而且和行标签「难度」
-    // 是同一个东西的两个标签。去掉标题;分组仍由 .side-section 本来就有的
-    // border-bottom 画着。
-    const gameSec = document.getElementById("mode-field")
-      && document.getElementById("mode-field").closest(".side-section");
-    if (gameSec) {
-      gameSec.classList.toggle("bare", playing);
-      // 双人对局中连「难度」也没有:整组一行不剩时,连同它的分隔线一起收起。
-      // 此前留着一条上下两道线夹着的空带(v1.64 评估 §4.1)。
-      gameSec.hidden = [...gameSec.querySelectorAll(".setting-row")].every((r) => r.hidden);
-    }
-  }
 
   function syncSettingsUI() {
+    // v1.74:这四格住在「新局」卡片里,亮的是卡片里还没生效的选择;卡片关着时就是偏好
+    const S = sheetChoice();
     document.querySelectorAll("#mode-seg button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.mode === mode);
+      b.classList.toggle("active", b.dataset.mode === S.mode);
     });
     document.querySelectorAll("#diff-seg button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.diff === difficulty);
+      b.classList.toggle("active", b.dataset.diff === S.difficulty);
     });
     document.querySelectorAll("#think-seg button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.think === thinkLevel);
+      b.classList.toggle("active", b.dataset.think === S.think);
     });
-    // 亮的是偏好(轮流 / 黑 / 白),这一局执哪色由侧栏顶上的黑白两侧说
     document.querySelectorAll("#color-seg button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.human === Session.colorChoice(prefs));
+      b.classList.toggle("active", b.dataset.human === S.color);
     });
     document.querySelectorAll("#lang-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.lang === I18n.lang());
@@ -2012,16 +1947,16 @@
     document.querySelectorAll("#rule-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.rule === prefs.rule);
     });
-    const aiOnly = mode === "ai";
+    const aiOnly = S.mode === "ai";
     const diffField = document.getElementById("diff-field");
     const thinkField = document.getElementById("think-field");
     const colorField = document.getElementById("color-field");
     if (diffField) diffField.hidden = !aiOnly;
     if (thinkField) {
-      thinkField.hidden = !(aiOnly && (difficulty === "hard" || difficulty === "extreme"));
+      thinkField.hidden = !(aiOnly && (S.difficulty === "hard" || S.difficulty === "extreme"));
       // Titles track the active difficulty budget (hard ≠ extreme wall times)
       const titles =
-        difficulty === "extreme"
+        S.difficulty === "extreme"
           ? { fast: t("think.fast.max.title"), normal: t("think.normal.max.title"), deep: t("think.deep.max.title") }
           : { fast: t("think.fast.hard.title"), normal: t("think.normal.hard.title"), deep: t("think.deep.hard.title") };
       document.querySelectorAll("#think-seg button[data-think]").forEach((b) => {
@@ -2032,13 +1967,13 @@
       if (thinkGroup) {
         thinkGroup.setAttribute(
           "aria-label",
-          t(difficulty === "extreme" ? "aria.thinkMax" : "aria.think")
+          t(S.difficulty === "extreme" ? "aria.thinkMax" : "aria.think")
         );
       }
     }
     // swap2 decides the human's color via the opening protocol, so hide 执子 then
-    if (colorField) colorField.hidden = !aiOnly || openingRule === "swap2";
-    syncPhaseFields(); // 相位优先:对局中一律不显示开局设置
+    // swap2 由开局协议定执子 —— 看的是下一局的规则(偏好)
+    if (colorField) colorField.hidden = !aiOnly || prefs.rule === "swap2";
     const sbOn = document.getElementById("opt-sound");
     if (sbOn) {
       sbOn.classList.toggle("active", soundOn);
@@ -2051,29 +1986,45 @@
     }
   }
 
+
   /**
-   * The sidebar's scroll region has no edge of its own: it just stops, cutting
-   * whatever row sits at the boundary in half. styles.css fades that edge, but
-   * only the side that actually has content past it — which is a fact about
-   * scroll position, so it has to be maintained here. Cheap enough to call from
-   * sync(); scroll/resize call it directly.
+   * v1.74:侧栏顶上的对阵行并进顶栏 —— 「你执黑 · 普通」/「双人」,非自由规则时后缀规则名。
+   * 轮到谁由状态胶囊说,这里只说「这一局是什么」。
    */
-  function syncScrollEdges() {
-    const el = document.getElementById("side-scroll");
+  function syncMatch() {
+    const el = document.getElementById("match");
     if (!el) return;
-    const max = el.scrollHeight - el.clientHeight;
-    const scrollable = max > 1;
-    el.dataset.above = scrollable && el.scrollTop > 1 ? "1" : "0";
-    el.dataset.below = scrollable && el.scrollTop < max - 1 ? "1" : "0";
+    const parts = [];
+    if (swap2 && mode === "ai") parts.push(t("match.swap2"));
+    else if (mode === "ai") parts.push(t("match.ai", {
+      side: t(humanColor === "b" ? "side.black" : "side.white"),
+      level: t("diff." + difficulty + ".full"),
+    }));
+    else parts.push(t("mode.pvp"));
+    const rc = ruleChoice();
+    if (rc !== "free") parts.push(t("rule." + rc));
+    el.textContent = parts.join(" · ");
+  }
+
+  /** v1.74:一条时间线代替手数列表与三个翻页按钮。悬停 / 读屏报「第 N 手 · H8」。 */
+  function syncTimeline() {
+    const tl = document.getElementById("timeline");
+    const pos = document.getElementById("replay-pos");
+    if (pos) pos.textContent = viewIndex + " / " + history.length;
+    if (!tl) return;
+    tl.max = String(history.length);
+    tl.value = String(viewIndex);
+    const p = viewIndex > 0 ? history[viewIndex - 1] : null;
+    const label = p ? t("timeline.at", { n: viewIndex, coord: cellLabel(p.r, p.c) }) : t("timeline.start");
+    tl.setAttribute("aria-valuetext", label);
+    tl.title = label;
+    // 走过的那一段填色(range 的轨道本身不分前后)
+    tl.style.setProperty("--fill", (history.length ? (viewIndex / history.length) * 100 : 0) + "%");
   }
 
   function sync() {
     draw();
-    syncPhaseFields();
-    syncScrollEdges();
     const status = document.getElementById("status");
-    const blackTurn = document.getElementById("black-turn");
-    const whiteTurn = document.getElementById("white-turn");
     const undoBtns = [document.getElementById("undo"), document.getElementById("undo2")].filter(Boolean);
     const live = isLive();
 
@@ -2082,31 +2033,14 @@
     appEl0.classList.toggle("is-empty", history.length === 0);
     // 这一局的规则(设置里亮的是偏好,可能是「下一局起」):给读屏之外的东西(测试、样式)一个稳定的钩子
     appEl0.dataset.rule = ruleChoice();
-    const modeEl = document.getElementById("info-mode");
-    if (modeEl) {
-      // 规则挪进设置之后,非「自由」时在这里留一个标记,不会忘了自己在什么规则下
-      // v1.70:人机时不再写档名 —— 下面的难度选择已经标着它;一件信息只说一遍
-      const rc = ruleChoice();
-      const parts = [];
-      if (mode === "pvp") parts.push(t("mode.pvp"));
-      if (rc !== "free") parts.push(t("rule." + rc));
-      modeEl.textContent = parts.join(" · ");
-      const metaEl = modeEl.closest(".side-meta");
-      if (metaEl) metaEl.hidden = !parts.length;
-    }
-    document.getElementById("replay-pos").textContent = viewIndex + " / " + history.length;
-    renderMoveList();
+    syncMatch();
+    syncTimeline();
     updateClock();
 
     undoBtns.forEach((b) => {
       // NOT disabled while aiThinking — 悔棋 is the cancel affordance (see abortThinking).
       if (b) b.disabled = history.length <= undoFloor() || hintBusy || !live || !!swap2;
     });
-    document.getElementById("rep-prev").disabled = viewIndex <= 0;
-    document.getElementById("rep-next").disabled = viewIndex >= history.length;
-    document.getElementById("rep-live").disabled = live;
-    // v1.73:在最新一手时「回到最新」「下一手」不显示,但位置保留 —— 看旧手时原位出现,不跳
-    document.getElementById("replay-seg").classList.toggle("at-live", live);
     // v1.73:「新局」只在一局结束后是主按钮
     document.getElementById("btn-new").classList.toggle("primary", result !== "play");
     document.getElementById("sgf-copy").disabled = history.length === 0;
@@ -2131,29 +2065,6 @@
       hintBtn.classList.toggle("busy", hintBusy);
     }
 
-    if (swap2) {
-      // Colors are undecided until settleSwap2 — don't show stale 你/电脑
-      document.getElementById("black-role").textContent = t("role.pending");
-      document.getElementById("white-role").textContent = t("role.pending");
-    } else if (mode === "ai") {
-      document.getElementById("black-role").textContent = t(humanColor === "b" ? "role.you" : "role.computer");
-      document.getElementById("white-role").textContent = t(humanColor === "w" ? "role.you" : "role.computer");
-    } else {
-      document.getElementById("black-role").textContent = t("role.p1");
-      document.getElementById("white-role").textContent = t("role.p2");
-    }
-
-    const showTurn = live && result === "play" && !swap2;
-    blackTurn.hidden = !(showTurn && turn === "b");
-    whiteTurn.hidden = !(showTurn && turn === "w");
-    // v1.65:轮到谁,由那一方的棋子自己说(一圈强调色,另一方退后),不再靠「行」字徽章;
-    // 徽章留给读屏
-    const vsSides = document.querySelectorAll(".vs .vs-side");
-    if (vsSides.length === 2) {
-      vsSides[0].classList.toggle("is-turn", showTurn && turn === "b");
-      vsSides[1].classList.toggle("is-turn", showTurn && turn === "w");
-      vsSides[0].parentElement.classList.toggle("has-turn", showTurn);
-    }
 
     const thinkDot = document.getElementById("think-dot");
     if (thinkDot) thinkDot.hidden = !(aiThinking && result === "play");
@@ -2188,6 +2099,12 @@
     else status.textContent = t(turn === "b" ? "status.blackTurn" : "status.whiteTurn");
 
     syncSettingsUI();
+    // v1.74:复盘开着时,时间线那一行换成局势曲线(见 styles.css #app.reviewing)
+    const reviewing = Review.isSideOpen() && !!Review.getData() && history.length >= 2;
+    if (reviewing !== appEl.classList.contains("reviewing")) {
+      appEl.classList.toggle("reviewing", reviewing);
+      layoutDock();
+    }
     Review.renderSide();
     // 重下线上第 ply 手之后的着法不在原局里:从那里「重下」或「练这一手」都会落到原局
     // 同号的另一手上(v1.63.1)。只留推演。
@@ -2244,26 +2161,19 @@
   document.getElementById("undo").onclick = undo;
   const undo2 = document.getElementById("undo2");
   if (undo2) undo2.onclick = undo;
-  document.getElementById("btn-new").onclick = () => { requestNewGame(); };
+  document.getElementById("btn-new").onclick = () => { toggleSheet(); };
   const hintBtnEl = document.getElementById("btn-hint");
   if (hintBtnEl) hintBtnEl.onclick = () => { requestHint(); };
   const reset2 = document.getElementById("reset2");
   if (reset2) reset2.onclick = () => { requestNewGame(); };
-  document.getElementById("toggle-panel").onclick = togglePanel;
-  document.getElementById("scrim").onclick = () => setPanelOpen(false);
-
-  const mlEl = document.getElementById("move-list");
-  if (mlEl) {
-    mlEl.onclick = (ev) => {
-      const b = ev.target.closest("button[data-i]");
-      if (b) setViewIndex(Number(b.dataset.i));
-    };
+  const timelineEl = document.getElementById("timeline");
+  if (timelineEl) {
+    timelineEl.addEventListener("input", () => {
+      const n = Number(timelineEl.value);
+      if (n === history.length) goLive(); else setViewIndex(n);
+    });
   }
-  document.getElementById("rep-prev").onclick = () => setViewIndex(viewIndex - 1);
-  document.getElementById("rep-next").onclick = () => setViewIndex(viewIndex + 1);
-  document.getElementById("rep-live").onclick = () => {
-    goLive();
-  };
+  wireMenus();
   document.getElementById("sgf-copy").onclick = () => { copySgf(); };
   document.getElementById("sgf-download").onclick = () => { downloadSgf(); };
   const contEl = document.getElementById("sgf-continue");
@@ -2367,16 +2277,6 @@
     });
   }
 
-  document.getElementById("mode-seg").onclick = async (ev) => {
-    const b = ev.target.closest("button[data-mode]");
-    if (!b) return;
-    if (b.dataset.mode === mode) return;
-    if (history.length && !(await confirmNative(t("confirm.switchMode"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
-    applyMode(b.dataset.mode);
-    saveSettings();
-    reset({ keepSettings: true }); // 点的就是那一格,不再复述;⌘1 / ⌘2(侧栏可能收着)仍会说
-  };
-
   const ruleSeg = document.getElementById("rule-seg");
   if (ruleSeg) {
     ruleSeg.onclick = async (ev) => {
@@ -2403,41 +2303,12 @@
       ));
     };
   }
-  document.getElementById("diff-seg").onclick = (ev) => {
-    const b = ev.target.closest("button[data-diff]");
-    if (!b) return;
-    // 难度是唯一在对局中立即生效的一格:这一局与偏好一起改
-    difficulty = prefs.difficulty = b.dataset.diff;
-    saveSettings();
-    syncSettingsUI(); // 选中格变亮就是反馈
-  };
-  const thinkSeg = document.getElementById("think-seg");
-  if (thinkSeg) {
-    thinkSeg.onclick = (ev) => {
-      const b = ev.target.closest("button[data-think]");
-      if (!b) return;
-      const id = b.dataset.think;
-      if (id !== "fast" && id !== "normal" && id !== "deep") return;
-      if (thinkLevel === id) return;
-      thinkLevel = id;
-      saveSettings();
-      syncSettingsUI();
-      toast(
-        t("toast.think", {
-          name: (difficulty === "extreme"
-            ? { fast: t("think.fast.maxName"), normal: t("think.normal.maxName"), deep: t("think.deep.maxName") }
-            : { fast: t("think.fast.name"), normal: t("think.normal.name"), deep: t("think.deep.name") })[id],
-        })
-      );
-    };
-  }
   const langSeg = document.getElementById("lang-seg");
   if (langSeg) langSeg.onclick = (ev) => {
     const b = ev.target.closest("button[data-lang]");
     if (!b || b.dataset.lang === I18n.lang()) return;
     I18n.setLang(b.dataset.lang); // rewrites the static markup
     // …and everything drawn from state has to be rebuilt in the new language
-    mlSig = "";
     syncSettingsUI();
     sync();
   };
@@ -2463,23 +2334,6 @@
       toast(t(showCoords ? "toast.coordsOn" : "toast.coordsOff"));
     };
   }
-  document.getElementById("color-seg").onclick = async (ev) => {
-    const b = ev.target.closest("button[data-human]");
-    if (!b) return;
-    if (b.dataset.human === Session.colorChoice(prefs)) return;
-    if (mode === "ai" && history.length && !(await confirmNative(t("confirm.changeColor"), t("confirm.changeColorTitle"), { ok: t("confirm.changeColorOk"), cancel: t("dlg.cancel") }))) return;
-    prefs.humanColor = b.dataset.human;
-    saveSettings();
-    if (mode === "ai") {
-      reset({ keepSettings: true });
-      toast(prefs.humanColor === "alt"
-        ? t("toast.playAlt", { side: t(humanColor === "b" ? "side.black" : "side.white") })
-        : t(humanColor === "b" ? "toast.playBlack" : "toast.playWhite"));
-    } else {
-      syncSettingsUI();
-    }
-  };
-
   const swap2Btns = document.getElementById("swap2-btns");
   if (swap2Btns) {
     swap2Btns.addEventListener("click", (ev) => {
@@ -2490,6 +2344,110 @@
 
   const helpModal = document.getElementById("help-modal");
   const confirmModal = document.getElementById("confirm-modal");
+  // --- v1.74: 「新局」卡片与「⋯」菜单 ---
+  function sheetChoice() {
+    return sheet || { mode: mode, difficulty: difficulty, think: thinkLevel, color: Session.colorChoice(prefs) };
+  }
+  function placePopover(el, anchor) {
+    const r = anchor.getBoundingClientRect();
+    el.style.top = Math.round(r.bottom + 6) + "px";
+    el.style.right = Math.max(8, Math.round(window.innerWidth - r.right)) + "px";
+  }
+  function openSheet() {
+    closeMenu();
+    // 执子偏好里有「auto」(低档执黑、高档轮流),三格里没有它 —— 没点过执子就不改偏好
+    sheet = { mode: mode, difficulty: prefs.difficulty || difficulty, think: thinkLevel, color: Session.colorChoice(prefs), colorTouched: false };
+    // 上一局是库里的旧局 / 重下时,这一局的模式可能不是偏好;新局从偏好开
+    sheet.mode = prefs.mode || mode;
+    const anchor = document.getElementById("btn-new");
+    sheetEl.hidden = false;
+    placePopover(sheetEl, anchor);
+    anchor.setAttribute("aria-expanded", "true");
+    syncSettingsUI();
+    const start = document.getElementById("new-start");
+    if (start) start.focus();
+  }
+  function closeSheet() {
+    if (sheetEl.hidden) return;
+    sheetEl.hidden = true;
+    sheet = null;
+    document.getElementById("btn-new").setAttribute("aria-expanded", "false");
+    syncSettingsUI();
+  }
+  function toggleSheet() { if (sheetEl.hidden) openSheet(); else closeSheet(); }
+  async function startFromSheet() {
+    const S = sheet || sheetChoice();
+    closeSheet();
+    // 下完的局早已自动留存,不问;没下完的才问一句(与 N 同一条)
+    if (history.length && result === "play") {
+      const ok = await confirmNative(t("newgame.confirm"), t("newgame.ok"), { ok: t("newgame.ok"), cancel: t("dlg.cancel") });
+      if (!ok) return;
+    }
+    applyMode(S.mode);
+    difficulty = prefs.difficulty = S.difficulty;
+    thinkLevel = S.think;
+    if (S.colorTouched) prefs.humanColor = S.color;
+    saveSettings();
+    reset({ keepSettings: true });
+  }
+  function openMenu() {
+    closeSheet();
+    const anchor = document.getElementById("more-btn");
+    menuEl.hidden = false;
+    placePopover(menuEl, anchor);
+    anchor.setAttribute("aria-expanded", "true");
+    const first = menuEl.querySelector(".menu-item:not([hidden])");
+    if (first) first.focus();
+  }
+  function closeMenu() {
+    if (menuEl.hidden) return;
+    menuEl.hidden = true;
+    document.getElementById("more-btn").setAttribute("aria-expanded", "false");
+  }
+  function closePopovers() {
+    const open = !sheetEl.hidden || !menuEl.hidden;
+    closeSheet(); closeMenu();
+    return open;
+  }
+  function wireMenus() {
+    document.getElementById("more-btn").onclick = () => { if (menuEl.hidden) openMenu(); else closeMenu(); };
+    // 菜单项各有自己的 onclick;这里只负责点完收起菜单
+    menuEl.addEventListener("click", (ev) => { if (ev.target.closest(".menu-item")) closeMenu(); });
+    menuEl.addEventListener("keydown", (ev) => {
+      if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+      ev.preventDefault();
+      const items = [...menuEl.querySelectorAll(".menu-item:not([hidden])")];
+      const i = items.indexOf(document.activeElement);
+      const next = items[(i + (ev.key === "ArrowDown" ? 1 : items.length - 1)) % items.length];
+      if (next) next.focus();
+    });
+    const pick = (segId, attr, apply) => {
+      const seg = document.getElementById(segId);
+      if (!seg) return;
+      seg.onclick = (ev) => {
+        const b = ev.target.closest("button[" + attr + "]");
+        if (!b) return;
+        if (!sheet) sheet = sheetChoice();
+        apply(b.getAttribute(attr));
+        syncSettingsUI();
+      };
+    };
+    pick("mode-seg", "data-mode", (v) => { sheet.mode = v; });
+    pick("diff-seg", "data-diff", (v) => { sheet.difficulty = v; });
+    pick("think-seg", "data-think", (v) => { sheet.think = v; });
+    pick("color-seg", "data-human", (v) => { sheet.color = v; sheet.colorTouched = true; });
+    document.getElementById("new-start").onclick = () => { startFromSheet(); };
+    sheetEl.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); ev.stopPropagation(); startFromSheet(); }
+    });
+    // 点在卡片 / 菜单与各自按钮之外就收起
+    document.addEventListener("pointerdown", (ev) => {
+      const tEl = ev.target;
+      if (!sheetEl.hidden && !sheetEl.contains(tEl) && !tEl.closest("#btn-new")) closeSheet();
+      if (!menuEl.hidden && !menuEl.contains(tEl) && !tEl.closest("#more-btn")) closeMenu();
+    }, true);
+  }
+
   function openHelp() {
     helpModal.classList.add("show");
     const close = document.getElementById("help-close");
@@ -2497,7 +2455,7 @@
   }
   function closeHelp() { helpModal.classList.remove("show"); }
   // v1.71:快捷键入口在设置弹层里(顶栏不再常驻);按 ? 照旧直接打开
-  document.getElementById("open-help").onclick = () => { closeSettings(); openHelp(); };
+  document.getElementById("open-help").onclick = () => { openHelp(); };
   document.getElementById("help-close").onclick = closeHelp;
   helpModal.onclick = (ev) => { if (ev.target === helpModal) closeHelp(); };
 
@@ -2531,9 +2489,9 @@
       if (Practice.isOpen()) { Practice.close(); return; }
       if (settingsModal.classList.contains("show")) { closeSettings(); return; }
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
-      // 棋盘有焦点时 Esc 先交给棋盘(「Esc 离开」是它播报过的承诺),其次才收侧栏
+      if (closePopovers()) return;
+      // 棋盘有焦点时 Esc 交给棋盘(「Esc 离开」是它播报过的承诺)
       if (document.activeElement === canvas && handleBoardKey(ev)) return;
-      if (appEl.classList.contains("panel-open")) setPanelOpen(false);
       return;
     }
     if (confirmModal.classList.contains("show")) {
@@ -2604,25 +2562,16 @@
       ev.preventDefault();
       requestHint();
     }
-    else if (k === "[") setPanelOpen(false);
-    else if (k === "]") setPanelOpen(true);
     else if (k === "f" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
       toggleFullscreen();
     }
   });
 
   window.addEventListener("resize", () => {
-    appEl.classList.toggle("scrim-on", appEl.classList.contains("panel-open") && window.innerWidth < 900);
-    resizeCanvas();
-    draw();
-    syncScrollEdges();
+    closePopovers();
+    layoutDock();
   });
 
-  {
-    const sc = document.getElementById("side-scroll");
-    if (sc) sc.addEventListener("scroll", syncScrollEdges, { passive: true });
-    syncScrollEdges();
-  }
 
   window.addEventListener("beforeunload", () => saveGame());
   window.addEventListener("pagehide", () => saveGame());
@@ -2639,7 +2588,6 @@
     else if (id === "goban.sgf-paste") pasteSgfFromClipboard();
     else if (id === "goban.sgf-continue") continueFromImport();
     else if (id === "goban.hint") requestHint();
-    else if (id === "goban.toggle-panel") togglePanel();
     else if (id === "goban.fullscreen") toggleFullscreen(); // system FS hint toast
   }
 
@@ -2664,14 +2612,6 @@
   if (verEl) verEl.textContent = window.GOBAN_VERSION || "—";
   document.documentElement.setAttribute("lang", I18n.lang() === "en" ? "en" : "zh-CN");
   document.documentElement.setAttribute("data-theme", themeId);
-  const savedPanel = Host.storageGet(PANEL_KEY);
-  // Restore the user's own choice; always run setPanelOpen so inert/aria apply.
-  // First run stores nothing, and a closed sidebar leaves exactly five buttons
-  // on screen (悔棋/提示/新局/?/☰) — 练习/每日/复盘/统计/存档 all sit behind ☰
-  // with nothing pointing at it. So open it once, and only where it can sit
-  // beside the board: under 900px it becomes a sheet over the board, which is
-  // a worse first impression than an entry the user has not found yet.
-  setPanelOpen(savedPanel == null ? window.innerWidth >= 900 : savedPanel === "1");
 
   try { migrateSlots(); } catch (_) {}
   const resumed = tryLoadSave();
@@ -2693,6 +2633,7 @@
 
   resizeCanvas();
   sync();
+  layoutDock();
   saveSettings();
   if (!resumed) saveGame();
   maybeAiTurn();

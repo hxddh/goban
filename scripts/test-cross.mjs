@@ -148,17 +148,42 @@ const snap = (page) =>
     status: document.getElementById("status").textContent,
   }));
 
-// "]" is idempotent (setPanelOpen(true)); #toggle-panel flips. Since v1.33
 /**
- * v1.61 起模式 / 执子 / 规则只在**开局态**出现（对局中改它们本来就会 reset
- * 重开一局，所以它们是「开新局」动作）。用例里有十几处在对局中点这三个控件，
- * 那是旧流程；这个辅助把新流程补上，幂等，可以无脑插在每个 seg 点击之前。
- *
- * 判「是否在对局中」看的是**手数**，不是元素几何。首版用
- * `getBoundingClientRect().height === 0`，那会把「侧栏被收起」误判成
- * 「被相位藏起来」；而想靠先调 openPanel 来消除这个歧义更糟 —— openPanel 按的
- * 是 `]`，是**开关**，侧栏已开时再调一次就把它关上了（正是下面那段注释警告的坑）。
+ * v1.74 起模式 / 难度 / 执子 / 思考住在「新局」卡片里:点「新局」→ 选 → 「开始」。
+ * 选择只记在卡片里,点「开始」才生效(对局中没下完会先问一句)。
  */
+async function setupGame(page, o) {
+  await page.evaluate(() => { const s = document.getElementById("new-sheet"); if (s && s.hidden) document.getElementById("btn-new").click(); });
+  await page.waitForTimeout(80);
+  await page.evaluate((o) => {
+    const q = (sel) => { const b = document.querySelector(sel); if (b) b.click(); };
+    if (o.mode) q('#mode-seg [data-mode="' + o.mode + '"]');
+    if (o.diff) q('#diff-seg [data-diff="' + o.diff + '"]');
+    if (o.think) q('#think-seg [data-think="' + o.think + '"]');
+    if (o.color) q('#color-seg [data-human="' + o.color + '"]');
+    document.getElementById("new-start").click();
+  }, o || {});
+  await page.waitForTimeout(150);
+  await dismissConfirm(page);
+  await page.waitForTimeout(150);
+}
+
+/** 盘上有子时先开新局 —— 设置里改规则只在空棋盘上立即生效 */
+async function ensureSetupPhase(page) {
+  const playing = await page.evaluate(() => {
+    const parts = (document.getElementById("replay-pos").textContent || "").split("/");
+    return parts.length === 2 && Number(parts[1]) > 0;
+  });
+  if (playing) await setupGame(page, {});
+}
+
+/** v1.74:复盘 / 练习 / 记录 / 设置 / 快捷键在「⋯」里 —— 像人一样先开菜单再点 */
+async function viaMenu(page, id) {
+  await page.click("#more-btn");
+  await page.waitForTimeout(80);
+  await page.click("#" + id);
+}
+
 /** v1.70 起复制 / 导出 / 导入 / 粘贴住在「存档」弹层里:像人一样先开存档,再点粘贴(它会自己关掉弹层)。 */
 async function pasteViaSlots(page) {
   await page.evaluate(() => document.getElementById("sgf-slots").click());
@@ -184,26 +209,6 @@ async function openFirstGame(page) {
   await page.waitForTimeout(250);
 }
 
-async function ensureSetupPhase(page) {
-  const playing = await page.evaluate(() => {
-    const m = document.getElementById("replay-pos"); // v1.70:顶栏不再写手数,侧栏的「a / b」是唯一一处
-    const parts = ((m && m.textContent) || "").split("/");
-    return parts.length === 2 && Number(parts[1]) > 0;
-  });
-  if (!playing) return;
-  await page.evaluate(() => document.querySelector("#btn-new").click());
-  await page.waitForTimeout(150);
-  await dismissConfirm(page);
-  await page.waitForTimeout(200);
-}
-
-// the panel starts OPEN on a fresh profile — and newPage() clears storage, so
-// every page here is a fresh profile — which turned a "click to open" into a
-// "click to close" and made the controls inside inert.
-async function openPanel(page) {
-  await page.keyboard.press("]");
-  await page.waitForTimeout(120);
-}
 
 /** 语言开关自 v1.51 起住在设置弹层里（外观那五项从常驻侧栏搬走了）。
  *  每个要换语言的闸门都得走真实那条路：开弹层 → 点 → 关，而不是对着藏起来的
@@ -219,7 +224,7 @@ async function setLang(page, lang) {
     if (blocked) await page.evaluate((s) => document.querySelector(s).click(), sel);
     else await page.click(sel);
   };
-  await hit("#settings-btn");
+  if (blocked) await hit("#settings-btn"); else await viaMenu(page, "settings-btn"); // v1.74:设置在「⋯」里
   await page.waitForTimeout(200);
   await hit('#lang-seg button[data-lang="' + lang + '"]');
   await page.waitForTimeout(350);
@@ -302,19 +307,12 @@ async function pickRule(page, rule) {
 
 /** v1.70 起人机 · 自由时信息行是空的(档名不再重复);它最长的形态是「双人 · 禁手」 */
 async function longestMeta(page) {
-  await page.evaluate(() => document.querySelector('#mode-seg button[data-mode="pvp"]').click());
-  await page.waitForTimeout(120);
-  await dismissConfirm(page);
+  await setupGame(page, { mode: "pvp" });
   await pickRule(page, "renju");
 }
 
 async function enableSwap2Pvp(page) {
-  await openPanel(page);
-  await ensureSetupPhase(page);
-  await page.click('button[data-mode="pvp"]');
-  await page.waitForTimeout(100);
-  await dismissConfirm(page);
-  await ensureSetupPhase(page);
+  await setupGame(page, { mode: "pvp" });
   await pickRule(page, "swap2");
   await page.waitForTimeout(120);
   await dismissConfirm(page);
@@ -351,17 +349,14 @@ async function enableSwap2Pvp(page) {
   await page.close();
 }
 
-// ---- Test 0b: top-bar actions must stay clickable with the sidebar open ----
-// The sidebar used to paint over the chrome bar: 悔棋/提示/新局/?/☰ showed
-// through as ghosts but every click landed on #side, and the sidebar hosts no
-// duplicates of them — an open panel left no way to undo or start a new game
-// by mouse. Attribute/visibility checks all passed; only hit testing catches
-// it, so assert elementFromPoint at each button's centre, both panel states,
-// across the window widths the app actually runs at.
+// ---- Test 0b: top-bar actions must stay clickable at every window width ----
+// The sidebar used to paint over the chrome bar: 悔棋/提示/新局 showed through as
+// ghosts but every click landed on #side. v1.74 retired the sidebar; what stays
+// is the hit test itself — elementFromPoint at each button's centre, across the
+// widths the app runs at — plus a real click through「⋯」to a dialog.
 {
   const page = await newPage();
-  const IDS = ["undo", "btn-hint", "btn-new", "settings-btn", "toggle-panel"]; // v1.71:快捷键挪进设置
-  // v1.71:空棋盘不显示悔棋 / 提示 —— 先落一子,让顶栏五个按钮都在场
+  const IDS = ["undo", "btn-hint", "btn-new", "more-btn"];
   await clicker(page)(7, 7);
   await page.waitForTimeout(900);
   const hitTest = () =>
@@ -375,43 +370,29 @@ async function enableSwap2Pvp(page) {
         if (!(hit === el || el.contains(hit))) {
           bad.push(id + "←" + (hit ? hit.id || hit.className || hit.tagName : "null"));
         } else if (b.right > bar.right + 0.5 || b.left < bar.left - 0.5) {
-          bad.push(id + ":出界"); // squeezed out of the bar rather than covered
+          bad.push(id + ":出界");
         }
       }
       return bad;
     }, IDS);
-
   const blocked = [];
-  // Toggle with the keyboard shortcuts ("]" open / "[" close) so a covered ☰
-  // cannot abort the run — the pointer assertions below are the actual test.
   for (const width of [560, 700, 820, 960, 1280, 1728]) {
     await page.setViewportSize({ width, height: 860 });
-    await page.waitForTimeout(120);
-    for (const id of await hitTest()) blocked.push(width + "px 收起:" + id);
-
-    await page.keyboard.press("]");
-    await page.waitForTimeout(420); // .28s panel transition + settle
-    const openPanel = await page.evaluate(() =>
-      document.getElementById("app").classList.contains("panel-open"));
-    if (!openPanel) blocked.push(width + "px 面板未打开");
-    for (const id of await hitTest()) blocked.push(width + "px 展开:" + id);
-
-    // …and a real click must still reach a handler while the panel is open
-    let helpOpens = false;
+    await page.waitForTimeout(150);
+    for (const id of await hitTest()) blocked.push(width + "px:" + id);
+    let opens = false;
     try {
+      await page.click("#more-btn", { timeout: 2500 });
       await page.click("#settings-btn", { timeout: 2500 });
       await page.waitForTimeout(200);
-      helpOpens = await page.evaluate(() =>
-        document.getElementById("settings-modal").classList.contains("show"));
-    } catch (_) { helpOpens = false; }
-    if (!helpOpens) blocked.push(width + "px 展开:帮助点不开");
-    await page.keyboard.press("Escape"); // close help (if it opened)
+      opens = await page.evaluate(() => document.getElementById("settings-modal").classList.contains("show"));
+    } catch (_) { opens = false; }
+    if (!opens) blocked.push(width + "px:设置点不开");
+    await page.keyboard.press("Escape");
     await page.waitForTimeout(150);
-    await page.keyboard.press("[");
-    await page.waitForTimeout(420);
   }
   await page.setViewportSize({ width: 1280, height: 860 });
-  report("0b 顶栏按钮在侧栏开合两态下均可点击",
+  report("0b 顶栏按钮在各档窗口宽度下均可点击,「⋯」里的设置点得开",
     blocked.length === 0 && page.__errors.length === 0,
     JSON.stringify({ blocked, errs: page.__errors }));
   await page.close();
@@ -466,7 +447,6 @@ async function enableSwap2Pvp(page) {
 {
   const page = await newPage();
   const click = clicker(page);
-  await openPanel(page);
   await page.waitForTimeout(80);
   await seedGame(page, { history: [{ r: 7, c: 7 }, { r: 7, c: 8 }] });
   await enableSwap2Pvp(page);
@@ -524,7 +504,6 @@ async function enableSwap2Pvp(page) {
 {
   const page = await newPage();
   const click = clicker(page);
-  await openPanel(page);
   await page.waitForTimeout(80);
   await ensureSetupPhase(page);
   await pickRule(page, "swap2");
@@ -537,11 +516,9 @@ async function enableSwap2Pvp(page) {
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(1200); // restore + 500ms rescheduled AI choice + settle
   const after = await snap(page);
-  const roles = await page.evaluate(() => ({
-    b: document.getElementById("black-role").textContent,
-    w: document.getElementById("white-role").textContent,
-  }));
-  const humanAssigned = roles.b === "你" || roles.w === "你";
+  // v1.74:对阵行并进顶栏 —— 「你执黑 / 你执白」
+  const roles = await page.evaluate(() => document.getElementById("match").textContent);
+  const humanAssigned = /你执[黑白]|You: (Black|White)/.test(roles);
   report("F AI mid-p2choose reload resumes AI choice",
     after.bar === false && humanAssigned && page.__errors.length === 0,
     JSON.stringify({ bar: after.bar, roles, status: after.status, errs: page.__errors }));
@@ -551,8 +528,6 @@ async function enableSwap2Pvp(page) {
 // ---- Test G: 中英切换 — static markup, runtime strings and persistence ----
 {
   const page = await newPage();
-  await page.keyboard.press("]");
-  await page.waitForTimeout(420);
   const zh = await page.evaluate(() => ({
     undo: document.getElementById("undo").textContent,
     status: document.getElementById("status").textContent,
@@ -574,7 +549,7 @@ async function enableSwap2Pvp(page) {
   // the whole visible chrome + sidebar must be free of Chinese in English mode
   const leftovers = await page.evaluate(() => {
     const out = [];
-    const scope = [document.querySelector(".chrome"), document.getElementById("side")];
+    const scope = [document.querySelector(".chrome"), document.getElementById("dock"), document.getElementById("more-menu"), document.getElementById("new-sheet")];
     for (const root of scope) {
       root.querySelectorAll("*").forEach((el) => {
         if (el.children.length) return; // leaf nodes only
@@ -599,8 +574,6 @@ async function enableSwap2Pvp(page) {
   }));
 
   // …and back to 中文
-  await page.keyboard.press("]");
-  await page.waitForTimeout(420);
   await setLang(page, "zh");
   await page.waitForTimeout(300);
   const backZh = await page.evaluate(() => document.getElementById("undo").textContent);
@@ -640,7 +613,7 @@ async function enableSwap2Pvp(page) {
   const step = (g.w - 2 * g.pad) / 14;
   await page.mouse.click(g.x + g.pad + 7 * step, g.y + g.pad + 7 * step);
   const answered = await page
-    .waitForFunction(() => document.getElementById("move-list").children.length >= 2, { timeout: 10000 })
+    .waitForFunction(() => Number((document.getElementById("replay-pos").textContent.split("/")[1] || "0").trim()) >= 2, { timeout: 10000 })
     .then(() => true).catch(() => false);
 
   report("H 打包版 worker：内嵌 bundle 启动并应答（fetch 兜底已切断）",
@@ -693,24 +666,37 @@ async function enableSwap2Pvp(page) {
 }
 
 // J 键盘可达：v1.31 之前 Tab 被绑去开合侧栏,于是 40 个按钮一个都走不到,
-// 而弹层从 v1.25.2 起就有焦点陷阱。两头都要守：主界面 Tab 走得进侧栏,
-// 弹层里 Tab 走不出去。
+// 而弹层从 v1.25.2 起就有焦点陷阱。两头都要守：主界面上看得见的每一个控件 Tab 都走得到
+// (v1.74 起主界面就是顶栏 + 时间线 + 坞),「⋯」与设置弹层里的也走得到,弹层里 Tab 走不出去。
 {
   const page = await newPage();
-  await page.keyboard.press("]");
-  await page.waitForTimeout(350);
+  await clicker(page)(7, 7);
+  await page.waitForTimeout(900);
+  const MAIN = ".chrome, #stage, #dock";
   const seen = new Set();
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 30; i++) {
     await page.keyboard.press("Tab");
-    const id = await page.evaluate(() => {
+    const id = await page.evaluate((m) => {
       const e = document.activeElement;
-      return e && e !== document.body && e.closest("#side") ? (e.id || e.textContent.trim().slice(0, 8)) : null;
-    });
+      return e && e !== document.body && e.closest(m) ? (e.id || e.textContent.trim().slice(0, 8)) : null;
+    }, MAIN);
     if (id) seen.add(id);
   }
-  // v1.51：外观那五项搬进设置弹层，侧栏少了 5 个控件（20 → 17）。门槛跟着降是不够的
-  // —— 那样只是把数字改到能过。搬走的东西必须在新家里同样 Tab 走得到，两处一起数。
-  await page.click("#settings-btn");
+  const mainCount = await page.evaluate((m) => [...document.querySelectorAll("button, input, select")]
+    .filter((e) => e.closest(m) && e.offsetParent !== null && !e.disabled && e.getBoundingClientRect().width > 0 &&
+      getComputedStyle(e).visibility !== "hidden").length, MAIN);
+  // 「⋯」:键盘打开,方向键走完菜单项
+  await page.focus("#more-btn");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(150);
+  const inMenu = new Set();
+  for (let i = 0; i < 6; i++) {
+    const id = await page.evaluate(() => { const e = document.activeElement; return e && e.closest("#more-menu") ? e.id : null; });
+    if (id) inMenu.add(id);
+    await page.keyboard.press("ArrowDown");
+  }
+  await page.keyboard.press("Escape");
+  await viaMenu(page, "settings-btn");
   await page.waitForTimeout(300);
   const inSettings = new Set();
   for (let i = 0; i < 24; i++) {
@@ -723,82 +709,49 @@ async function enableSwap2Pvp(page) {
   }
   await page.click("#settings-close");
   await page.waitForTimeout(250);
-
-  await page.evaluate(() => document.getElementById("open-help").click()); // v1.71:设置里的「快捷键」
+  await page.evaluate(() => document.getElementById("open-help").click());
   await page.waitForTimeout(300);
   let escaped = 0;
   for (let i = 0; i < 6; i++) {
     await page.keyboard.press("Tab");
     if (!(await page.evaluate(() => !!(document.activeElement && document.activeElement.closest(".modal-bg"))))) escaped++;
   }
-  // v1.71:侧栏的控件又少了(复盘不足两手不显示、统计并进「记录」)。判据从固定的「≥ 15」改成更强的
-  // 「侧栏里看得见的每一个控件都 Tab 得到」—— 数字跟着界面走,但一个都不许漏。
-  const sideCount = await page.evaluate(() => [...document.querySelectorAll("#side button, #side input, #side select")]
-    .filter((e) => e.offsetParent !== null && !e.disabled && e.getBoundingClientRect().width > 0).length);
-  const okJ = seen.size >= sideCount && sideCount >= 10 && inSettings.size >= 8 && escaped === 0 && page.__errors.length === 0;
-  report("J Tab 走得进侧栏（看得见的每一个）与设置弹层（≥8）且走不出弹层",
+  const menuCount = await page.evaluate(() => [...document.querySelectorAll("#more-menu .menu-item")].filter((e) => !e.hidden).length);
+  const okJ = seen.size >= mainCount && mainCount >= 4 && inMenu.size >= menuCount && menuCount >= 4 &&
+    inSettings.size >= 8 && escaped === 0 && page.__errors.length === 0;
+  report("J Tab 走得到主界面上看得见的每一个控件、方向键走完「⋯」、设置弹层(≥8)且走不出弹层",
     okJ,
-    JSON.stringify({ reachable: seen.size, sideCount, settings: inSettings.size, escaped, errs: page.__errors }));
+    JSON.stringify({ reachable: seen.size, mainCount, inMenu: inMenu.size, menuCount, settings: inSettings.size, escaped, errs: page.__errors }));
   await page.close();
 }
 
-// K 折叠线：五个功能入口在任何常见窗口高度都要够得着。v1.32 把侧栏刮到
-// 856px 让它们挤进 900px 的窗口，但 1280×720 同样是普通窗口，那里又掉到线下。
-// v1.33 改成钉住脚栏——断言从"侧栏不滚动"改成"入口在视口内"，因为后者才是
-// 用户真正在乎的事，而且不随内容多寡失效。
+// K 折叠线：功能入口在任何常见窗口高度都要够得着(v1.33 起)。v1.74 起入口在「⋯」里:
+// 「⋯」本身和打开后的每一项都得在视口内。
+// L(v1.74 退役):首次运行侧栏展开并记住用户关闭 —— 侧栏整个退役了,入口在「⋯」里,K 守它。
 {
-  const FEATS = ["open-practice", "sgf-slots"]; // v1.70:「每日」并进「练习」;v1.71:统计并进「记录」,复盘不足两手不显示
+  const FEATS = ["open-practice", "sgf-slots", "settings-btn", "open-help"];
   const bad = [];
-  for (const [w, h] of [[1280, 720], [1366, 768], [960, 900], [1440, 900]]) {
+  for (const [w, h] of [[1280, 720], [1366, 768], [960, 900], [1440, 900], [760, 600]]) {
     const page = await newPage();
     await page.setViewportSize({ width: w, height: h });
-    await page.keyboard.press("]");
-    await page.waitForTimeout(350);
+    await page.waitForTimeout(200);
+    await page.click("#more-btn");
+    await page.waitForTimeout(150);
     const miss = await page.evaluate((ids) => {
       const H = innerHeight, W = innerWidth;
-      return ids.filter((id) => {
+      return ["more-btn"].concat(ids).filter((id) => {
         const e = document.getElementById(id);
         if (!e) return true;
         const b = e.getBoundingClientRect();
-        return !(b.width > 0 && b.height > 0 && b.top >= 0 && b.bottom <= H + 0.5 &&
-                 b.right > 0 && b.left < W);
+        return !(b.width > 0 && b.height > 0 && b.top >= 0 && b.bottom <= H + 0.5 && b.left >= 0 && b.right <= W + 0.5);
       });
     }, FEATS);
     if (miss.length) bad.push(w + "x" + h + ":" + miss.join(","));
     if (page.__errors.length) bad.push(w + "x" + h + ":errs " + page.__errors.join("|"));
     await page.close();
   }
-  report("K 功能入口在 720/768/900 高的窗口都在视口内",
+  report("K 「⋯」与其中的功能入口在 600–900 高的窗口都在视口内",
     bad.length === 0, JSON.stringify({ bad }));
-}
-
-// L 首屏可见性：v1.32 之前侧栏默认关闭，视口内只剩 5 个按钮，
-// 练习/每日/复盘/统计/存档 全在 ☰ 之后且没有任何引导。首次运行展开一次；
-// 用户自己关掉之后必须记住，否则就成了每次都要关的骚扰。
-{
-  const page = await newPage();
-  const seen = await page.evaluate(() => {
-    const W = innerWidth, H = innerHeight;
-    const inView = (e) => {
-      const b = e.getBoundingClientRect();
-      return b.width > 0 && b.height > 0 && b.right > 0 && b.left < W && b.bottom > 0 && b.top < H;
-    };
-    return {
-      open: document.getElementById("app").classList.contains("panel-open"),
-      feats: ["open-practice", "sgf-slots"]
-        .filter((id) => { const e = document.getElementById(id); return e && inView(e); }).length,
-    };
-  });
-  await page.keyboard.press("[");
-  await page.waitForTimeout(400);
-  await page.reload({ waitUntil: "networkidle" });
-  await page.waitForTimeout(400);
-  const remembered = await page.evaluate(() =>
-    !document.getElementById("app").classList.contains("panel-open"));
-  report("L 首次运行侧栏展开（功能入口可见）且记住用户关闭",
-    seen.open && seen.feats === 2 && remembered && page.__errors.length === 0,
-    JSON.stringify({ ...seen, remembered, errs: page.__errors }));
-  await page.close();
 }
 
 // M 长思考的出口：极限档每手 5s（深 8s）。此前思考期间悔棋被禁用，误落一子
@@ -806,9 +759,7 @@ async function enableSwap2Pvp(page) {
 // 局面何时进入真正的搜索取决于战术层，所以这里落子直到观察到思考态为止。
 {
   const page = await newPage();
-  await page.evaluate(() => document.querySelector('button[data-diff="extreme"]').click());
-  await page.waitForTimeout(250);
-  await dismissConfirm(page);
+  await setupGame(page, { diff: "extreme" });
   await page.waitForTimeout(200);
   const click = clicker(page);
   const pts = [[7, 7], [6, 8], [8, 6], [9, 7], [5, 6], [10, 4], [4, 10], [11, 3], [3, 11]];
@@ -894,9 +845,7 @@ async function enableSwap2Pvp(page) {
     };
     requestAnimationFrame(tick);
   });
-  await page.evaluate(() => document.querySelector('button[data-human="w"]').click());
-  await page.waitForTimeout(250);
-  await dismissConfirm(page);
+  await setupGame(page, { color: "w" });
   await page.waitForTimeout(4000);
   const r = await page.evaluate(() => ({
     fired: window.__fired,
@@ -968,57 +917,7 @@ async function enableSwap2Pvp(page) {
   await page.close();
 }
 
-// Q 滚动内容不得从脚栏底下经过。v1.33.0 用 position:sticky 钉住脚栏，等于在
-// 半透明面板上再叠一层半透明条——木色主题下能直接读出条底下滚过的「导入」。
-// 提高不透明度只是遮住症状；v1.34 改成结构保证：滚动区到脚栏为止，脚栏是它的
-// 兄弟节点。
-//
-// 判据只能是几何边界，不能是「矩形相交」：被 overflow 裁掉的元素，
-// getBoundingClientRect() 照样返回未裁剪的矩形，扫描相交必然误报（这个坑在
-// v1.29 和 v1.32 的审计里各踩过一次）。真正的不变式是滚动区的下边缘不越过
-// 脚栏的上边缘 —— 越不过去，就没有任何东西能被画到脚栏底下。
-{
-  const bad = [];
-  for (const [w, h] of [[1280, 600], [1280, 720], [1366, 768], [1440, 900]]) {
-    const page = await newPage();
-    await page.setViewportSize({ width: w, height: h });
-    await page.keyboard.press("]");
-    await page.waitForTimeout(350);
-    const r = await page.evaluate(() => {
-      const sc = document.querySelector(".side-scroll");
-      const foot = document.querySelector(".side-foot");
-      if (!sc || !foot) return { missing: true };
-      let worstGap = Infinity;
-      for (const t of [0, 0.5, 1]) {
-        sc.scrollTop = Math.round((sc.scrollHeight - sc.clientHeight) * t);
-        worstGap = Math.min(worstGap,
-          foot.getBoundingClientRect().top - sc.getBoundingClientRect().bottom);
-      }
-      sc.scrollTop = sc.scrollHeight;
-      const rows = [...sc.querySelectorAll(".setting-row")].filter((e) => e.getBoundingClientRect().height > 0);
-      const lb = rows[rows.length - 1].getBoundingClientRect();
-      const scb = sc.getBoundingClientRect();
-      return {
-        worstGap: Math.round(worstGap),
-        // 最后一行滚到底后必须真正落在滚动区的可视范围内
-        lastVisible: lb.bottom <= scb.bottom + 0.5 && lb.top >= scb.top - 0.5,
-        bg: getComputedStyle(foot).backgroundColor,
-        scrolls: sc.scrollHeight - sc.clientHeight,
-      };
-    });
-    const tag = w + "x" + h;
-    if (r.missing) bad.push(tag + ":缺少 .side-scroll/.side-foot");
-    else {
-      if (r.worstGap < -0.5) bad.push(tag + ":滚动区越过脚栏 " + (-r.worstGap) + "px");
-      if (!r.lastVisible) bad.push(tag + ":滚到底后最后一行仍不可见");
-      if (r.bg !== "rgba(0, 0, 0, 0)") bad.push(tag + ":脚栏有自己的背景 " + r.bg);
-    }
-    if (page.__errors.length) bad.push(tag + ":errs " + page.__errors.join("|"));
-    await page.close();
-  }
-  report("Q 滚动区止于脚栏，且脚栏没有自己的背景（结构保证，非遮挡）",
-    bad.length === 0, JSON.stringify({ bad }));
-}
+// Q(v1.74 退役)滚动内容不得从侧栏脚栏底下经过 —— 侧栏与脚栏整个退役了。
 
 // R 棋盘必须始终按 1:dpr 渲染，且格距落在整设备像素上。
 // 两个都是 v1.35 修掉的清晰度缺陷：
@@ -1150,115 +1049,39 @@ async function enableSwap2Pvp(page) {
     bad.length === 0, JSON.stringify({ bad }));
 }
 
-// T 侧栏那行元信息不能把分隔点甩成孤行。
-// 原来是 4 段文字 + 3 个 <span class="sep"> 共 7 个平级 flex 子元素。243px 放不下
-// 一行，flex-wrap 就在它必须断的地方断 —— 实测中英两版都是三个点一起换到第 2 行，
-// 「· · ·」孤零零挂在中间。现在分隔点是后一项的 ::before，根本不是元素，排版层面
-// 就不可能被甩出去；并且这一行只剩两个子元素：对局状态，和存档状态。
+// T(v1.74 改)顶栏最长的形态(状态 + 「你执黑 · 普通」/「双人 · 禁手」+ 用时 + 四个按钮)在窄窗口里
+// 不溢出、不重叠:按钮留在窗口里,左边的文字不压到按钮上。此前量的是侧栏元信息行,侧栏退役后
+// 同一件事(信息行不甩出孤行、不溢出)落在顶栏上。
 {
   const bad = [];
   for (const lang of ["zh", "en"]) {
-    const page = await newPage();
-    if (lang === "en") {
-      await setLang(page, "en");
-      await page.waitForTimeout(400);
+    for (const w of [560, 760, 1024]) {
+      const page = await newPage();
+      await page.setViewportSize({ width: w, height: 700 });
+      if (lang === "en") { await setLang(page, "en"); await page.waitForTimeout(250); }
+      await longestMeta(page);
+      await clicker(page)(7, 7);
+      await page.waitForTimeout(600);
+      const r = await page.evaluate(() => {
+        const acts = document.querySelector(".chrome-actions").getBoundingClientRect();
+        const left = [...document.querySelectorAll("#status, #match, #clock")].filter((e) => e.offsetParent !== null)
+          .map((e) => e.getBoundingClientRect());
+        return { actsOut: acts.right > innerWidth + 0.5 || acts.left < 0,
+          overlap: left.some((b) => b.right > acts.left + 0.5),
+          match: document.getElementById("match").textContent };
+      });
+      const tag = lang + "@" + w;
+      if (r.actsOut) bad.push(tag + ":按钮出了窗口");
+      if (r.overlap) bad.push(tag + ":左侧文字压到按钮上(" + r.match + ")");
+      if (page.__errors.length) bad.push(tag + ":errs " + page.__errors.join("|"));
+      await page.close();
     }
-    // newPage() 把 storageSet 换成了空函数（防止卸载时的自动存档把 clear 撤销），
-    // 那样存档提示会显示「存档失败」。这里换回真货，测的才是它最长的那个形态。
-    await page.evaluate(() => {
-      window.GobanHost.storageSet = function (k, v) {
-        try { localStorage.setItem(k, v); return true; } catch (_) { return false; }
-      };
-    });
-    // v1.70:存档提示没了;信息行最长的形态是「双人 · 禁手」
-    await longestMeta(page);
-    await page.evaluate(() => {
-      const c = document.getElementById("board"); const b = c.getBoundingClientRect();
-      const g = window.GobanDraw.geometry(); const sc = b.width / g.w;
-      c.dispatchEvent(new MouseEvent("click", { bubbles: true,
-        clientX: b.x + (g.pad + 7 * g.step) * sc, clientY: b.y + (g.pad + 7 * g.step) * sc }));
-    });
-    await page.waitForTimeout(1400);
-    const r = await page.evaluate(() => {
-      const m = document.querySelector(".side-meta");
-      const mb = m.getBoundingClientRect();
-      const kids = [...m.querySelectorAll(":scope > .meta-stats > *, :scope > :not(.meta-stats)")];
-      const rows = {};
-      for (const k of kids) {
-        const b = k.getBoundingClientRect();
-        const key = Math.round(b.top);
-        (rows[key] = rows[key] || []).push((k.textContent || "").trim());
-      }
-      return {
-        sepEls: m.querySelectorAll(".sep").length,
-        rows: Object.keys(rows).sort((a, b) => a - b).map((k) => rows[k]),
-        over: +(Math.max(...kids.map((k) => k.getBoundingClientRect().right)) - mb.right).toFixed(1),
-      };
-    });
-    if (r.sepEls) bad.push(lang + ":分隔点又成了元素 ×" + r.sepEls);
-    const empty = r.rows.filter((row) => row.every((t) => t === ""));
-    if (empty.length) bad.push(lang + ":有 " + empty.length + " 行只剩分隔点");
-    if (r.over > 0.5) bad.push(lang + ":内容溢出 " + r.over + "px");
-    if (page.__errors.length) bad.push(lang + ":errs " + page.__errors.join("|"));
-    await page.close();
   }
-  report("T 侧栏元信息行不会把分隔点甩成孤行，也不溢出",
+  report("T 顶栏最长形态在窄窗口里不溢出、文字不压按钮",
     bad.length === 0, JSON.stringify({ bad }));
 }
 
-// U 侧栏滚动区的边缘要淡出，而且只在那一侧真有内容时淡出。
-// 没有淡出时，滚动区就是一条硬横线，把正好落在边界上的那一行拦腰切断 —— 默认窗口下
-// 被切的是「复制 / 导出 / 导入」，四个主题里都是从字的中间切过去。反过来，已经滚到底
-// 了还继续压暗最后一行，那才是拿装饰盖住问题。所以两头都要断言。
-{
-  const bad = [];
-  const page = await newPage();
-  // v1.51：外观搬进设置弹层后侧栏矮了 260px，默认窗口下滚动区不再溢出 —— 这条闸门
-  // 自己的覆盖判据当场报了「测不到东西」。把窗口压矮，让它回到有溢出的处境；
-  // 判据本身（该淡出时淡出、到底了就别再压暗）一个字没动。
-  // v1.70：棋谱文件与「每日」挪走后侧栏又矮了一截，540 高不再溢出（实测 470 高才溢出 19px）。
-  // 同样只把它放回「有溢出」的处境：压到 440（溢出 49px）；判据一个字没动。
-  await page.setViewportSize({ width: 1024, height: 440 });
-  await page.waitForTimeout(250);
-  // v1.61：模式/执子/规则搬进开局态后，**对局中**的侧栏不再溢出 —— 棋谱是
-  // grow-sec，挤压全被它内部的滚动吸收了，实测 540/500/470/440/420 五档全是 0px。
-  // 所以这条闸门改在**开局态**测：四行设置都在，540 高实测溢出 43px，正是它要的
-  // 处境。和 v1.51 那次一样，动的是把它放回「有溢出」的处境，**判据一个字没动**。
-  const read = () => page.evaluate(() => {
-    const el = document.getElementById("side-scroll");
-    const mask = getComputedStyle(el).maskImage || getComputedStyle(el).webkitMaskImage;
-    // 末两个色标：… #000 <bottomStop>, transparent 100%
-    const m = /rgb\(0, 0, 0\)\s+(calc\(100% - (\d+)px\)|100%)/.exec(mask);
-    const top = /rgb\(0, 0, 0\)\s+(\d+)px/.exec(mask);
-    return {
-      above: el.dataset.above, below: el.dataset.below,
-      scrollable: el.scrollHeight - el.clientHeight,
-      scrollTop: Math.round(el.scrollTop),
-      fadeBot: m ? (m[2] ? +m[2] : 0) : null,
-      fadeTop: top ? +top[1] : null,
-      hasMask: mask !== "none",
-    };
-  });
-  const top0 = await read();
-  if (!top0.hasMask) bad.push("顶部:没有遮罩");
-  if (top0.scrollable <= 1) bad.push("滚动区没有溢出，这条闸门测不到东西（溢出 " + top0.scrollable + "px）");
-  if (top0.below !== "1" || !top0.fadeBot) bad.push("顶部:下方有内容却没淡出 " + JSON.stringify(top0));
-  if (top0.above !== "0" || top0.fadeTop) bad.push("顶部:上方没内容却淡出了 " + JSON.stringify(top0));
-
-  await page.evaluate(() => {
-    const el = document.getElementById("side-scroll");
-    el.scrollTop = el.scrollHeight;
-  });
-  await page.waitForTimeout(250);
-  const bot = await read();
-  if (bot.scrollTop === 0) bad.push("底部:没滚动成功");
-  if (bot.below !== "0" || bot.fadeBot) bad.push("底部:已到底还在压暗最后一行 " + JSON.stringify(bot));
-  if (bot.above !== "1" || !bot.fadeTop) bad.push("底部:上方有内容却没淡出 " + JSON.stringify(bot));
-  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
-  report("U 侧栏滚动区两端按需淡出（到底就不再压暗）",
-    bad.length === 0, JSON.stringify({ bad }));
-  await page.close();
-}
+// U(v1.74 退役)侧栏滚动区两端按需淡出 —— 侧栏退役,主界面不再有滚动区。
 
 // V 去掉 color-mix 之后，界面必须还在。
 // 这套回归跑在 Chromium，而应用跑 WKWebView / WebView2，且发出去的 Info.plist 写着
@@ -1282,7 +1105,7 @@ async function enableSwap2Pvp(page) {
         return m ? 0.2126 * +m[0] + 0.7152 * +m[1] + 0.0722 * +m[2] : null;
       };
       const out = { surfaces: [], text: [] };
-      for (const [sel, label] of [[".side", "侧栏"], [".toast", "toast"],
+      for (const [sel, label] of [["#more-menu", "菜单"], [".toast", "toast"],
                                   [".swap2-bar", "swap2 条"], [".badge", "badge"],
                                   [".theme-row button.active", "主题选中态"],
                                   ['.switch[aria-pressed="true"]', "开关开启态"]]) {
@@ -1292,8 +1115,9 @@ async function enableSwap2Pvp(page) {
                            opaque(getComputedStyle(el).backgroundColor)]);
       }
       // 文字必须仍然读得出来：拿它和所在面板的亮度差说话
-      const panel = lum(getComputedStyle(document.querySelector(".side")).backgroundColor);
-      for (const [sel, label] of [[".move-list button", "棋谱行"]]) {
+      // v1.74:侧栏与棋谱行退役;文字换成时间线旁的手数,拿它与页面底色比
+      const panel = lum(getComputedStyle(document.body).backgroundColor);
+      for (const [sel, label] of [[".timeline-pos", "手数"]]) {
         const el = document.querySelector(sel);
         if (!el) { out.text.push([label, "缺元素"]); continue; }
         const c = getComputedStyle(el).color;
@@ -1320,6 +1144,7 @@ async function enableSwap2Pvp(page) {
 // 这套回归在容器里渲染中文用的是 WenQuanYi Zen Hei —— macOS 装的是苹方、Windows
 // 装的是微软雅黑，两个平台都没有这个字体。所以「在 100% 下正好放得下」证明不了
 // 发布版应用放得下。把字号推到 125% 再断言同样的性质，才是能跨字体成立的那条。
+// v1.74:侧栏退役,量的是顶栏(按钮不出窗口、文字不压按钮)与「⋯」菜单(每一项都在窗口里)。
 {
   const bad = [];
   for (const scale of [1.0, 1.25]) {
@@ -1331,37 +1156,29 @@ async function enableSwap2Pvp(page) {
       }
       if (scale !== 1) {
         await page.addStyleTag({ content:
-          `body,.side,.modal,.chrome{font-size:${Math.round(14 * scale)}px}` +
-          `.side-meta,.setting-row,.tool-btn,.text-link,.pill button{font-size:${Math.round(12 * scale)}px}` });
+          `body,.modal,.chrome{font-size:${Math.round(14 * scale)}px}` +
+          `.setting-row,.tool-btn,.text-link,.pill button,.menu-item,.meta-chip,.status-pill{font-size:${Math.round(12 * scale)}px}` });
       }
       await longestMeta(page);
-      await page.waitForTimeout(350);
+      await clicker(page)(7, 7);
+      await page.waitForTimeout(500);
+      await page.click("#more-btn");
+      await page.waitForTimeout(150);
       const r = await page.evaluate(() => {
         const H = innerHeight, W = innerWidth;
-        const foot = [...document.querySelectorAll(".side-foot .text-link")];
-        const out = foot.filter((e) => {
-          const b = e.getBoundingClientRect();
-          return !(b.width > 0 && b.height > 0 && b.top >= 0 && b.bottom <= H + 0.5 &&
-                   b.left >= 0 && b.right <= W + 0.5);
-        }).map((e) => e.textContent.trim());
-        const m = document.querySelector(".side-meta");
-        const mb = m.getBoundingClientRect();
-        const kids = [...m.querySelectorAll(":scope > .meta-stats > *, :scope > :not(.meta-stats)")];
-        const rows = {};
-        for (const k of kids) {
-          const b = k.getBoundingClientRect();
-          (rows[Math.round(b.top)] = rows[Math.round(b.top)] || []).push((k.textContent || "").trim());
-        }
+        const inView = (b) => b.width > 0 && b.height > 0 && b.top >= 0 && b.bottom <= H + 0.5 && b.left >= 0 && b.right <= W + 0.5;
+        const acts = document.querySelector(".chrome-actions").getBoundingClientRect();
+        const left = [...document.querySelectorAll("#status, #match, #clock")].filter((e) => e.offsetParent !== null).map((e) => e.getBoundingClientRect());
         return {
-          footOut: out,
-          metaOver: +(Math.max(...kids.map((k) => k.getBoundingClientRect().right)) - mb.right).toFixed(1),
-          dotOnly: Object.values(rows).filter((v) => v.every((t) => t === "")).length,
+          menuOut: [...document.querySelectorAll("#more-menu .menu-item")].filter((e) => !e.hidden && !inView(e.getBoundingClientRect())).map((e) => e.textContent.trim()),
+          actsOut: !inView(acts),
+          overlap: left.some((b) => b.right > acts.left + 0.5),
         };
       });
       const tag = Math.round(scale * 100) + "%" + lang;
-      if (r.footOut.length) bad.push(tag + ":脚栏出视口 " + r.footOut.join(","));
-      if (r.metaOver > 0.5) bad.push(tag + ":元信息溢出 " + r.metaOver + "px");
-      if (r.dotOnly) bad.push(tag + ":有 " + r.dotOnly + " 行只剩分隔点");
+      if (r.menuOut.length) bad.push(tag + ":菜单项出视口 " + r.menuOut.join(","));
+      if (r.actsOut) bad.push(tag + ":顶栏按钮出视口");
+      if (r.overlap) bad.push(tag + ":顶栏文字压到按钮上");
       if (page.__errors.length) bad.push(tag + ":errs " + page.__errors.join("|"));
       await page.close();
     }
@@ -1497,8 +1314,7 @@ async function enableSwap2Pvp(page) {
   // 1) 人赢：黑(人) 已有四子，人点第五子
   {
     const page = await newAudioPage();
-    await openPanel(page);
-    await page.click('button[data-diff="easy"]').catch(() => {});
+    await setupGame(page, { diff: "easy" });
     await page.waitForTimeout(100);
     await page.evaluate(() => navigator.clipboard.writeText(
       "(;FF[4]GM[1]SZ[15];B[dh];W[aa];B[eh];W[ac];B[fh];W[ae];B[gh];W[ag])"));
@@ -1524,8 +1340,7 @@ async function enableSwap2Pvp(page) {
   // 2) 电脑赢：白(电脑) 已有四子，点「续下」让它走
   {
     const page = await newAudioPage();
-    await openPanel(page);
-    await page.click('button[data-diff="easy"]').catch(() => {});
+    await setupGame(page, { diff: "easy" });
     await page.waitForTimeout(100);
     await page.evaluate(() => navigator.clipboard.writeText(
       "(;FF[4]GM[1]SZ[15];B[aa];W[dh];B[ac];W[eh];B[ae];W[fh];B[ag];W[gh];B[ai])"));
@@ -1550,9 +1365,8 @@ async function enableSwap2Pvp(page) {
   //    黑 113 / 白 112 恰好能黑先交替落完 —— 和局此前没有任何测试走到过。
   {
     const page = await newAudioPage();
-    await openPanel(page);
     await ensureSetupPhase(page);
-    await page.click('button[data-mode="pvp"]');
+    await setupGame(page, { mode: "pvp" });
     await page.waitForTimeout(100);
     await dismissConfirm(page);
     await page.waitForTimeout(150);
@@ -1610,7 +1424,6 @@ async function enableSwap2Pvp(page) {
 {
   const bad = [];
   const page = await newAudioPage();
-  await openPanel(page);
   await page.evaluate(() => {
     const b = [...document.querySelectorAll("button")].find((x) => /^练习$|^Practice$/.test(x.textContent.trim()));
     if (b) b.click();
@@ -1747,7 +1560,6 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const seen = {};
   const page = await newPage();
-  await openPanel(page);
   for (const lang of ["zh", "en"]) {
     if (lang === "en") {
       await setLang(page, "en");
@@ -1803,7 +1615,6 @@ async function enableSwap2Pvp(page) {
 {
   const bad = [];
   const page = await newPage();
-  await openPanel(page);
   // v1.71:空棋盘不显示提示 —— 先落一子(合成事件,不切换指针模态)
   await clicker(page)(7, 7); await page.waitForTimeout(900);
   // v1.51：色板随外观搬进设置弹层，得开着量 —— 藏起来的元素聚不了焦，那会读成
@@ -1814,7 +1625,7 @@ async function enableSwap2Pvp(page) {
   await page.evaluate(() => document.getElementById("settings-btn").click());
   await page.waitForTimeout(300);
   const r = await page.evaluate(() => {
-    const ids = ["btn-new", "btn-hint", "toggle-panel", "settings-btn"];
+    const ids = ["btn-new", "btn-hint", "more-btn"]; // v1.74:侧栏开关退役,设置进了「⋯」
     const out = [];
     for (const id of ids) {
       const el = document.getElementById(id);
@@ -1875,7 +1686,6 @@ async function enableSwap2Pvp(page) {
 {
   const bad = [];
   const page = await newPage();
-  await openPanel(page);
   const seen = {};
   for (const lang of ["zh", "en"]) {
     if (lang === "en") {
@@ -1974,7 +1784,6 @@ async function enableSwap2Pvp(page) {
   await page.waitForTimeout(300);
   for (const lang of ["zh", "en"]) {
     if (lang === "en") {
-      await openPanel(page);
       await setLang(page, "en");
     }
     await page.evaluate(() => { const x = document.getElementById("sgf-slots"); if (x) x.click(); }); // v1.71:战绩在「记录」里
@@ -2054,7 +1863,6 @@ async function enableSwap2Pvp(page) {
   await page.waitForTimeout(250);
   for (const lang of ["zh", "en"]) {
     if (lang === "en") {
-      await openPanel(page);
       await setLang(page, "en");
     }
     await page.evaluate(() => { const x = document.getElementById("sgf-slots"); if (x) x.click(); });
@@ -2116,10 +1924,11 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const seen = {};
   const press = async (page, key, ms) => { await page.keyboard.press(key); await page.waitForTimeout(ms || 300); };
-  const moveCount = (page) => page.evaluate(() => document.querySelectorAll("#move-list button").length);
+  // v1.74:手数列表退役 —— 手数与当前手读时间线旁的「a / b」(开局时当前手为 null)
+  const moveCount = (page) => page.evaluate(() => Number(document.getElementById("replay-pos").textContent.split("/")[1]));
   const curMove = (page) => page.evaluate(() => {
-    const el = document.querySelector("#move-list button.cur");
-    return el ? el.textContent.trim() : null;
+    const n = Number(document.getElementById("replay-pos").textContent.split("/")[0]);
+    return n > 0 ? String(n) : null;
   });
   const okConfirm = async (page) => {
     await page.evaluate(() => {
@@ -2130,10 +1939,7 @@ async function enableSwap2Pvp(page) {
     await page.waitForTimeout(250);
   };
   const toPvp = async (page) => {
-    await openPanel(page);
-    await page.evaluate(() => { const x = document.querySelector('button[data-mode="pvp"]'); if (x) x.click(); });
-    await page.waitForTimeout(200);
-    await okConfirm(page);
+    await setupGame(page, { mode: "pvp" });
   };
 
   // ① 点击交叉点落子 + 悬停有预览
@@ -2187,10 +1993,7 @@ async function enableSwap2Pvp(page) {
     await press(page, "ArrowRight"); const r1 = await curMove(page);
     await press(page, "Home"); const home = await curMove(page);
     await press(page, "End"); const end = await curMove(page);
-    const last = await page.evaluate(() => {
-      const all = [...document.querySelectorAll("#move-list button")];
-      return all.length ? all[all.length - 1].textContent.trim() : null;
-    });
+    const last = String(await moveCount(page));
     seen["③④"] = { 起: start, 左1: l1, 左2: l2, 右1: r1, Home: home, End: end, 末手: last };
     if (!(l1 && l1 !== start)) bad.push("← 没有回退（" + start + " → " + l1 + "）");
     if (!(l2 && l2 !== l1)) bad.push("← 第二次没有再退（" + l1 + " → " + l2 + "）");
@@ -2229,19 +2032,7 @@ async function enableSwap2Pvp(page) {
     if (!(n0 > 0 && n1 === 0)) bad.push("N 没开新局（" + n0 + " → " + n1 + "）");
     await page.close();
   }
-  // ⑦ [ ] 侧栏
-  {
-    const page = await newPage();
-    const isOpen = () => page.evaluate(() => {
-      const a = document.getElementById("app"); return a ? a.classList.contains("panel-open") : null;
-    });
-    await press(page, "]", 350); const o1 = await isOpen();
-    await press(page, "[", 350); const o2 = await isOpen();
-    seen["⑦侧栏"] = { "]": o1, "[": o2 };
-    if (o1 !== true) bad.push("] 没有展开侧栏");
-    if (o2 !== false) bad.push("[ 没有收起侧栏");
-    await page.close();
-  }
+  // ⑦(v1.74 退役)[ ] 开合侧栏 —— 侧栏退役,这两个键随之从说明里删掉
   // ⑧ ⌘1 / ⌘2 模式
   {
     const page = await newPage();
@@ -2266,15 +2057,13 @@ async function enableSwap2Pvp(page) {
     const closed = await page.evaluate(() => {
       const m = document.getElementById("help-modal"); return m ? !m.classList.contains("show") : null;
     });
-    await press(page, "]", 300);
+    await page.click("#more-btn"); await page.waitForTimeout(150);
     await press(page, "Escape", 400);
-    const panel = await page.evaluate(() => {
-      const a = document.getElementById("app"); return a ? a.classList.contains("panel-open") : null;
-    });
-    seen["⑪⑬"] = { "?打开": shown, "Esc关掉": closed, "Esc后侧栏": panel };
+    const menu = await page.evaluate(() => document.getElementById("more-menu").hidden);
+    seen["⑪⑬"] = { "?打开": shown, "Esc关掉": closed, "Esc后菜单收起": menu };
     if (shown !== true) bad.push("? 没有打开说明");
     if (closed !== true) bad.push("Esc 没有关掉说明");
-    if (panel !== false) bad.push("Esc 没有收起侧栏");
+    if (menu !== true) bad.push("Esc 没有收起「⋯」菜单");
     await page.close();
   }
   report("AI 帮助里写的快捷键逐个按下去都管用", bad.length === 0, JSON.stringify({ bad, seen }));
@@ -2317,7 +2106,6 @@ async function enableSwap2Pvp(page) {
   });
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(300);
-  await openPanel(page);
   // v1.71:空棋盘不显示悔棋 / 提示 / 复盘 —— 先落两子,让这条闸门量到的东西在场
   await clicker(page)(7, 7); await page.waitForTimeout(900);
   await clicker(page)(6, 6); await page.waitForTimeout(900);
@@ -2470,61 +2258,16 @@ async function enableSwap2Pvp(page) {
   report("AJ 四套主题的文字都达 AA", bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
-// ---- Test AK: 顶栏与侧栏之间不许有硬缝，且顶栏五个按钮仍点得到 ----
-// 顶栏底色是**淡出到透明**的渐变。在棋盘那一侧它化得开（相邻像素亮度跳变 0–1.2），
-// 而 v1.47 之前侧栏从 top:--chrome-h 起、换成另一个面，于是在 y=44 处被齐刷刷切断：
-// 实测 notebook 35.3 / day 32.9 / wood 13 / night 8.6。补一条 border-top 只会更糟
-// （43 / 34.7 / 34.1 / 32.9 —— 色阶之上再加一条线）。侧栏改为铺满整列之后降到 ~1。
-//
-// 第二半同样要紧：让缝消失的办法是把顶栏压在侧栏上（z-index 31 > 30），而 v1.26 正是
-// 反过来做才把 悔棋/提示/新局/?/☰ 埋掉的 —— 五个按钮透出来却吞掉每一次点击。所以这条
-// 闸门必须同时守住「缝要平」和「按钮要可点」：只守前者，把 z 序写反照样绿。
+// ---- Test AK: 顶栏按钮在最上层、弹层盖得住顶栏 ----
+// v1.26 把 悔棋/提示/新局 埋在侧栏底下 —— 按钮透出来却吞掉每一次点击。v1.74 侧栏退役,
+// 「顶栏与侧栏之间不许有硬缝」那一半随之退役;「按钮要可点」「弹层要盖住顶栏」两件照守。
 {
   const bad = [];
   const seen = {};
   const page = await newPage();
-  await openPanel(page);
   await page.waitForTimeout(300);
-  // v1.71:空棋盘不显示悔棋 / 提示 / 复盘 —— 先落两子,让这条闸门量到的东西在场
   await clicker(page)(7, 7); await page.waitForTimeout(900);
   await clicker(page)(6, 6); await page.waitForTimeout(900);
-  for (const th of ["wood", "night", "day", "notebook"]) {
-    await page.evaluate((t) => { const x = document.querySelector('.theme-row [data-theme="' + t + '"]'); if (x) x.click(); }, th);
-    await page.waitForTimeout(420);
-    const shot = (await page.screenshot()).toString("base64");
-    const r = await page.evaluate(async ({ shot }) => {
-      const img = new Image(); img.src = "data:image/png;base64," + shot; await img.decode();
-      const cv = document.createElement("canvas"); cv.width = img.width; cv.height = img.height;
-      const ctx = cv.getContext("2d"); ctx.drawImage(img, 0, 0);
-      const dpr = img.width / innerWidth;
-      const lum = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      const side = document.querySelector(".side").getBoundingClientRect();
-      const chromeH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--chrome-h")) || 44;
-      // 竖线取在侧栏内、贴着左缘 8px：那一列没有文字，量到的是纯粹的底
-      const at = (x) => (y) => {
-        const d = ctx.getImageData(Math.round(x * dpr), Math.round(y * dpr), 1, 1).data;
-        return lum(d[0], d[1], d[2]);
-      };
-      const inSide = at(side.left + 8);
-      const onBoard = at(60);
-      const span = (f) => {
-        let mx = 0, where = null;
-        for (let y = chromeH - 9; y <= chromeH + 10; y++) {
-          const d = Math.abs(f(y) - f(y - 1));
-          if (d > mx) { mx = d; where = y; }
-        }
-        return { 跳变: Math.round(mx * 10) / 10, 在y: where };
-      };
-      return { 侧栏: span(inSide), 棋盘: span(onBoard), 侧栏顶: Math.round(side.top) };
-    }, { shot });
-    seen[th] = r;
-    // 判据是**相对**的：跟同一条顶栏在棋盘那侧的表现比，不写死一个绝对阈值 ——
-    // 主题换了、渐变调了，绝对值会动，而「两侧应当一样平」不会。
-    const 上限 = Math.max(4, r.棋盘.跳变 * 3);
-    if (r.侧栏.跳变 > 上限) {
-      bad.push(th + ": 侧栏侧跳变 " + r.侧栏.跳变 + "(在 y=" + r.侧栏.在y + ")，棋盘侧只有 " + r.棋盘.跳变 + " —— 顶栏在侧栏这边被切断了");
-    }
-  }
   // 五个顶栏按钮:必须是命中最上层的那个元素
   const hits = await page.evaluate(() => {
     const out = {};
@@ -2554,7 +2297,7 @@ async function enableSwap2Pvp(page) {
   if (covered !== true) bad.push("开着弹层时顶栏「新局」仍可点 —— 顶栏爬到弹层上面了");
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
-  report("AK 顶栏与侧栏之间没有硬缝，且顶栏按钮仍在最上层", bad.length === 0, JSON.stringify({ bad, seen }));
+  report("AK 顶栏按钮在最上层,开着弹层时顶栏被盖住", bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
 // ---- Test AL: 网格容器的列数要跟子元素数相容 ----
@@ -2567,7 +2310,6 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const seen = {};
   const page = await newPage();
-  await openPanel(page);
   for (const lang of ["zh", "en"]) {
     if (lang === "en") {
       await setLang(page, "en");
@@ -2614,7 +2356,6 @@ async function enableSwap2Pvp(page) {
   const sgfOf = (moves) => "(;GM[1]FF[4]SZ[15]" +
     moves.map(([r, c], i) => ";" + (i % 2 === 0 ? "B" : "W") + "[" + P(r, c) + "]").join("") + ")";
   const page = await newPage();
-  await openPanel(page);
   seen["①开关与评语行"] = await page.evaluate(() => ({
     toggle: !!document.getElementById("opt-analysis"), line: !!document.getElementById("coach-verdict") }));
   if (seen["①开关与评语行"].toggle || seen["①开关与评语行"].line) bad.push("「复盘分析」开关或逐手评语行还在");
@@ -2666,7 +2407,6 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const seen = {};
   const page = await newPage();
-  await openPanel(page);
   const measure = (scope) =>
     page.evaluate((sel) => {
       const rows = [...document.querySelectorAll(sel + " .setting-row")]
@@ -2691,10 +2431,11 @@ async function enableSwap2Pvp(page) {
       };
     }, scope);
 
-  const scopes = [["侧栏", "#side"], ["设置弹层", "#settings-modal"]];
+  // v1.74:侧栏退役,对局那几行住进「新局」卡片 —— 两处照样都量
+  const scopes = [["新局卡片", "#new-sheet"], ["设置弹层", "#settings-modal"]];
   for (const lang of ["zh", "en"]) {
     if (lang === "en") await setLang(page, "en");
-    await page.evaluate(() => document.getElementById("settings-btn").click());
+    await page.evaluate(() => { document.getElementById("btn-new").click(); document.getElementById("settings-btn").click(); });
     await page.waitForTimeout(300);
     let totalRows = 0, totalPills = 0, totalSwitches = 0;
     const all = [];
@@ -2715,23 +2456,24 @@ async function enableSwap2Pvp(page) {
     const hs = [...new Set(all)];
     if (hs.length !== 1) bad.push(lang + ": 控件有 " + hs.length + " 种高度 " + JSON.stringify(hs));
     await page.evaluate(() => document.getElementById("settings-close").click());
+    await page.keyboard.press("Escape");
     await page.waitForTimeout(200);
   }
 
   // ③ 控件不许撑起行高。压扁控件后每一行的顶端都必须原地不动。
-  await page.evaluate(() => document.getElementById("settings-btn").click());
+  await page.evaluate(() => { document.getElementById("btn-new").click(); document.getElementById("settings-btn").click(); });
   await page.waitForTimeout(300);
-  const beforeSide = await measure("#side");
+  const beforeSide = await measure("#new-sheet");
   const beforeMod = await measure("#settings-modal");
   await page.addStyleTag({ content: ".setting-row > .pill, .setting-row .switch { height: 1px !important; }" });
   await page.waitForTimeout(200);
-  const afterSide = await measure("#side");
+  const afterSide = await measure("#new-sheet");
   const afterMod = await measure("#settings-modal");
   const movedIn = (name, b, a) =>
     b.tops.map((t, i) => ({ i, t, t2: a.tops[i] }))
       .filter((x) => x.t2 == null || Math.abs(x.t2 - x.t) > 0.5)
       .map((m) => name + "第" + (m.i + 1) + "行 " + m.t + "→" + m.t2);
-  const moved = [...movedIn("侧栏", beforeSide, afterSide), ...movedIn("弹层", beforeMod, afterMod)];
+  const moved = [...movedIn("卡片", beforeSide, afterSide), ...movedIn("弹层", beforeMod, afterMod)];
   seen.压扁控件后位移 = moved;
   if (beforeSide.tops.length + beforeMod.tops.length < 8) {
     bad.push("压扁前两处合计只量到 " + (beforeSide.tops.length + beforeMod.tops.length) + " 行 —— 这半条测不到东西");
@@ -2740,7 +2482,7 @@ async function enableSwap2Pvp(page) {
 
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
-  report("AN 设置行控件同高、行距同节奏，且控件不撑行高（侧栏 + 设置弹层）",
+  report("AN 设置行控件同高、行距同节奏，且控件不撑行高（新局卡片 + 设置弹层）",
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
@@ -2757,7 +2499,6 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const seen = {};
   const page = await newPage();
-  await openPanel(page);
   // v1.68 起空棋盘不显示翻页条(没有可翻的):先落一子,让它出来再量
   await clicker(page)(7, 7);
   await page.waitForTimeout(300);
@@ -2766,7 +2507,7 @@ async function enableSwap2Pvp(page) {
       await setLang(page, "en");
     }
     const r = await page.evaluate(() => {
-      const rows = { chrome: ".chrome-actions", replay: ".replay-bar" };
+      const rows = { chrome: ".chrome-actions" }; // v1.74:翻页条退役
       const host = document.createElement("div");
       host.style.cssText = "position:fixed;left:0;top:0;opacity:0;pointer-events:none";
       document.body.appendChild(host);
@@ -2819,9 +2560,12 @@ async function enableSwap2Pvp(page) {
     seen[lang] = r;
 
     // 覆盖:量不到东西的闸门永远是绿的
-    // v1.71:翻页 5 → 3、快捷键挪进设置,图标从 8 个减到 5 个(开局 / 终局 / 问号的定义一并删掉)
-    if (r.symbols.length < 5) bad.push(lang + ": 只找到 " + r.symbols.length + " 个图标定义 —— 覆盖不足");
-    if (r.buttons.length < 5) bad.push(lang + ": 只找到 " + r.buttons.length + " 个图标按钮 —— 覆盖不足");
+    // v1.71:翻页 5 → 3、快捷键挪进设置,图标从 8 个减到 5 个;v1.74:翻页与侧栏开关退役、设置进了「⋯」,
+    // 只剩「⋯」一个图标按钮 —— 图标定义与图标按钮一一对应,多一个没用上的定义也算错
+    if (r.symbols.length < 1) bad.push(lang + ": 没有图标定义 —— 覆盖不足");
+    if (r.buttons.length < 1) bad.push(lang + ": 没有图标按钮 —— 覆盖不足");
+    const used = new Set(r.buttons.map((b) => b.sym));
+    for (const sy of r.symbols) if (!used.has(sy.id)) bad.push(lang + ": 图标 " + sy.id + " 定义了却没人用");
 
     const vbs = [...new Set(r.symbols.map((x) => x.vb))];
     if (vbs.length !== 1) bad.push(lang + ": 图标定义有 " + vbs.length + " 种 viewBox " + JSON.stringify(vbs));
@@ -2851,9 +2595,7 @@ async function enableSwap2Pvp(page) {
     }
   }
   // 浏览器自己算的无障碍名，和上面的结构判据对一遍（只查结构不查计算值是同义反复）
-  // v1.73 起「回到最新」在最新一手时不显示（也就不在无障碍树里），先退到旧手让它出现
-  await page.evaluate(() => document.getElementById("rep-prev").click()); await page.waitForTimeout(100);
-  for (const id of ["rep-prev", "rep-live", "settings-btn", "toggle-panel"]) {
+  for (const id of ["more-btn"]) {
     const snap = await page.locator("#" + id).ariaSnapshot().catch(() => "");
     const m = /button "([^"]*)"/.exec(snap || "");
     const name = m ? m[1] : "";
@@ -2890,7 +2632,6 @@ async function enableSwap2Pvp(page) {
   const page = await newPage();
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.waitForTimeout(200);
-  await openPanel(page);
   // v1.71:空棋盘不显示悔棋 / 提示 / 复盘 —— 先落两子,让这条闸门量到的东西在场
   await clicker(page)(7, 7); await page.waitForTimeout(900);
   await clicker(page)(6, 6); await page.waitForTimeout(900);
@@ -2917,29 +2658,28 @@ async function enableSwap2Pvp(page) {
   for (const lang of ["zh", "en"]) {
     if (lang === "en") await setLang(page, "en");
 
-    // ---- 底栏：中英都得是一行，且每个入口点得着 ----
+    // ---- 「⋯」菜单(v1.74,接替侧栏底栏):中英每一项都是一行,且点得着 ----
+    await page.evaluate(() => document.getElementById("more-btn").click());
+    await page.waitForTimeout(150);
     const foot = await page.evaluate(() => {
-      const f = document.querySelector(".side-foot");
-      const bs = [...f.querySelectorAll("button")].filter((x) => x.getBoundingClientRect().height > 0);
+      const bs = [...document.querySelectorAll("#more-menu .menu-item")].filter((x) => x.getBoundingClientRect().height > 0);
+      const lh = (b) => { const rg = document.createRange(); rg.selectNodeContents(b.firstElementChild || b);
+        return rg.getClientRects().length; };
       return {
-        h: +f.getBoundingClientRect().height.toFixed(1),
         n: bs.length,
-        rows: [...new Set(bs.map((x) => Math.round(x.getBoundingClientRect().top)))].length,
-        // v1.64:底栏分两层(学习入口一排按钮 + 存档 / 统计一排文字),每一层各自不许折行
-        groupRows: [...f.querySelectorAll(".learn-row, .foot-links")].map((g) =>
-          [...new Set([...g.querySelectorAll("button")].filter((x) => x.getBoundingClientRect().height > 0)
-            .map((x) => Math.round(x.getBoundingClientRect().top)))].length),
+        wrapped: bs.filter((b) => lh(b) > 1).map((b) => b.textContent.trim()),
         minW: +Math.min(...bs.map((x) => x.getBoundingClientRect().width)).toFixed(1),
         minH: +Math.min(...bs.map((x) => x.getBoundingClientRect().height)).toFixed(1),
       };
     });
-    seen[lang + "/底栏"] = foot;
-    if (foot.n < 3) bad.push(lang + ": 底栏只量到 " + foot.n + " 个入口 —— 覆盖不足"); // v1.71:复盘 · 练习 + 记录
-    if (foot.groupRows.length !== 2 || foot.groupRows.some((r) => r !== 1))
-      bad.push(lang + ": 底栏某一层折行了 " + JSON.stringify(foot.groupRows) + "（高 " + foot.h + "）");
-    // 24px 是 v1.32 定的最小命中尺寸，省宽度不许省到这条线以下
-    if (foot.minW < 24) bad.push(lang + ": 底栏最窄入口只有 " + foot.minW + "px 宽，低于 24 的最小命中尺寸");
-    if (foot.minH < 24) bad.push(lang + ": 底栏最矮入口只有 " + foot.minH + "px 高");
+    seen[lang + "/菜单"] = foot;
+    if (foot.n < 4) bad.push(lang + ": 菜单只量到 " + foot.n + " 项 —— 覆盖不足");
+    if (foot.wrapped.length) bad.push(lang + ": 菜单项折行了 " + JSON.stringify(foot.wrapped));
+    // 24px 是 v1.32 定的最小命中尺寸
+    if (foot.minW < 24) bad.push(lang + ": 最窄菜单项只有 " + foot.minW + "px 宽,低于 24 的最小命中尺寸");
+    if (foot.minH < 24) bad.push(lang + ": 最矮菜单项只有 " + foot.minH + "px 高");
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(150);
 
     // ---- 说明弹层 ----
     await page.evaluate(() => document.getElementById("open-help").click());
@@ -2974,7 +2714,7 @@ async function enableSwap2Pvp(page) {
   }
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
-  report("AP 弹层宽度与底栏宽度都对得上内容（1280×720，中英）",
+  report("AP 弹层宽度对得上内容、「⋯」菜单项不折行（1280×720，中英）",
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
@@ -2990,7 +2730,6 @@ async function enableSwap2Pvp(page) {
 {
   const bad = [];
   const page = await newPage();
-  await openPanel(page);
   const r = await page.evaluate(() => {
     const rules = [];
     for (const sh of document.styleSheets) {
@@ -3061,11 +2800,6 @@ async function enableSwap2Pvp(page) {
   for (const [vw, vh] of sizes) {
     await page.setViewportSize({ width: vw, height: vh });
     await page.waitForTimeout(250);
-    await page.evaluate(() => {
-      const a = document.getElementById("app");
-      if (!a.classList.contains("panel-open")) document.getElementById("toggle-panel").click();
-    });
-    await page.waitForTimeout(200);
     await page.evaluate(() => document.getElementById("open-practice").click());
     await page.waitForTimeout(600);
     const r = await page.evaluate(() => {
@@ -3125,7 +2859,6 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const seen = {};
   const page = await newPage();
-  await openPanel(page);
   const click = clicker(page);
   const pick = async (rule) => {
     await ensureSetupPhase(page);
@@ -3147,7 +2880,7 @@ async function enableSwap2Pvp(page) {
   if (seen.afterRenju.rule !== "renju") bad.push("点了禁手,规则没跟上:" + seen.afterRenju.rule);
   if (seen.afterRenju.mode !== "ai") bad.push("选禁手把模式改掉了:" + seen.afterRenju.mode);
   await ensureSetupPhase(page);
-  await page.click('#mode-seg button[data-mode="ai"]');
+  await setupGame(page, { mode: "ai" });
   await page.waitForTimeout(200);
   seen.afterAi = await st();
   if (seen.afterAi.mode !== "ai") bad.push("点了人机,模式没跟上:" + seen.afterAi.mode);
@@ -3167,7 +2900,7 @@ async function enableSwap2Pvp(page) {
   };
   await pick("renju");
   await ensureSetupPhase(page);
-  await page.click('#mode-seg button[data-mode="pvp"]');   // 手工摆局面,别让电脑抢手
+  await setupGame(page, { mode: "pvp" });   // 手工摆局面,别让电脑抢手
   await page.waitForTimeout(200);
   await build();
   seen.built = await stoneCount();
@@ -3203,7 +2936,6 @@ async function enableSwap2Pvp(page) {
   seen.ctrlOn = await inkA(5, 5);   // 同盘上一个没有标记的空交叉点
   // 同样是禁手档,但局面里没有禁手点 —— (8,8) 与 (5,5) 都空着、都没有标记
   const page2 = await newPage();
-  await openPanel(page2);
   const click2 = clicker(page2);
   await ensureSetupPhase(page2);
   await pickRule(page2, "renju");
@@ -3227,10 +2959,9 @@ async function enableSwap2Pvp(page) {
 
   // ④ 反证:同一个点在自由档下落得下去 —— 否则 ② 可能只是「黑一律不许落」
   const page3 = await newPage();
-  await openPanel(page3);
   // 双人 —— 默认是人机,那样白的四手会被引擎抢着下,九手根本摆不出来(实测只落 5 子)
   await ensureSetupPhase(page3);
-  await page3.click('#mode-seg button[data-mode="pvp"]');
+  await setupGame(page3, { mode: "pvp" });
   await page3.waitForTimeout(200);
   const click3 = clicker(page3);
   for (const [r, c] of [[8, 6], [0, 0], [8, 7], [0, 2], [6, 8], [0, 4], [7, 8], [0, 6], [8, 8]]) {
@@ -3250,15 +2981,17 @@ async function enableSwap2Pvp(page) {
 
   // ⑥ 否决项:960×620 中英两语,设置区都不许开始滚。
   //    v1.53 实测两语都是 0px;拆成「规则」+「开局」两行时中文 7px、英文 44px。
+  //    v1.74:侧栏退役,规则一直在设置弹层里 —— 量设置弹层。
   for (const lang of ["zh", "en"]) {
     const p = await newPage();
     await p.setViewportSize({ width: 960, height: 620 });
-    await openPanel(p);
     if (lang === "en") await setLang(p, "en");
     await p.waitForTimeout(200);
+    await p.evaluate(() => document.getElementById("settings-btn").click());
+    await p.waitForTimeout(250);
     const r = await p.evaluate(() => {
-      const sc = document.getElementById("side-scroll");
-      const rows = [...document.querySelectorAll("#side .setting-row")]
+      const sc = document.querySelector("#settings-modal .modal");
+      const rows = [...document.querySelectorAll("#settings-modal .setting-row")]
         .filter((x) => x.getBoundingClientRect().height > 0).length;
       const seg = [...document.querySelectorAll("#rule-seg button")].map((b) => ({
         clipped: b.scrollWidth > b.clientWidth + 1,
@@ -3274,7 +3007,7 @@ async function enableSwap2Pvp(page) {
 
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
-  report("AS 规则三选一:联动、拦子、标点、RU[]，且侧栏一行没多长",
+  report("AS 规则三选一:联动、拦子、标点、RU[]，且设置弹层一行没多长",
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
@@ -3314,13 +3047,12 @@ async function enableSwap2Pvp(page) {
   // ① 禁手档存 → 切到人机(规则被带回自由)→ 载入:规则必须回到禁手,模式回到双人
   {
     const page = await newPage();
-    await openPanel(page);
     const click = clicker(page);
     await ensureSetupPhase(page);
     await pickRule(page, "renju");
     await page.waitForTimeout(200);
     await ensureSetupPhase(page);
-    await page.click('#mode-seg button[data-mode="pvp"]');
+    await setupGame(page, { mode: "pvp" });
     await page.waitForTimeout(200);
     for (const [r, c] of [[8, 6], [0, 0], [8, 7], [0, 2]]) { await click(r, c); await page.waitForTimeout(60); }
     seen.saved = await state(page);
@@ -3345,7 +3077,6 @@ async function enableSwap2Pvp(page) {
   //    所以这里落一手让电脑应一手(手数确定是 2,落点随它),而不是先切双人摆棋。
   {
     const page = await newPage();
-    await openPanel(page);
     const click = clicker(page);
     await click(7, 7);
     await page.waitForTimeout(1800);      // 等电脑应手
@@ -3385,7 +3116,6 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const seen = {};
   const page = await newPage();
-  await openPanel(page);
   const click = clicker(page);
 
   const setup = async (diff) => {
@@ -3397,13 +3127,13 @@ async function enableSwap2Pvp(page) {
     await pickRule(page, "renju"); await page.waitForTimeout(150);
     await dismissConfirm(page); await page.waitForTimeout(150);
     await ensureSetupPhase(page);
-    await page.click('#mode-seg button[data-mode="ai"]'); await page.waitForTimeout(150);
+    await setupGame(page, { mode: "ai" }); await page.waitForTimeout(150);
     await dismissConfirm(page); await page.waitForTimeout(150);
-    await page.click('#diff-seg button[data-diff="' + diff + '"]'); await page.waitForTimeout(150);
+    await setupGame(page, { diff: diff }); await page.waitForTimeout(150);
     await dismissConfirm(page); await page.waitForTimeout(150);
     // 人执白 ⇒ 电脑执黑,禁手约束落在电脑身上
     await ensureSetupPhase(page);
-    await page.click('#color-seg button[data-human="w"]'); await page.waitForTimeout(150);
+    await setupGame(page, { color: "w" }); await page.waitForTimeout(150);
     await dismissConfirm(page); await page.waitForTimeout(400);
   };
   for (const [diff, plies] of [["normal", 8], ["hard", 4]]) {
@@ -3467,7 +3197,6 @@ async function enableSwap2Pvp(page) {
   const bad = [];
   const seen = {};
   const page = await newPage();
-  await openPanel(page);
   const click = clicker(page);
 
   const playAFew = async () => {
@@ -3515,7 +3244,7 @@ async function enableSwap2Pvp(page) {
   await pickRule(page, "renju"); await page.waitForTimeout(150);
   await dismissConfirm(page); await page.waitForTimeout(150);
   await ensureSetupPhase(page);
-  await page.click('#mode-seg button[data-mode="pvp"]'); await page.waitForTimeout(150);
+  await setupGame(page, { mode: "pvp" }); await page.waitForTimeout(150);
   await dismissConfirm(page); await page.waitForTimeout(300);
   await playAFew();
   const rj = await probe("renju");
@@ -3543,23 +3272,10 @@ async function enableSwap2Pvp(page) {
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
-// AW 开局设置只在开局态出现，且侧栏在最矮支持窗口下仍然不用滚（v1.61）。
-// v1.68：规则挪进了设置弹层（一次性的偏好，不是每局都换），这里改为守「它不许回到侧栏」。
+// AW 开局设置住在「新局」卡片里(v1.74 改;v1.61 起它们只在开局态出现在侧栏)。
 //
-// 模式 / 执子 / 规则三个控件在对局中改，**本来就会弹确认再 reset() 重开一局**
-// （mode-seg / color-seg / rule-seg 三个 onclick 都是 confirm → reset）——
-// 它们是「开新局」动作，只是长得像设置。所以放进开局态不损失任何能力。难度是
-// 唯一真正的对局中设置（立即生效、不重开），必须留下。
-//
-// 这条闸门守两件互相独立的事，缺一不可：
-//
-// ① **相位**：开局态四行都在；落一子之后，只剩难度。
-//    反证在判据里自带 —— 如果有人把 syncPhaseFields 拆掉，「对局中模式仍显示」
-//    立刻报；如果有人连难度一起藏了，「对局中难度不见了」也立刻报。两个方向都堵。
-//
-// ② **溢出**：侧栏卡片是这一版新加的，内边距吃垂直空间。10px 12px 那一版实测
-//    在 1024×600 撑出 6px 溢出，踩了「设置区不许从不用滚变成要滚」。所以这里
-//    把五种高度全量到 0，改内边距的人会被这条拦下。
+// 守三件事:① 卡片里模式 / 难度 / 执子三行一直都在 —— 空棋盘和对局中一样(对局中改它们
+// 本来就是开新局);② 规则仍在设置弹层里,不回到卡片;③ 五种高度下卡片整张都在窗口里。
 {
   const bad = [], seen = {};
   const vis = (page) => page.evaluate(() => {
@@ -3568,51 +3284,36 @@ async function enableSwap2Pvp(page) {
       if (!e) return "缺失";
       return e.getBoundingClientRect().height > 0 ? "显示" : "隐藏";
     };
-    const sc = document.getElementById("side-scroll");
+    const sh = document.getElementById("new-sheet");
+    const r = sh.getBoundingClientRect();
     return {
-      模式: q("mode-field"), 难度: q("diff-field"),
-      执子: q("color-field"),
-      // v1.68 起规则在设置弹层里:它不许回到侧栏
-      规则: document.querySelector("#side #rule-field") ? "在侧栏" : document.querySelector("#settings-modal #rule-field") ? "在设置" : "缺失",
-      溢出: sc ? Math.max(0, sc.scrollHeight - sc.clientHeight) : -1,
+      模式: q("mode-field"), 难度: q("diff-field"), 执子: q("color-field"),
+      规则: document.querySelector("#new-sheet #rule-field") ? "在卡片" : document.querySelector("#settings-modal #rule-field") ? "在设置" : "缺失",
+      出屏: Math.max(0, Math.round(r.bottom - innerHeight)),
     };
   });
-
   for (const h of [600, 640, 700, 720, 800]) {
     const page = await newPage();
     await page.setViewportSize({ width: 1024, height: h });
     await page.waitForTimeout(250);
-    await openPanel(page);
-
+    await page.click("#btn-new"); await page.waitForTimeout(150);
     const before = await vis(page);
     if (h === 800) seen.开局态 = before;
-    if (before.模式 !== "显示" || before.执子 !== "显示" || before.规则 !== "在设置")
-      bad.push(h + "高 开局态:模式/执子应当在侧栏、规则在设置弹层(得到 " + JSON.stringify(before) + ")");
-    if (before.溢出 !== 0) bad.push(h + "高 开局态:侧栏溢出 " + before.溢出 + "px —— 设置区不许要滚");
-
-    // 落一子进入对局态
-    await page.evaluate(() => {
-      const cv = document.getElementById("board");
-      const b = cv.getBoundingClientRect();
-      const pad = b.width * 0.06, step = (b.width - 2 * pad) / 14;
-      cv.dispatchEvent(new MouseEvent("click", {
-        bubbles: true, clientX: b.left + pad + 7 * step, clientY: b.top + pad + 7 * step,
-      }));
-    });
+    if (before.模式 !== "显示" || before.难度 !== "显示" || before.执子 !== "显示" || before.规则 !== "在设置")
+      bad.push(h + "高 空棋盘:卡片里应有模式/难度/执子、规则在设置弹层(得到 " + JSON.stringify(before) + ")");
+    if (before.出屏) bad.push(h + "高:卡片出了窗口 " + before.出屏 + "px");
+    await page.keyboard.press("Escape");
+    await clicker(page)(7, 7);
     await page.waitForTimeout(700);
-
+    await page.click("#btn-new"); await page.waitForTimeout(150);
     const after = await vis(page);
     if (h === 800) seen.对局中 = after;
-    if (after.模式 !== "隐藏") bad.push(h + "高 对局中:模式还在 —— 相位切换没生效");
-    if (after.执子 !== "隐藏") bad.push(h + "高 对局中:执子还在(syncSettingsUI 可能覆盖了相位)");
-    if (after.规则 !== "在设置") bad.push(h + "高 对局中:规则不在设置弹层里");
-    if (after.难度 !== "显示") bad.push(h + "高 对局中:难度不见了 —— 它是唯一该留下的对局中设置");
-    if (after.溢出 !== 0) bad.push(h + "高 对局中:侧栏溢出 " + after.溢出 + "px");
-
+    if (after.模式 !== "显示" || after.难度 !== "显示" || after.执子 !== "显示")
+      bad.push(h + "高 对局中:卡片里的三行应当都在(得到 " + JSON.stringify(after) + ")");
     if (page.__errors.length) bad.push(h + "高 errs " + page.__errors.join("|"));
     await page.close();
   }
-  report("AW 开局设置只在开局态出现，且五种高度下侧栏都不用滚",
+  report("AW 模式 / 难度 / 执子在「新局」卡片里(空盘与对局中都在)、规则在设置里、五种高度下卡片不出屏",
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 

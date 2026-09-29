@@ -106,10 +106,13 @@ async function dismissConfirm(page) {
   }
 }
 
+// v1.74:模式住在「新局」卡片里,选好点「开始」
 async function toPvp(page) {
-  await page.keyboard.press("]");
-  await page.waitForTimeout(120);
-  await page.evaluate(() => { const x = document.querySelector('button[data-mode="pvp"]'); if (x) x.click(); });
+  await page.evaluate(() => {
+    document.getElementById("btn-new").click();
+    const x = document.querySelector('#mode-seg [data-mode="pvp"]'); if (x) x.click();
+    document.getElementById("new-start").click();
+  });
   await page.waitForTimeout(150);
   await dismissConfirm(page);
 }
@@ -139,7 +142,8 @@ const GAME = [[7, 7], [8, 7], [7, 8], [8, 8], [7, 9], [8, 9], [7, 10], [8, 10], 
   const retryHidden = await hidden(page, "end-card-retry");
   const retryLabel = await text(page, "end-card-retry");
   const games = await archive(page);
-  const ok = !cardHidden && /黑棋胜|Black wins/.test(title) && /第 8 手/.test(body) && /漏防/.test(body)
+  // v1.74(B10):「第 8 手」内部是不断行空格
+  const ok = !cardHidden && /黑棋胜|Black wins/.test(title) && /第\s8\s手/.test(body) && /漏防/.test(body)
     && !retryHidden && /第 8 手/.test(retryLabel)
     && games.length === 1 && games[0].history.length === 9 && games[0].ruleSet === "free" && games[0].result === "b"
     && clockAtStart === "00:00" && clockIdle === "00:00";
@@ -186,7 +190,8 @@ const GAME = [[7, 7], [8, 7], [7, 8], [8, 8], [7, 9], [8, 9], [7, 10], [8, 10], 
     const cv = document.getElementById("review-curve");
     return {
       hidden: !e || e.hidden,
-      curveInPanel: !!(cv && e && e.contains(cv) && cv.getBoundingClientRect().height > 0),
+      // v1.74:复盘时时间线那一行就是曲线(不再在面板里)
+      curveShown: !!(cv && cv.offsetParent !== null && cv.getBoundingClientRect().height > 0),
       cur: (document.querySelector("#review-side-chips .review-chip.cur") || {}).textContent || null,
       lines: [...document.querySelectorAll("#review-side-explain .rs-lines li")].map((l) => l.textContent),
       head: (document.querySelector("#review-side-explain .rs-head") || {}).textContent || "",
@@ -195,8 +200,8 @@ const GAME = [[7, 7], [8, 7], [7, 8], [8, 8], [7, 9], [8, 9], [7, 10], [8, 10], 
     };
   });
   const row8 = rows.find((r) => r.i === 8);
-  report("3 复盘只有侧栏一个面:曲线在面板里、手数跳转、威胁 → 落点 → 惩罚 → 替代,证据分层可见",
-    closedSide && !!row8 && row8.tier === "tier-hard" && /可证明|proven/.test(side.head) && modalCount === 0 && side.curveInPanel
+  report("3 复盘只有一个面:曲线就是时间线、手数跳转、威胁 → 落点 → 惩罚 → 替代,证据分层可见",
+    closedSide && !!row8 && row8.tier === "tier-hard" && /可证明|proven/.test(side.head) && modalCount === 0 && side.curveShown
       && !side.hidden && side.cur === "8" && side.lines.length === 4 && /G8|L8/.test(side.lines[0]) && /K7/.test(side.lines[1]) && /G8|L8/.test(side.lines[3])
       && !side.actionsHidden && side.pos === "8 / 9",
     JSON.stringify({ rows, side, modalCount, errs: page.__errors }));
@@ -266,8 +271,6 @@ const GAME = [[7, 7], [8, 7], [7, 8], [8, 8], [7, 9], [8, 9], [7, 10], [8, 10], 
 // ---- 6. 分层提示:提示 → 错一次再试 → 再错才给答案;看答案不算掌握 ----
 {
   const page = await newPage();
-  await page.keyboard.press("]");
-  await page.waitForTimeout(120);
   await page.evaluate(() => document.getElementById("open-practice").click());
   await page.waitForTimeout(400);
   const hintHidden0 = await hidden(page, "practice-hint");
@@ -322,7 +325,7 @@ const GAME = [[7, 7], [8, 7], [7, 8], [8, 8], [7, 9], [8, 9], [7, 10], [8, 10], 
   await toPvp(page);
   for (const [r, c] of GAME) { await click(r, c); await page.waitForTimeout(100); }
   await page.waitForTimeout(500);
-  await page.evaluate(() => document.getElementById("btn-new").click());
+  await page.evaluate(() => { document.getElementById("btn-new").click(); document.getElementById("new-start").click(); });
   await page.waitForTimeout(150);
   await dismissConfirm(page);
   await page.waitForTimeout(200);
@@ -377,7 +380,7 @@ const CJK = /[\u4e00-\u9fff]/;
   const page = await newPage();
   await finishGame(page);
   const statsBefore = await page.evaluate(() => localStorage.getItem("goban.v12.stats"));
-  await page.evaluate(() => document.getElementById("btn-new").click());
+  await page.evaluate(() => { document.getElementById("btn-new").click(); document.getElementById("new-start").click(); });
   await page.waitForTimeout(150);
   await dismissConfirm(page);
   await page.evaluate(() => document.getElementById("sgf-slots").click());
@@ -410,7 +413,7 @@ const CJK = /[\u4e00-\u9fff]/;
   await page.waitForTimeout(200);
   const during = await save(page);
   const pref = await page.evaluate(() => JSON.parse(localStorage.getItem("goban.v11.settings") || "{}"));
-  await page.evaluate(() => document.getElementById("btn-new").click());
+  await page.evaluate(() => { document.getElementById("btn-new").click(); document.getElementById("new-start").click(); });
   await page.waitForTimeout(150);
   await dismissConfirm(page);
   await page.waitForTimeout(200);
@@ -438,45 +441,41 @@ const CJK = /[\u4e00-\u9fff]/;
   await page.close();
 }
 
-// ---- 12. 窄窗口:侧栏不自动展开,棋盘下沿有终局的门 ----
+// ---- 12. 窄窗口终局(v1.74 改):终局卡在棋盘下方 —— 看得见、不压棋盘(此前侧栏收着时要靠棋盘下沿一扇门)----
 {
   const page = await newPage();
   await page.setViewportSize({ width: 820, height: 640 });
   await page.waitForTimeout(200);
   const click = clicker(page);
   await toPvp(page);
-  await page.keyboard.press("Escape"); // 窄窗口下侧栏是盖住棋盘的抽屉,收起来再下
-  await page.waitForTimeout(400);
   for (const [r, c] of GAME) { await click(r, c); await page.waitForTimeout(100); }
-  await page.waitForTimeout(600);
-  const panelOpen = await page.evaluate(() => document.getElementById("app").classList.contains("panel-open"));
-  const nudgeHidden = await hidden(page, "end-nudge");
-  const nudge = await text(page, "end-nudge");
-  await page.evaluate(() => { const b = document.getElementById("end-nudge"); if (b) b.click(); });
-  await page.waitForTimeout(450);
-  const openedAfter = await page.evaluate(() => document.getElementById("app").classList.contains("panel-open"));
-  const nudgeGone = await hidden(page, "end-nudge");
-  report("12 窄窗口终局:侧栏收着时有一扇门,点开侧栏,门随即撤掉",
-    !panelOpen && !nudgeHidden && /黑棋胜|Black wins/.test(nudge) && openedAfter && nudgeGone,
-    JSON.stringify({ panelOpen, nudgeHidden, nudge, openedAfter, nudgeGone, errs: page.__errors }));
+  await page.waitForTimeout(700);
+  const st = await page.evaluate(() => {
+    const card = document.getElementById("end-card"), board = document.getElementById("board-wrap");
+    const a = card.getBoundingClientRect(), b = board.getBoundingClientRect();
+    return { shown: !card.hidden && a.height > 0, inView: a.bottom <= innerHeight + 1 && a.top >= 0,
+      overlap: !(a.bottom <= b.top + 1 || a.top >= b.bottom - 1 || a.right <= b.left + 1 || a.left >= b.right - 1),
+      title: document.getElementById("end-card-title").textContent };
+  });
+  report("12 窄窗口终局:终局卡直接可见、在窗口里、不压棋盘",
+    st.shown && st.inView && !st.overlap && /黑棋胜|Black wins/.test(st.title), JSON.stringify({ st, errs: page.__errors }));
   await page.close();
 }
 
-// ---- 13. 棋盘聚焦时 Esc 先离开棋盘,不收侧栏 ----
+// ---- 13. 棋盘聚焦时 Esc 先离开棋盘 ----
 {
   const page = await newPage();
   await toPvp(page);
-  const openBefore = await page.evaluate(() => document.getElementById("app").classList.contains("panel-open"));
   await page.focus("#board");
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("Escape");
   await page.waitForTimeout(150);
   const st = await page.evaluate(() => ({
     focused: document.activeElement === document.getElementById("board"),
-    open: document.getElementById("app").classList.contains("panel-open"),
+    popover: [...document.querySelectorAll(".popover")].some((e) => !e.hidden),
   }));
-  report("13 棋盘上按 Esc:离开棋盘(兑现播报里的「Esc 离开」),侧栏不动",
-    openBefore && !st.focused && st.open, JSON.stringify({ openBefore, st, errs: page.__errors }));
+  report("13 棋盘上按 Esc:离开棋盘(兑现播报里的「Esc 离开」),不弹出别的东西",
+    !st.focused && !st.popover, JSON.stringify({ st, errs: page.__errors }));
   await page.close();
 }
 

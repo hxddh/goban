@@ -47,7 +47,6 @@
       --chrome-bg: linear-gradient(180deg, rgba(20,16,14,.88), rgba(20,16,14,.4) 75%, transparent);
       --board-frame: linear-gradient(145deg, #e0b07a, #c9965c 45%, #b8864e);
       --board-shadow: 0 10px 36px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.22);
-      --side-w: 284px;
       --chrome-h: 44px;
       --stage-pad: 6px;
       --wood-pad: 8px;
@@ -325,159 +324,114 @@
     .tool-btn:disabled, .icon-btn:disabled { opacity: .35; cursor: default; transform: none; }
     .tool-btn.busy:not(:disabled) { opacity: .55; }
 
+    /* v1.74:只剩一块棋盘。棋盘居中,下面一条时间线;坞(终局卡 / 复盘 …)放得下就在棋盘
+       右侧的空白里(棋盘不动),放不下就在棋盘下方(棋盘让出 --dock-h)。 */
+    :root { --tl-h: 36px; --dock-h: 0px; --dock-w: 280px; }
     .stage {
       position: absolute; inset: 0;
-      display: grid; place-items: center;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
       /* Reserve the chrome bar's height: it is absolutely positioned above the
          stage, so in wide windows (maximize/fullscreen) a height-limited board
          otherwise slides under its gradient — a dark band over the top rows. */
-      padding: calc(var(--chrome-h) + var(--stage-pad)) var(--stage-pad) var(--stage-pad);
-      transition: padding-right var(--dur-panel) var(--ease);
-    }
-    #app.panel-open .stage {
-      padding-right: calc(var(--side-w) + var(--stage-pad));
+      padding: calc(var(--chrome-h) + var(--stage-pad)) var(--stage-pad) calc(var(--stage-pad) + var(--dock-h));
     }
     #board-wrap {
-      position: relative;
+      position: relative; flex-shrink: 0;
       --free-w: calc(100vw - 2 * var(--stage-pad));
-      --free-h: calc(100vh - var(--chrome-h) - 2 * var(--stage-pad));
+      --free-h: calc(100vh - var(--chrome-h) - 2 * var(--stage-pad) - var(--tl-h) - var(--dock-h));
       width: min(var(--free-w), var(--free-h));
       height: min(var(--free-w), var(--free-h));
-      max-width: 100%; max-height: 100%;
       padding: var(--wood-pad); border-radius: var(--radius-lg);
       box-shadow: var(--board-shadow);
       transition: width var(--dur-panel) var(--ease), height var(--dur-panel) var(--ease), background var(--dur-panel) var(--ease), box-shadow var(--dur-panel) var(--ease);
     }
-    #app.panel-open #board-wrap {
-      --free-w: calc(100vw - var(--side-w) - 2 * var(--stage-pad));
-      --free-h: calc(100vh - var(--chrome-h) - 2 * var(--stage-pad));
-      width: min(var(--free-w), var(--free-h));
-      height: min(var(--free-w), var(--free-h));
+    /* 时间线:与棋盘同宽,永远占着一行(空棋盘时看不见但不收起,第一手落下时棋盘不跳) */
+    .timeline {
+      height: var(--tl-h); flex-shrink: 0;
+      width: min(calc(100vw - 2 * var(--stage-pad)), calc(100vh - var(--chrome-h) - 2 * var(--stage-pad) - var(--tl-h) - var(--dock-h)));
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 4px;
+      transition: width var(--dur-panel) var(--ease);
+    }
+    #app.is-empty .timeline { visibility: hidden; }
+    .timeline input[type="range"] {
+      flex: 1; min-width: 0; margin: 0; height: 24px;
+      -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer;
+      --fill: 100%;
+    }
+    .timeline input[type="range"]::-webkit-slider-runnable-track {
+      height: 4px; border-radius: var(--radius-sm);
+      background: var(--card-border);
+      background: linear-gradient(to right,
+        color-mix(in srgb, var(--text) 55%, transparent) var(--fill),
+        color-mix(in srgb, var(--text) 16%, transparent) var(--fill));
+    }
+    .timeline input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 14px; height: 14px; margin-top: -5px; border-radius: 50%;
+      background: var(--fg); border: 0;
+      box-shadow: 0 1px 3px rgba(0,0,0,.35);
+    }
+    .timeline-pos { font-size: var(--fs-ui); color: var(--muted); min-width: 4.5em; text-align: right; }
+
+    /* 坞:默认在棋盘下方 */
+    .dock {
+      position: absolute; left: 50%; transform: translateX(-50%);
+      bottom: var(--stage-pad);
+      width: min(calc(100vw - 2 * var(--stage-pad)), 560px);
+      display: flex; flex-direction: column; gap: 8px;
+      z-index: 20;
+    }
+    #app.dock-empty .dock { pointer-events: none; }
+    /* 宽窗口:放在棋盘右侧的空白里,顶端与棋盘对齐,棋盘不动 */
+    #app.dock-side .dock {
+      left: calc(50vw + (100vh - var(--chrome-h) - 2 * var(--stage-pad) - var(--tl-h)) / 2 + 24px);
+      transform: none;
+      top: calc(var(--chrome-h) + var(--stage-pad));
+      bottom: auto;
+      width: min(var(--dock-w), calc(50vw - (100vh - var(--chrome-h) - 2 * var(--stage-pad) - var(--tl-h)) / 2 - 24px - var(--stage-pad)));
+      max-height: calc(100vh - var(--chrome-h) - 2 * var(--stage-pad));
+      overflow-y: auto;
+    }
+
+    /* v1.74:「新局」卡片与「⋯」菜单 —— 挂在各自按钮下方的小浮层 */
+    .popover {
+      position: absolute; z-index: 40;
+      padding: 12px;
+      background: var(--panel);
+      background: color-mix(in srgb, var(--panel) 96%, transparent);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 14px 40px rgba(0,0,0,.32);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      animation: modal-in var(--dur-ui) var(--ease);
+    }
+    .popover[hidden] { display: none; }
+    #new-sheet { width: 300px; }
+    .popover-h { margin: 0 0 12px; font-size: var(--fs-body); font-weight: 600; color: var(--fg); }
+    .popover-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .popover.menu { min-width: 180px; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+    .menu-item {
+      -webkit-appearance: none; appearance: none; border: 0; background: transparent;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      width: 100%; min-height: var(--ctl-h); padding: 0 10px;
+      border-radius: var(--radius-sm);
+      font: inherit; font-size: var(--fs-ui); color: var(--text); text-align: left;
+      cursor: pointer;
+    }
+    .menu-item:hover, .menu-item:focus-visible { background: var(--btn-hover); }
+    .menu-item kbd { font: inherit; color: var(--muted); }
+    #more-btn { position: relative; }
+    .more-badge {
+      position: absolute; top: -4px; right: -4px;
+      min-width: 16px; line-height: 12px; text-align: center;
     }
     canvas {
       display: block; width: 100%; height: 100%;
       cursor: default; border-radius: calc(var(--radius-sm) - 2px);
     }
 
-    .side {
-      /* 铺满整个右列,从 y=0 到底 —— 顶栏压在它上面,不再是「顶栏之下另起一块」。
-         为什么改:顶栏底色是**淡出到透明**的渐变,在棋盘那一侧化得开(实测相邻像素
-         亮度跳变 0–1.2),而侧栏从 top:--chrome-h 起、换成 panel 94% 的面,于是在
-         y=44 处被齐刷刷切断 —— 实测跳变 notebook 35.3 / day 32.9 / wood 13 /
-         night 8.6,那五个按钮浮在较暗的页面底色上、脚下突然是更亮的面板。
-         补一条 border-top 只会更糟(43 / 34.7 / 34.1 / 32.9:色阶之上再加一条线)。
-         铺到顶之后同一处跳变降到 1.2 / 1.0 / 1.0 / 1.6,与棋盘侧同量级。
-
-         v1.26 踩过的坑不会回来,但**挡住它的是 z 序,不是偏移**:那次侧栏盖住了顶栏,
-         把 悔棋/提示/新局/?/☰ 埋在下面 —— 五个按钮透出来却吞掉每一次点击,而侧栏
-         刻意不放它们的副本("顶栏已有悔棋/新局"),于是开着面板就没法用鼠标悔棋或开局。
-         现在 .chrome 是 31、.side 是 30,顶栏**在上**;弹层(50/60/70)仍在顶栏之上。
-         交叉闸门 AK 盯着这两件事:缝要平,五个按钮要可点。 */
-      position: absolute; top: 0; right: 0; bottom: 0;
-      width: var(--side-w); z-index: 30;
-      background: var(--panel);
-      background: color-mix(in srgb, var(--panel) 94%, transparent);
-      border-left: 1px solid var(--panel-border);
-      backdrop-filter: blur(22px) saturate(1.15);
-      -webkit-backdrop-filter: blur(22px) saturate(1.15);
-      /* 顶部留出顶栏的高度,内容才不会钻到按钮底下 */
-      padding: calc(var(--chrome-h) + 16px) 20px 20px;
-      display: flex; flex-direction: column; gap: 0;
-      transform: translateX(100%);
-      transition: transform var(--dur-panel) var(--ease);
-      box-shadow: -12px 0 40px rgba(0,0,0,.22);
-      /* v1.34: the panel is no longer the scroller — .side-scroll is. See the
-         .side-foot note: a pinned bar over a scrolling panel means two
-         translucent layers, and the lower one reads through the upper one. */
-      overflow: hidden;
-      /* Closed: ignore pointer/hit testing so half-visible glitches can't steal clicks */
-      pointer-events: none;
-    }
-    #app.panel-open .side {
-      transform: translateX(0);
-      pointer-events: auto;
-    }
-
-    /* —— side: more air, less density —— */
-    .side-head {
-      padding: 2px 0 12px;
-      margin-bottom: 2px;
-      border-bottom: 1px solid var(--card-border);
-    }
-    .vs {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 12px;
-    }
-    .vs-side {
-      display: flex; align-items: center; gap: 8px; min-width: 0;
-    }
-    .vs-right { flex-direction: row; text-align: right; }
-    /* v1.65:轮到的一方 —— 棋子外一圈强调色,另一方退后。「行」字徽章只留给读屏。 */
-    .vs .badge {
-      position: absolute; width: 1px; height: 1px; overflow: hidden;
-      clip: rect(0 0 0 0); white-space: nowrap;
-    }
-    /* v1.66:不轮到的一方只退后文字,棋子保持原色。v1.65 把整侧调到 0.55,结果深色侧栏上
-       不轮到的黑子几乎消失、木盘上的白子变成一颗灰点(像第三种颜色),日间的白子融进米色。 */
-    .vs-side > div { transition: opacity var(--dur-ui) var(--ease); }
-    .vs.has-turn .vs-side:not(.is-turn) > div { opacity: 0.55; }
-    /* 棋子在侧栏底色上要有轮廓:深色侧栏(木盘 / 夜盘)给黑子一线亮边,日间给白子一线暖灰边 */
-    .vs .stone.black { box-shadow: 0 0 0 1px rgba(255,255,255,0.36), 0 1px 2px rgba(0,0,0,.3); }
-    [data-theme="day"] .vs .stone.black { box-shadow: 0 1px 2px rgba(0,0,0,.3); }
-    [data-theme="day"] .vs .stone.white { box-shadow: 0 0 0 1px rgba(110,85,50,0.72), 0 1px 2px rgba(0,0,0,0.18); }
-    [data-theme="notebook"] .vs .stone { box-shadow: none; }
-    .vs .vs-side.is-turn .stone { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--accent); }
-    /* 日间的强调色在米色上只有 2.5:1,环用深一档的强调文字色 */
-    [data-theme="day"] .vs .vs-side.is-turn .stone { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--accent-text); }
-    .vs-right .vs-name { justify-content: flex-end; }
-    .vs-name {
-      font-size: var(--fs-body); font-weight: 600;
-      display: flex; align-items: center; gap: 4px;
-    }
-    /* font-size 由 .muted 给（同值，重复声明只会让「死声明」扫描噪声变大） */
-    .vs-role { margin-top: 2px; line-height: 1.3; }
-    /* Four items and three dot separators used to sit here as seven equal flex
-       children of one wrapping row. At the sidebar's real width that row does
-       not fit on one line, and flex-wrap breaks wherever it must: measured at
-       243px, in both languages, all three dots wrapped together onto a line of
-       their own — "· · ·" stranded between the stats and the save hint.
-
-       Two changes, and neither is a width tweak. The dots are no longer
-       elements: each is a ::before on the item that FOLLOWS it, so a separator
-       is part of its item's box and cannot be laid out away from it. And the
-       row now has two children rather than seven — live game state, and the
-       save status, which is a different kind of fact and is the one that
-       belongs on its own line when the row does have to break. */
-    .side-meta {
-      margin-top: 12px;
-      display: flex; align-items: baseline; flex-wrap: wrap;
-      gap: 2px 10px;
-      font-size: var(--fs-ui); color: var(--muted);
-      line-height: var(--lh-ui);
-    }
-    .meta-stats { display: flex; align-items: baseline; flex-wrap: wrap; }
-    .meta-stats > * + *::before {
-      content: ""; display: inline-block;
-      width: 3px; height: 3px; border-radius: 50%;
-      /* var(--muted), not currentColor: the 00:00 item is .num and carries
-         --text, which would have made its leading dot darker than the others. */
-      background: var(--muted); opacity: 0.4;
-      margin: 0 8px; vertical-align: middle;
-    }
-    .side-meta .num { color: var(--text); font-weight: 600; }
-
-    .side-section {
-      padding: 12px 0;
-      border-bottom: 1px solid var(--card-border);
-    }
-    .side-section.grow-sec {
-      flex: 1; border-bottom: 0;
-      padding-bottom: 8px;
-      /* v1.51 —— 外观搬进设置弹层后这一列空出 259.8px。空出来的地方给手数列表:
-         它是对局中唯一会长的东西。列表撑开、导航条与棋谱四按钮被顶到底部,
-         于是从开局到终局这一列都是满的 —— 不再是「上面一堆开关、下面一片空白」。 */
-      display: flex; flex-direction: column; min-height: 0;
-    }
     .side-h {
       margin: 0 0 8px;
       font-size: var(--fs-micro); font-weight: 600;
@@ -485,13 +439,6 @@
       color: var(--muted);
       opacity: 0.9;
     }
-    .side-h-row {
-      display: flex; align-items: baseline; justify-content: space-between;
-      margin-bottom: 12px;
-      gap: 12px;
-    }
-    .side-h-row .side-h { margin: 0; }
-    .side-h-meta { font-size: var(--fs-ui); color: var(--muted); }
 
     .setting-list { display: flex; flex-direction: column; gap: 8px; }
     /* 标签一列、控件一列。控件列宽是个 token(`--ctl-w`),不由文案长度决定 ——
@@ -662,71 +609,6 @@
       background: #fff;
     }
 
-    .move-list {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
-      grid-auto-rows: max-content;
-      gap: 2px;
-      /* 高度不再写死 176:由 grow-sec 剩多少给多少,短窗口自然收缩(flex 要
-         min-height:0 才收得下去),长到装不下就自己滚。 */
-      flex: 1; min-height: 0;
-      overflow-y: auto;
-      padding: 2px;
-      margin-bottom: 8px;
-    }
-    .move-list:empty { display: none; }
-    .move-empty {
-      flex: 1; margin: 0; padding: 8px 2px 0;
-      font-size: var(--fs-ui); color: var(--muted); line-height: var(--lh-text);
-      opacity: 0.75;
-    }
-    .move-list button {
-      border: 0;
-      background: transparent;
-      color: var(--muted);
-      color: color-mix(in srgb, var(--text) 60%, transparent);
-      font-size: var(--fs-ui);
-      font-variant-numeric: tabular-nums;
-      padding: 2px 4px;
-      border-radius: var(--radius-sm);
-      cursor: pointer;
-      text-align: left;
-      white-space: nowrap;
-    }
-    /* v1.71:浅色两套里「正文 60%」只有 3.9 / 3.7:1,不到 AA 的 4.5(此前闸门在空棋盘上量,量不到棋谱);
-       改用为 AA 定过的 --muted。深色两套里 60% 本来就过线,保留更轻的那一档。 */
-    [data-theme="day"] .move-list button,
-    [data-theme="notebook"] .move-list button { color: var(--muted); }
-    .move-list button:hover { background: var(--btn); color: var(--text); }
-    .move-list button.cur {
-      background: var(--btn-hover);
-      background: color-mix(in srgb, var(--accent) 32%, transparent);
-      color: var(--text);
-      font-weight: 600;
-    }
-
-    /* v1.66:翻页条去掉底板与描边 —— 它是棋谱的一部分,不是一张卡片;一道上分隔线够了 */
-    .replay-bar {
-      display: flex; gap: 4px;
-      padding: 6px 0 0;
-      border-top: 1px solid var(--card-border);
-    }
-    .replay-bar button {
-      flex: 1;
-      -webkit-appearance: none; appearance: none; border: 0; background: transparent;
-      color: var(--text);
-      font: inherit; line-height: 1;
-      /* 图标有内在尺寸,不像空的 ::after 会被 place-items 压塌(v1.50 那个坑) */
-      display: grid; place-items: center;
-      padding: 8px 0; border-radius: var(--radius-md);
-      cursor: pointer;
-      transition: background var(--dur-tap) var(--ease);
-    }
-    .replay-bar button:hover:not(:disabled) {
-      background: var(--btn-ghost);
-      background: color-mix(in srgb, var(--text) 8%, transparent);
-    }
-    .replay-bar button:disabled { opacity: 0.28; cursor: default; }
 
 
     /* v1.72:命名存档退役,这个类只剩「最近对局」在用(高度由 .games-list 定) */
@@ -775,12 +657,13 @@
       margin: 0 0 4px; font-size: var(--fs-ui); color: var(--muted); line-height: 1.4;
     }
     .review-curve {
-      width: 100%; height: 64px; display: block; margin: 6px 0 4px;
-      border: 1px solid var(--card-border);
+      flex: 1; min-width: 0; height: 56px; display: block;
       border-radius: var(--radius-md);
-      background: var(--btn-ghost);
       cursor: pointer;
     }
+    #app:not(.reviewing) .review-curve { display: none; }
+    #app.reviewing { --tl-h: 64px; }
+    #app.reviewing #timeline { display: none; }
     .review-stat { font-size: var(--fs-ui); font-variant-numeric: tabular-nums; margin-left: 6px; }
     .swap2-bar {
       position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
@@ -796,24 +679,6 @@
       -webkit-backdrop-filter: blur(6px);
       z-index: 6;
     }
-    /* 终局卡的门:与 swap2 条同一位置、同一层,但只有一行 */
-    .end-nudge {
-      position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
-      max-width: min(90%, 420px);
-      padding: 8px 16px;
-      font: inherit; font-size: var(--fs-ui); font-weight: 600;
-      color: var(--text);
-      background: var(--panel);
-      background: color-mix(in srgb, var(--panel) 92%, transparent);
-      border: 1px solid var(--card-border);
-      border-radius: 999px;
-      box-shadow: 0 6px 24px rgba(0,0,0,0.22);
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      cursor: pointer;
-      z-index: 6;
-    }
     /* 初见一句话(第一次启动才有)。v1.68 起住在侧栏的空棋谱区里,不再压着棋盘最下面一行 */
     .welcome-bar {
       display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
@@ -825,9 +690,6 @@
     }
     .welcome-bar > span { flex: 1 1 100%; }
     .welcome-bar .tool-btn { border-radius: 999px; }
-    .welcome-bar .welcome-x { padding: 4px 8px; margin-left: auto; }
-    /* 提示在的时候,空棋谱那句说明让位 */
-    .welcome-bar:not([hidden]) ~ .move-empty { display: none; }
     .swap2-msg {
       font-size: var(--fs-body); font-weight: 600; color: var(--fg); text-align: center;
     }
@@ -902,12 +764,9 @@
 
     /* v1.68:空棋盘时没有意义的控件不显示 —— 没有可翻的棋谱、没有可复制导出的对局、
        用时是 0。落下第一子即出现。 */
-    #app.is-empty #replay-seg,
     #app.is-empty #clock,
     #app.is-empty #undo,
-    #app.is-empty #btn-hint,
-    #app.is-empty #btn-new,
-    #app.is-empty #replay-pos { display: none; }
+    #app.is-empty #btn-hint { display: none; }
     /* v1.70:棋谱文件挪进存档弹层,与备份同一行式;行间不再画第二条分隔线 */
     .backup-row.sgf-row { border-top: 0; margin-top: 8px; padding-top: 0; }
     /* backup/restore sits under the slot list, away from the per-slot rows —
@@ -957,89 +816,7 @@
       opacity: 0.75;
     }
 
-    .side-foot {
-      /* Pinned by structure, not by position:sticky. v1.32 shaved the sidebar to
-         856px so these five entries cleared a 900px window — but 1280×720 is
-         just as ordinary a window, and there they fell below the fold again.
-         v1.33.0 pinned it with sticky, which put a translucent bar on top of a
-         translucent panel: at the panel's own 94% you could read 导入/复制
-         through it as they scrolled underneath, and raising the opacity would
-         only have hidden the symptom. Now the scroll region ends where this bar
-         begins, so nothing can pass under it — and with nothing behind it to
-         cover, it needs no background at all. It simply IS the panel, which is
-         the only way its colour can never drift from the panel's. */
-      margin: 0 -20px -20px;
-      padding: 10px 20px 8px;
-      border-top: 1px solid var(--card-border);
-      display: flex; flex-direction: column; gap: 4px;
-    }
-    /* v1.64:三个学习入口等宽一排,与顶栏同一套 .tool-btn;存档 / 统计退成一行小字 */
-    /* v1.71:列数跟着显示的按钮走 —— 不足两手时「复盘」不显示,「练习」独占一行 */
-    .learn-row { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
-    .learn-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 6px; min-width: 0; }
-    .learn-badge { font-variant-numeric: tabular-nums; line-height: 1; }
-    .foot-links { display: flex; gap: 6px; }
-    .side-scroll {
-      flex: 1;
-      min-height: 0;
-      overflow-y: auto;
-      overflow-x: hidden;
-      scrollbar-width: thin;
-      /* Let the scrollbar sit at the panel edge, where it was when the panel
-         itself scrolled, instead of inset by the panel's 20px padding. */
-      margin: 0 -20px;
-      padding: 0 20px;
-      display: flex; flex-direction: column;
-      /* The region ends in a hard horizontal slice through whatever row happens
-         to sit at the boundary — in the default window that is the 复制/导出/导入
-         row, cut through the middle of its glyphs. A cut reads as broken; a
-         fade reads as "there is more below".
 
-         The fade is on the side that has content beyond it and only there:
-         fading the bottom while already scrolled to the end would dim the last
-         row for nothing, and that dimming is exactly the kind of decoration
-         that would be papering over the problem instead of naming it. Both
-         widths default to 0, which makes the gradient a solid mask — the
-         no-scroll case pays nothing. app.js sets the two flags. */
-      --fade-top: 0px;
-      --fade-bot: 0px;
-      -webkit-mask-image: linear-gradient(to bottom,
-        transparent 0, #000 var(--fade-top),
-        #000 calc(100% - var(--fade-bot)), transparent 100%);
-      mask-image: linear-gradient(to bottom,
-        transparent 0, #000 var(--fade-top),
-        #000 calc(100% - var(--fade-bot)), transparent 100%);
-    }
-    .side-scroll[data-above="1"] { --fade-top: 18px; }
-    .side-scroll[data-below="1"] { --fade-bot: 28px; }
-    /* 8px vertical keeps these three at the 24px minimum hit height; the 4px
-       the spacing grid rounded them to left them at 23. */
-    /* v1.64 起只剩存档 / 统计两个次要入口:上下 5px,仍过 24px 的最小命中高度(v1.32) */
-    .side-foot .text-link { color: var(--muted); font-size: var(--fs-ui); padding: 5px 2px; }
-    .side-foot .text-link:hover { color: var(--text); }
-
-    .stone {
-      width: 14px; height: 14px; border-radius: 50%;
-      box-shadow: 0 1px 2px rgba(0,0,0,.3); flex-shrink: 0;
-    }
-    /* 色标与高光位置取自 draw.js 的 paintStone —— 这是同一颗棋子的第二种画法,
-       没有任何东西阻止它继续漂移。高光在 (-0.38r, -0.42r),换算成百分比即
-       31%/29%;色标 #6a6a6a → #242424(40%) → #050505 与 #fff → #f2f2f2(50%)
-       → #bcbcbc 均与画布逐字一致。夜间主题画布另有一组更暗的黑子色标,这里
-       跟上。 */
-    .stone.black { background: radial-gradient(circle at 33% 30%, #5e6268, #2a2c30 32%, #121315 75%, #050506); }
-    .stone.white { background: radial-gradient(circle at 33% 30%, #fffefb, #f4f2ec 45%, #e2ded6 82%, #bab4a8); }
-    [data-theme="night"] .stone.black { background: radial-gradient(circle at 33% 30%, #4c5056, #212327 30%, #0e0f11 75%, #040405); }
-    [data-theme="night"] .stone.white { background: radial-gradient(circle at 33% 30%, #fffefb, #f4f2ec 45%, #e2ded6 82%, #cdc8bd); }
-    [data-theme="day"] .stone.white { background: radial-gradient(circle at 33% 30%, #fffefb, #f4f2ec 45%, #e2ded6 82%, #aba699); }
-    [data-theme="notebook"] .stone {
-      box-shadow: none; border-radius: 0; background: transparent !important;
-      display: grid; place-items: center; font-size: var(--fs-ui); line-height: 1;
-    }
-    [data-theme="notebook"] .stone.black { color: #1e3a5f; }
-    [data-theme="notebook"] .stone.white { color: #9a3412; }
-    [data-theme="notebook"] .stone.black::after { content: "△"; }
-    [data-theme="notebook"] .stone.white::after { content: "○"; }
     /* v1.65:日间原来与练习本共用这条蓝色 —— 练习本的强调色本来就是墨水蓝,日间却是
        暖米色,整套主题里只有「新局」一处冷蓝,像从别的应用借来的。换成日间自己的
        暖棕;白字在最浅处 #8a5a2b 上是 5.9:1,仍过 4.5。 */
@@ -1062,6 +839,7 @@
       background: linear-gradient(180deg, #4477a8, #2b5580);
       color: #fff;
     }
+    .learn-badge { font-variant-numeric: tabular-nums; line-height: 1; }
     .badge {
       font-size: var(--fs-micro); padding: 2px 4px; border-radius: 999px;
       background: var(--accent);
@@ -1160,20 +938,6 @@
     }
     .modal .close-row .app-version { margin-right: auto; font-size: var(--fs-ui); }
 
-    .scrim {
-      display: none; position: absolute; inset: 0; z-index: 25;
-      background: rgba(0,0,0,.32);
-    }
-    #app.panel-open.scrim-on .scrim { display: block; }
-    @media (max-width: 820px) {
-      #app.panel-open .stage { padding-right: var(--stage-pad); }
-      #app.panel-open #board-wrap {
-        --free-w: calc(100vw - 2 * var(--stage-pad));
-        --free-h: calc(100vh - var(--chrome-h) - 2 * var(--stage-pad));
-        width: min(var(--free-w), var(--free-h));
-        height: min(var(--free-w), var(--free-h));
-      }
-    }
   
 /* v1.9 polish */
 .status-pill.thinking {
@@ -1220,16 +984,6 @@
   transition: box-shadow var(--dur-panel) var(--ease);
 }
 
-/* 对局中「对局」这一组只剩难度一行,标题「对局」就文不对题了(而且和行标签
-   「难度」是同一个东西的两个标签)。去掉标题即可 —— 分组仍由 .side-section
-   本来就有的 border-bottom 画出来,不需要再叠一层表面。
-
-   曾经试过把 .side-section 改成卡片(--card 底 + 边框)。**四套主题的分段控件
-   未选中标签对比度全部跌破 AA**(wood 2.41 / night 2.7 / day 3.55 /
-   notebook 3.73,闸门 AJ 报),因为浅色表面抬高了背景亮度。加表面就得还对比度,
-   这条路是死的。 */
-.side-section.bare > .side-h,
-.side-section.bare > .side-h-row { display: none; }
 
 /* ── 棋盘不再套一圈木边 ──────────────────────────────────────────────────
    #board-wrap 原本用 8px 内边距 + var(--board-frame) 渐变画出一条边带。去掉它
@@ -1316,9 +1070,8 @@
     }
     .review-explain { font-size: var(--fs-ui); line-height: var(--lh-text); color: var(--text); }
     /* v1.73:按词均衡换行,关键一句不再单字掉到下一行 */
-    .end-card-body, .review-explain, .rs-head { text-wrap: balance; }
-    /* v1.73:在最新一手时「回到最新」「下一手」不显示,位置保留 */
-    #replay-seg.at-live #rep-live, #replay-seg.at-live #rep-next { visibility: hidden; }
+    /* v1.74(B10):不再整段均衡换行 —— 中文没有词边界,v1.73 的 balance 把「第 11 手」
+       从数字后面切开。改为「第 N 手」内部用不断行空格粘住(app.js / review.js 的 glueMove)。 */
     .rs-head { font-weight: 600; font-size: var(--fs-body); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
     .rs-lines { margin: 6px 0 0; padding-left: 18px; }
     .rs-lines li { margin: 2px 0; }

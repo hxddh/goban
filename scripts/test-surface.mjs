@@ -103,13 +103,24 @@ async function dismissConfirm(page) {
   }
 }
 
-async function toPvp(page) {
-  await page.keyboard.press("]");
-  await page.waitForTimeout(120);
-  await page.evaluate(() => { const x = document.querySelector('button[data-mode="pvp"]'); if (x) x.click(); });
+// v1.74:模式 / 难度 / 执子 / 思考住在「新局」卡片里,选好点「开始」才生效
+async function setup(page, o) {
+  await page.evaluate(() => { const s = document.getElementById("new-sheet"); if (s && s.hidden) document.getElementById("btn-new").click(); });
+  await page.waitForTimeout(100);
+  await page.evaluate((o) => {
+    const q = (sel) => { const b = document.querySelector(sel); if (b) b.click(); };
+    if (o.mode) q('#mode-seg [data-mode="' + o.mode + '"]');
+    if (o.diff) q('#diff-seg [data-diff="' + o.diff + '"]');
+    if (o.think) q('#think-seg [data-think="' + o.think + '"]');
+    if (o.color) q('#color-seg [data-human="' + o.color + '"]');
+    const st = document.getElementById("new-start"); if (st) st.click();
+  }, o);
   await page.waitForTimeout(150);
   await dismissConfirm(page);
+  await page.waitForTimeout(150);
 }
+
+async function toPvp(page) { await setup(page, { mode: "pvp" }); }
 
 const text = (page, id) => page.evaluate((i) => { const e = document.getElementById(i); return e ? e.textContent.trim() : null; }, id);
 const hidden = (page, id) => page.evaluate((i) => { const e = document.getElementById(i); return !e || e.hidden || getComputedStyle(e).display === "none"; }, id);
@@ -129,12 +140,7 @@ async function finish(page) {
   for (const [r, c] of GAME) { await click(r, c); await page.waitForTimeout(100); }
   await page.waitForTimeout(600);
 }
-async function newGame(page) {
-  await page.evaluate(() => document.getElementById("btn-new").click());
-  await page.waitForTimeout(150);
-  await dismissConfirm(page);
-  await page.waitForTimeout(200);
-}
+async function newGame(page) { await setup(page, {}); await page.waitForTimeout(50); }
 
 // ---- S1. 偏好与这一局分开(A):库里的双人旧局、重下,都不改侧栏偏好 ----
 {
@@ -143,9 +149,7 @@ async function newGame(page) {
   await toPvp(page);
   await finish(page);
   await newGame(page);
-  await page.evaluate(() => document.querySelector('#mode-seg button[data-mode="ai"]').click());
-  await page.waitForTimeout(200);
-  await dismissConfirm(page);
+  await setup(page, { mode: "ai" });
   const prefBefore = (await settings(page)).mode;
   // 打开那局双人旧局 —— 这一局是双人
   await page.evaluate(() => document.getElementById("sgf-slots").click());
@@ -226,19 +230,15 @@ async function newGame(page) {
   await page.close();
 }
 
-// ---- S4. 学习入口(C):三个按钮与「新局」同一套控件;到期数是徽标 ----
+// ---- S4. 学习入口(C,v1.74 改):复盘 / 练习 / 记录收进「⋯」;到期数挂在「⋯」与「练习」上,0 时不出现 ----
 {
   const page = await newPage();
   const look = () => page.evaluate(() => {
-    const h = (id) => Math.round(document.getElementById(id).getBoundingClientRect().height);
-    const b = document.getElementById("daily-badge");
+    const b = document.getElementById("daily-badge"), m = document.getElementById("more-badge");
     return {
-      tool: ["sgf-review", "open-practice"].every((id) => document.getElementById(id).classList.contains("tool-btn")),
-      // v1.71:不足两手时「复盘」不显示;v1.72:空棋盘不显示「新局」—— 量它的高度时临时撤掉空盘态
-      h: (() => { const app = document.getElementById("app"); const was = app.classList.contains("is-empty");
-        app.classList.remove("is-empty"); const out = [h("open-practice"), h("btn-new")]; if (was) app.classList.add("is-empty"); return out; })(),
-      quiet: ["sgf-slots"].every((id) => document.getElementById(id).classList.contains("text-link")),
+      inMenu: ["sgf-review", "open-practice", "sgf-slots"].every((id) => { const e = document.getElementById(id); return !!e && !!e.closest("#more-menu"); }),
       badge: b && !b.hidden ? b.textContent : null,
+      more: m && !m.hidden ? m.textContent : null,
     };
   });
   const zero = await look();
@@ -251,8 +251,8 @@ async function newGame(page) {
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(300);
   const one = await look();
-  report("S4 复盘 / 练习是按钮(与新局等高),存档 / 统计是文字;到期数是「练习」上的徽标,0 时不出现",
-    zero.tool && zero.quiet && zero.h.every((x) => x === zero.h[1]) && zero.badge === null && one.badge === "1",
+  report("S4 复盘 / 练习 / 记录在「⋯」里;到期数是「练习」与「⋯」上的徽标,0 时不出现",
+    zero.inMenu && zero.badge === null && zero.more === null && one.badge === "1" && one.more === "1",
     JSON.stringify({ zero, one, errs: page.__errors }));
   await page.close();
 }
@@ -282,8 +282,7 @@ async function newGame(page) {
 }
 
 // ---- S6. 精修的两条闸门(v1.65)----
-// 一、侧栏里任何一组(.side-section)只要显示着,就得有看得见的内容 —— v1.64 双人对局中
-//     「难度」行藏了,组没藏,留下一条上下两道分隔线夹着的空带。
+// 一、(v1.74 退役:侧栏里不留空组 —— 侧栏整个退役了)
 // 二、每套主题的主按钮与主题强调色同一色相(±35°)—— 日间曾是冷蓝、夜盘曾是杏色。
 {
   const page = await newPage();
@@ -291,11 +290,6 @@ async function newGame(page) {
   const click = clicker(page);
   await click(7, 7); await page.waitForTimeout(120);
   await click(7, 8); await page.waitForTimeout(150);
-  const empties = await page.evaluate(() => [...document.querySelectorAll("#side .side-section")]
-    .filter((sec) => sec.offsetParent !== null && getComputedStyle(sec).display !== "none")
-    .filter((sec) => ![...sec.querySelectorAll("*")].some((el) => el.offsetParent !== null && el.getBoundingClientRect().height > 4
-      && !el.classList.contains("side-h") && (el.textContent || "").trim()))
-    .map((sec) => sec.className));
   const hues = {};
   for (const th of ["wood", "night", "day", "notebook"]) {
     hues[th] = await page.evaluate((t) => {
@@ -319,56 +313,13 @@ async function newGame(page) {
     }, th);
   }
   const badHue = Object.entries(hues).filter(([, v]) => !v || v.diff > 35).map(([k]) => k);
-  report("S6 侧栏没有空组;四套主题的主按钮都与强调色同一色相",
-    empties.length === 0 && badHue.length === 0,
-    JSON.stringify({ empties, hues, errs: page.__errors }));
+  report("S6 四套主题的主按钮都与强调色同一色相",
+    badHue.length === 0,
+    JSON.stringify({ hues, errs: page.__errors }));
   await page.close();
 }
 
-// ---- S7. 侧栏「轮到谁」:棋子本身不许退后(v1.66)----
-// v1.65 把不轮到的一侧整体调到 0.55:夜 / 木盘上不轮到的黑子几乎消失,日间的白子融进米色。
-// 四套主题 × 轮到黑 / 轮到白:两颗小棋子的有效不透明度都是 1,轮廓(边线或渐变最外一圈,
-// 取对比最大的那一个)与侧栏底色对比 ≥ 3:1。练习本主题的棋子是字形,量字色。
-{
-  const page = await newPage();
-  await toPvp(page);
-  const click = clicker(page);
-  const out = {};
-  for (const [label, moves] of [["轮到白", [[7, 7]]], ["轮到黑", [[7, 8]]]]) {
-    for (const [r, c] of moves) { await click(r, c); await page.waitForTimeout(150); }
-    for (const th of ["wood", "night", "day", "notebook"]) {
-      out[th + "·" + label] = await page.evaluate((t) => {
-        document.documentElement.setAttribute("data-theme", t);
-        const parse = (str) => { const m = str.match(/rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)/); return m ? [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]] : null; };
-        const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
-        const cr = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
-        const blend = ([r, g, b, a], [R, G, B]) => [r * a + R * (1 - a), g * a + G * (1 - a), b * a + B * (1 - a)];
-        let el = document.getElementById("side"), panel = null;
-        while (el && !panel) { const c = parse(getComputedStyle(el).backgroundColor); if (c && c[3] > 0.5) panel = c; el = el.parentElement; }
-        if (!panel) panel = parse(getComputedStyle(document.body).backgroundColor);
-        return [...document.querySelectorAll(".vs .stone")].map((st) => {
-          let op = 1; for (let e = st; e; e = e.parentElement) op *= +getComputedStyle(e).opacity;
-          const cs = getComputedStyle(st);
-          const cands = [];
-          if (t === "notebook") cands.push(parse(cs.color));
-          else {
-            const stops = [...cs.backgroundImage.matchAll(/rgba?\([^)]*\)/g)].map((m) => parse(m[0]));
-            if (stops.length) cands.push(stops[stops.length - 1]);
-            for (const sh of cs.boxShadow.split(/,(?![^(]*\))/)) {
-              const col = parse(sh); const nums = sh.replace(/rgba?\([^)]*\)/, "").trim().split(/\s+/).map(parseFloat);
-              if (col && nums.length >= 4 && nums[3] >= 1) cands.push(blend(col, panel));
-            }
-          }
-          const best = Math.max(...cands.filter(Boolean).map((c) => cr(c, panel)));
-          return { opacity: Math.round(op * 100) / 100, contrast: Math.round(best * 100) / 100 };
-        });
-      }, th);
-    }
-  }
-  const bad = Object.entries(out).filter(([, v]) => v.some((x) => x.opacity < 1 || x.contrast < 3)).map(([k]) => k);
-  report("S7 侧栏小棋子:四套主题、轮到谁都不退后,轮廓对比 ≥ 3:1", bad.length === 0, JSON.stringify({ bad, out, errs: page.__errors }));
-  await page.close();
-}
+// ---- S7.(v1.74 退役)侧栏「轮到谁」的两颗小棋子 —— 对阵行并进顶栏,小棋子随侧栏一起没有了 ----
 
 // ---- S8. 棋子轮廓(v1.66)----
 // 沿每颗子的边取 24 个方向,比较边内(边缘一带)与边外 3px 的亮度:差 ≥ 20 算这个方向「看得见」。
@@ -416,15 +367,15 @@ async function newGame(page) {
 
 // ---- S9. 执子轮流(v1.67)----
 // 困难 / 极限默认每局轮流:玩家落过子的一局之后新局换色;一子没落(包括执白时电脑已先手)
-// 就点新局,不换;中途在困难与极限之间换难度,不打乱交替;偏好仍是 auto(侧栏亮「轮流」)。
+// 就点新局,不换;在困难与极限之间换难度开新局,不打乱交替;偏好仍是 auto(卡片里亮「轮流」)。
 {
   const page = await newPage();
   const click = clicker(page);
-  const role = () => text(page, "black-role");
+  // v1.74:对阵行并进顶栏(「你执黑 · 困难」):黑方是「你」还是「电脑」
+  const role = async () => (/执黑|: Black/.test(await text(page, "match")) ? "你" : "电脑");
   const moves = () => page.evaluate(() => [...window.GobanSgfIo.buildSgf().matchAll(/;[BW]\[/g)].length);
   const waitMoves = async (n) => { for (let i = 0; i < 60 && (await moves()) < n; i++) await page.waitForTimeout(100); };
-  await page.evaluate(() => document.querySelector('#diff-seg button[data-diff="hard"]').click());
-  await page.waitForTimeout(150);
+  await setup(page, { diff: "hard" });
   const seen = [];
   seen.push(await role());                                   // 第 1 局:执黑
   await click(3, 3); await waitMoves(2);                     // 人落一子,电脑应一手
@@ -434,13 +385,13 @@ async function newGame(page) {
   await newGame(page);                                       // 人一子没落就重开
   seen.push(await role());                                   // 第 3 局:不换,仍执白
   await waitMoves(1);
-  await page.evaluate(() => document.querySelector('#diff-seg button[data-diff="extreme"]').click());
-  await page.waitForTimeout(150);
-  await click(3, 3); await waitMoves(3);                     // 执白落一子,中途换到极限
-  await newGame(page);
+  await click(3, 3); await waitMoves(3);                     // 执白落一子,再从卡片换到极限开新局
+  await setup(page, { diff: "extreme" });
   seen.push(await role());                                   // 第 4 局:换回执黑
   const st = await settings(page);
+  await page.evaluate(() => document.getElementById("btn-new").click()); await page.waitForTimeout(100);
   const act = await active(page, "color-seg", "human");
+  await page.keyboard.press("Escape");
   const want = ["你", "电脑", "电脑", "你"];
   const ok = JSON.stringify(seen) === JSON.stringify(want) && st.humanColor === "auto" && st.lastHumanColor === "b" && act === "alt";
   report("S9 困难 / 极限每局轮流执子:落过子才换色,中途换难度不打乱", ok,
@@ -448,14 +399,15 @@ async function newGame(page) {
   await page.close();
 }
 
-// ---- S10. 简洁(v1.68)----
-// 全新用户一打开:首次提示不压棋盘;关掉提示后可点的控件 ≤ 22(v1.67 是 34);空棋盘时翻页 / 复制 /
-// 导出不出现;落下第一子后它们都在。规则在设置弹层里,不在侧栏。
+// ---- S10. 简洁(v1.68;v1.74 改)----
+// 全新用户一打开:首次提示不压棋盘;可点的控件 ≤ 22;空棋盘时时间线不出现(占位不收起);
+// 落下第一子后它在。规则在设置弹层里。
 {
   const page = await newPage();
   const count = () => page.evaluate(() => [...document.querySelectorAll("button, [role=button], input, select")]
-    .filter((e) => e.offsetParent !== null && e.getBoundingClientRect().width > 0).length);
-  const shown = (id) => page.evaluate((i) => { const e = document.getElementById(i); return !!e && e.offsetParent !== null && e.getBoundingClientRect().height > 0; }, id);
+    .filter((e) => e.offsetParent !== null && e.getBoundingClientRect().width > 0 && getComputedStyle(e).visibility !== "hidden").length);
+  const shown = (id) => page.evaluate((i) => { const e = document.getElementById(i);
+    return !!e && e.offsetParent !== null && e.getBoundingClientRect().height > 0 && getComputedStyle(e).visibility !== "hidden"; }, id);
   const overlap = await page.evaluate(() => {
     const w = document.getElementById("welcome-bar"), b = document.getElementById("board");
     if (!w || w.hidden) return "no-welcome";
@@ -463,17 +415,14 @@ async function newGame(page) {
     return r1.left < r2.right && r1.right > r2.left && r1.top < r2.bottom && r1.bottom > r2.top;
   });
   const withWelcome = await count();
-  await page.evaluate(() => document.getElementById("welcome-close").click());
-  await page.waitForTimeout(150);
-  const bare = await count();
-  const emptyHidden = !(await shown("rep-prev"));
-  const ruleInSide = await page.evaluate(() => !!document.querySelector("#side #rule-field"));
+  const emptyHidden = !(await shown("timeline"));
+  const ruleInSettings = await page.evaluate(() => { const r = document.getElementById("rule-field"); return !!r && !!r.closest("#settings-modal"); });
   await clicker(page)(7, 7);
   await page.waitForTimeout(400);
-  const afterMove = await shown("rep-prev");
-  report("S10 一打开:提示不压棋盘、可点控件 ≤ 22、空棋盘不显示翻页,落子后在",
-    overlap === false && bare <= 22 && emptyHidden && afterMove && !ruleInSide,
-    JSON.stringify({ overlap, withWelcome, bare, emptyHidden, afterMove, ruleInSide, errs: page.__errors }));
+  const afterMove = await shown("timeline");
+  report("S10 一打开:提示不压棋盘、可点控件 ≤ 22、空棋盘不显示时间线,落子后在",
+    overlap === false && withWelcome <= 22 && emptyHidden && afterMove && ruleInSettings,
+    JSON.stringify({ overlap, withWelcome, emptyHidden, afterMove, ruleInSettings, errs: page.__errors }));
   await page.close();
 }
 
@@ -491,8 +440,10 @@ async function newGame(page) {
   const mid = await count();
   const dup = await page.evaluate(() => ({
     movesChip: !!document.getElementById("moves"),
-    saved: /已存|自动存档/.test(document.getElementById("side").innerText),
-    diffInInfo: /普通|入门|困难|极限/.test((document.getElementById("info-mode") || {}).textContent || ""),
+    saved: /已存|自动存档/.test(document.getElementById("app").innerText),
+    // v1.74:难度只在顶栏说一次(「你执黑 · 普通」),难度格收进了「新局」卡片
+    levelOnce: /普通/.test((document.getElementById("match") || {}).textContent || "") &&
+      !(document.getElementById("diff-seg") || { offsetParent: null }).offsetParent,
   }));
   await page.evaluate(() => document.getElementById("sgf-slots").click());
   await page.waitForTimeout(150);
@@ -505,14 +456,14 @@ async function newGame(page) {
     copied = await page.evaluate(() => navigator.clipboard.readText());
   }
   await page.evaluate(() => document.getElementById("slots-close").click());
-  await page.click("#open-practice");
+  await page.evaluate(() => document.getElementById("open-practice").click());
   await page.waitForTimeout(200);
   const pTitle = await page.evaluate(() => document.getElementById("practice-title").textContent.trim());
   const dailyChip = await page.evaluate(() => { const b = document.querySelector('#practice-skill [data-skill="daily"]'); return !!b && b.offsetParent !== null && b.classList.contains("active"); });
-  await page.click('#practice-skill [data-skill="all"]');
+  await page.evaluate(() => document.querySelector('#practice-skill [data-skill="all"]').click());
   await page.waitForTimeout(150);
   const freeTitle = await page.evaluate(() => document.getElementById("practice-title").textContent.trim());
-  const ok = first <= 21 && mid <= 19 && !dup.movesChip && !dup.saved && !dup.diffInInfo &&
+  const ok = first <= 21 && mid <= 19 && !dup.movesChip && !dup.saved && dup.levelOnce &&
     inSlots && /^\(;/.test(copied) && pTitle === "每日挑战" && dailyChip && freeTitle === "战术练习";
   report("S11 侧栏只留下棋要用的:控件 ≤ 21 / ≤ 19;文件操作在存档里、每日在练习里;信息不重复", ok,
     JSON.stringify({ first, mid, dup, inSlots, copied: copied.slice(0, 12), pTitle, dailyChip, freeTitle, errs: page.__errors }));
@@ -537,9 +488,9 @@ async function newGame(page) {
       .observe(el, { childList: true, characterData: true, subtree: true });
   });
   const first = await count();
-  const reviewHiddenEmpty = await page.evaluate(() => (document.getElementById("sgf-review") || {}).offsetParent === null);
+  const reviewHiddenEmpty = await page.evaluate(() => { const e = document.getElementById("sgf-review"); return !e || e.hidden; }); // v1.74:在「⋯」里
   // 标准一局:换难度、落子、提示、看旧手再回来、换主题
-  await page.evaluate(() => document.querySelector('#diff-seg button[data-diff="easy"]').click());
+  await setup(page, { diff: "easy" });
   for (const [r, c] of [[7, 7], [6, 8], [8, 6]]) { await click(r, c); await page.waitForTimeout(900); }
   await page.evaluate(() => (document.getElementById("btn-hint") || { click() {} }).click()); await page.waitForTimeout(900);
   await page.keyboard.press("ArrowLeft"); await page.waitForTimeout(100);
@@ -548,7 +499,7 @@ async function newGame(page) {
   await page.evaluate(() => document.querySelector('#theme-seg [data-theme="night"]').click()); await page.waitForTimeout(100);
   await page.evaluate(() => (document.getElementById("settings-close") || { click() {} }).click()); await page.waitForTimeout(200);
   const mid = await count();
-  const reviewShownMid = await page.evaluate(() => document.getElementById("sgf-review").offsetParent !== null);
+  const reviewShownMid = await page.evaluate(() => !document.getElementById("sgf-review").hidden);
   await page.keyboard.press("Home"); await page.waitForTimeout(100);
   const home = await page.evaluate(() => document.getElementById("replay-pos").textContent.trim());
   await page.keyboard.press("End"); await page.waitForTimeout(100);
@@ -566,7 +517,7 @@ async function newGame(page) {
   const n = await page.evaluate(() => Number(document.getElementById("replay-pos").textContent.split("/")[1]));
   let offered = 0, empty = 0;
   for (let ply = 1; ply <= n && offered < 3; ply++) {
-    await page.evaluate((i) => { const b = [...document.querySelectorAll("#move-list button")][i - 1]; if (b) b.click(); }, ply);
+    await page.evaluate((i) => { const e = document.getElementById("timeline"); e.value = String(i); e.dispatchEvent(new Event("input", { bubbles: true })); }, ply);
     await page.waitForTimeout(60);
     const vis = await page.evaluate(() => { const b = document.getElementById("review-side-practice"); return !!b && b.offsetParent !== null; });
     if (!vis) continue;
@@ -576,11 +527,10 @@ async function newGame(page) {
     await page.evaluate(() => (document.getElementById("practice-close") || { click() {} }).click()); await page.waitForTimeout(100);
   }
   // B2:下完的局点新局不再确认
-  await page.evaluate(() => (document.getElementById("btn-new") || { click() {} }).click()); await page.waitForTimeout(250);
+  await page.evaluate(() => { document.getElementById("btn-new").click(); document.getElementById("new-start").click(); }); await page.waitForTimeout(250);
   const askedAfterEnd = await page.evaluate(() => document.getElementById("confirm-modal").classList.contains("show"));
   if (askedAfterEnd) await page.click("#confirm-ok");
-  // 快捷键:设置里有入口;? 直接开
-  await page.evaluate(() => (document.getElementById("settings-btn") || { click() {} }).click()); await page.waitForTimeout(100);
+  // 快捷键:「⋯」里有入口(v1.74,此前在设置里);? 直接开
   await page.evaluate(() => (document.getElementById("open-help") || { click() {} }).click()); await page.waitForTimeout(150);
   const helpViaSettings = await page.evaluate(() => document.getElementById("help-modal").classList.contains("show") && !document.getElementById("settings-modal").classList.contains("show"));
   const helpText = await page.evaluate(() => document.getElementById("help-modal").innerText);
@@ -594,7 +544,7 @@ async function newGame(page) {
   await page.evaluate(() => (document.getElementById("slots-close") || { click() {} }).click());
   const modalKinds = await page.evaluate(() => document.querySelectorAll(".modal-bg").length);
   // B1:双人下 swap2 → 自由,提示条收起
-  await page.evaluate(() => document.querySelector('#mode-seg button[data-mode="pvp"]').click()); await page.waitForTimeout(150);
+  await setup(page, { mode: "pvp" });
   for (const rule of ["swap2", "free"]) {
     await page.evaluate(() => (document.getElementById("settings-btn") || { click() {} }).click()); await page.waitForTimeout(80);
     await page.click('#rule-seg button[data-rule="' + rule + '"]'); await page.waitForTimeout(80);
@@ -672,7 +622,8 @@ async function newGame(page) {
   if (await page.evaluate(() => document.getElementById("confirm-modal").classList.contains("show"))) await page.click("#confirm-ok");
   await page.waitForTimeout(300);
   const opened = await page.evaluate(() => document.getElementById("replay-pos").textContent.trim());
-  const ok = first <= 15 && !newOnEmpty && newAfterMove && reviewOpen && !reviewBtnWhileOpen &&
+  // v1.74:「新局」打开对局卡片(对手 / 难度 / 执子),空棋盘上也有用 —— 撤回 v1.72 的「空盘不显示」
+  const ok = first <= 15 && newOnEmpty && newAfterMove && reviewOpen && !reviewBtnWhileOpen &&
     !rec.clearSave && !rec.slotsList && rec.primary === 0 && rec.focus === "slots-close" &&
     !set.analysis && set.close === "完成" && set.rows === 5 &&
     mig.key === null && (mig.top.history || []).length === 3 && /进行中/.test(rowText) && opened === "3 / 3";
@@ -698,12 +649,13 @@ async function newGame(page) {
   const primary = () => page.evaluate(() => document.getElementById("btn-new").classList.contains("primary"));
   for (const [r, c] of [[7, 7], [6, 8], [8, 6]]) { await click(r, c); await page.waitForTimeout(900); }
   const mid = await count();
-  const liveHidden = !(await vis("rep-live")) && !(await vis("rep-next"));
-  const posLive = [await rect("rep-live"), await rect("rep-next")];
+  // v1.74:翻页三键退役(由 S15 的时间线接替),这三项不再量
+  const liveHidden = true;
+  const posLive = [];
   const newPrimaryMid = await primary();
   await page.keyboard.press("ArrowLeft"); await page.waitForTimeout(100);
-  const oldShown = (await vis("rep-live")) && (await vis("rep-next"));
-  const posOld = [await rect("rep-live"), await rect("rep-next")];
+  const oldShown = true;
+  const posOld = [];
   const samePos = JSON.stringify(posLive) === JSON.stringify(posOld);
   await page.keyboard.press("End"); await page.waitForTimeout(100);
   for (let i = 0; i < 40; i++) {
@@ -734,11 +686,111 @@ async function newGame(page) {
   for (const [r, c] of [[7, 10], [0, 3], [7, 11]]) { await click(r, c); await page.waitForTimeout(300); }
   const lib = await page.evaluate(() => JSON.parse(localStorage.getItem("goban.v12.games") || "[]").map((g) => ({ id: g.id, result: g.result, n: g.history.length })));
   const ok = mid <= 13 && liveHidden && oldShown && samePos && !newPrimaryMid && over && endCount <= 15 && !hintAtEnd &&
-    newPrimaryEnd && balance === "balance" && !reviewOnOpen && resumedToast &&
+    newPrimaryEnd && !reviewOnOpen && resumedToast &&
     lib.length === 1 && lib[0].id === "g-play" && lib[0].result === "b" && lib[0].n === 9;
   report("S14 对局中 ≤ 13、终局 ≤ 15;翻页原位出现;终局无提示;新局终局后才是主按钮;B8 库里仍一条;B9 接着下不开复盘", ok,
     JSON.stringify({ mid, liveHidden, oldShown, samePos, posLive, posOld, newPrimaryMid, over, endCount, hintAtEnd, newPrimaryEnd,
       balance, reviewOnOpen, toasts, lib, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- S15. 只剩一块棋盘(v1.74)----
+// 侧栏退役:首开 ≤ 3、对局中 ≤ 6、终局 ≤ 8、复盘 ≤ 9(按「真看得见」数);挪走的每一样都还能到
+// (新局卡片里的模式 / 难度 / 思考 / 执子、时间线翻页、⋯ 里的复盘 / 练习 / 记录 / 设置 / 快捷键、到期徽标);
+// B10 终局卡「第 N 手」不断开;B11 打开复盘就有解释;B12 没有孤零零的翻页箭头;
+// 四档窗口没有横向滚动,坞不压棋盘。
+{
+  const page = await newPage();
+  const click = clicker(page);
+  const count = () => page.evaluate(() => [...document.querySelectorAll("button, [role=button], input, select")]
+    .filter((e) => e.offsetParent !== null && e.getBoundingClientRect().width > 0 &&
+      getComputedStyle(e).visibility !== "hidden" && !e.closest("#move-list")).length);
+  const shown = (sel) => page.evaluate((q) => { const e = document.querySelector(q);
+    return !!e && e.offsetParent !== null && getComputedStyle(e).visibility !== "hidden"; }, sel);
+  const clickId = (id) => page.evaluate((i) => { const e = document.getElementById(i); if (e) e.click(); return !!e; }, id);
+  const first = await count();
+  for (const [r, c] of [[7, 7], [6, 8], [8, 6]]) { await click(r, c); await page.waitForTimeout(900); }
+  const mid = await count();
+  // 时间线翻页
+  const tl = await page.evaluate(() => {
+    const e = document.getElementById("timeline");
+    if (!e) return null;
+    e.value = "2"; e.dispatchEvent(new Event("input", { bubbles: true }));
+    const at2 = document.getElementById("replay-pos").textContent.trim();
+    return { at2, label: e.getAttribute("aria-valuetext") || "" };
+  });
+  await page.keyboard.press("End"); await page.waitForTimeout(100);
+  const b12 = await page.evaluate(() => ["rep-prev", "rep-live", "rep-next", "side", "toggle-panel"].filter((i) => document.getElementById(i)));
+  // 新局卡片:四格都在,选困难出思考时长,选双人 + 开始 → 双人新局
+  await clickId("btn-new"); await page.waitForTimeout(200);
+  const sheet = await page.evaluate(() => {
+    const vis = (id) => { const e = document.getElementById(id); return !!e && e.offsetParent !== null; };
+    return { mode: vis("mode-seg"), diff: vis("diff-seg"), color: vis("color-seg"), start: vis("new-start") };
+  });
+  await page.evaluate(() => { const b = document.querySelector('#diff-seg [data-diff="hard"]'); if (b) b.click(); });
+  const thinkShown = await shown("#think-seg");
+  await page.evaluate(() => { const b = document.querySelector('#mode-seg [data-mode="pvp"]'); if (b) b.click(); });
+  await clickId("new-start"); await page.waitForTimeout(300);
+  if (await page.evaluate(() => document.getElementById("confirm-modal").classList.contains("show"))) await page.click("#confirm-ok");
+  await page.waitForTimeout(300);
+  const afterStart = await page.evaluate(() => ({ match: (document.getElementById("match") || {}).textContent || "",
+    moves: document.getElementById("replay-pos").textContent.trim(), sheetOpen: !(document.getElementById("new-sheet") || { hidden: true }).hidden }));
+  // ⋯ 菜单里的五样,各自打开各自的东西
+  await clickId("more-btn"); await page.waitForTimeout(150);
+  const menuItems = await page.evaluate(() => [...document.querySelectorAll("#more-menu .menu-item")].filter((e) => e.offsetParent !== null).map((e) => e.id));
+  const opens = {};
+  for (const [id, modal, close] of [["open-practice", "practice-modal", "practice-close"], ["sgf-slots", "slots-modal", "slots-close"],
+    ["settings-btn", "settings-modal", "settings-close"], ["open-help", "help-modal", "help-close"]]) {
+    await clickId("more-btn"); await page.waitForTimeout(100);
+    await clickId(id); await page.waitForTimeout(250);
+    opens[id] = await page.evaluate((m) => document.getElementById(m).classList.contains("show"), modal);
+    await page.keyboard.press("Escape"); await page.waitForTimeout(100);
+  }
+  const badge = await page.evaluate(() => { const d = document.getElementById("daily-badge"), m = document.getElementById("more-badge");
+    return { daily: d ? d.textContent : null, more: m ? (m.hidden ? "" : m.textContent) : null }; });
+  // 回到人机下到终局
+  await clickId("btn-new"); await page.waitForTimeout(150);
+  await page.evaluate(() => { const b = document.querySelector('#mode-seg [data-mode="ai"]'); if (b) b.click();
+    const d = document.querySelector('#diff-seg [data-diff="normal"]'); if (d) d.click(); });
+  await clickId("new-start"); await page.waitForTimeout(300);
+  for (let i = 0; i < 40; i++) {
+    if (await page.evaluate(() => !document.getElementById("end-card").hidden)) break;
+    await click(1 + (i % 13), 1 + ((i * 5) % 13)); await page.waitForTimeout(500);
+  }
+  await page.waitForTimeout(400);
+  const over = await page.evaluate(() => !document.getElementById("end-card").hidden);
+  const endCount = await count();
+  const b10 = await page.evaluate(() => { const k = document.querySelector("#end-card .endcard-key");
+    return { text: k ? k.textContent : "", wrap: k ? getComputedStyle(k).textWrap || "" : "" }; });
+  const overlap = await page.evaluate(() => { const a = document.getElementById("board-wrap").getBoundingClientRect();
+    const b = document.getElementById("end-card").getBoundingClientRect();
+    return !(b.right <= a.left || b.left >= a.right || b.bottom <= a.top || b.top >= a.bottom); });
+  await clickId("end-card-review"); await page.waitForTimeout(1200);
+  const reviewCount = await count();
+  const b11 = await page.evaluate(() => ({ head: !!document.querySelector("#review-side-explain .rs-head"),
+    blunders: (window.GobanReview.getData() || { blunders: [] }).blunders.length,
+    curve: (() => { const c = document.getElementById("review-curve"); return !!c && c.offsetParent !== null && c.getBoundingClientRect().height > 30; })() }));
+  // 四档窗口:无横向滚动
+  const widths = {};
+  for (const [w, h] of [[760, 600], [1024, 768], [1280, 800], [1440, 900]]) {
+    await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(450);
+    widths[w] = await page.evaluate(() => ({ hscroll: document.documentElement.scrollWidth > innerWidth,
+      overlap: (() => { const a = document.getElementById("board-wrap").getBoundingClientRect();
+        const d = document.getElementById("review-side"); if (!d || d.hidden) return false; const b = d.getBoundingClientRect();
+        return !(b.right <= a.left + 1 || b.left >= a.right - 1 || b.bottom <= a.top + 1 || b.top >= a.bottom - 1); })() }));
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const ok = first <= 3 && mid <= 6 && !!tl && /^2 \/ /.test(tl.at2) && /2/.test(tl.label) && b12.length === 0 &&
+    sheet.mode && sheet.diff && sheet.color && sheet.start && thinkShown &&
+    /双人/.test(afterStart.match) && afterStart.moves === "0 / 0" && !afterStart.sheetOpen &&
+    ["sgf-review", "open-practice", "sgf-slots", "settings-btn", "open-help"].every((i) => menuItems.includes(i) || i === "sgf-review") &&
+    Object.values(opens).every(Boolean) && badge.more === badge.daily &&
+    over && endCount <= 8 && /第 \d+ 手/.test(b10.text) && b10.wrap !== "balance" && !overlap &&
+    reviewCount <= 9 && (b11.blunders === 0 || b11.head) && b11.curve &&
+    Object.values(widths).every((v) => !v.hscroll && !v.overlap);
+  report("S15 只剩一块棋盘:控件 ≤ 3 / 6 / 8 / 9;新局卡片、时间线、⋯ 都到得了;B10 B11 B12;四档窗口无横滚、坞不压棋盘", ok,
+    JSON.stringify({ first, mid, tl, b12, sheet, thinkShown, afterStart, menuItems, opens, badge, over, endCount, b10, overlap,
+      reviewCount, b11, widths, errs: page.__errors }));
   await page.close();
 }
 
