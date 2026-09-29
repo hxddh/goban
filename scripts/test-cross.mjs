@@ -2247,7 +2247,19 @@ async function enableSwap2Pvp(page) {
     const c2 = await computed();
     await page.evaluate(() => { const x = document.getElementById("slots-close"); if (x) x.click(); });
     await page.waitForTimeout(300);
-    const c = { checked: c1.checked + c2.checked, out: [...c1.out, ...c2.out] };
+    // v1.74:侧栏退役,主界面上的文字只剩顶栏几处;侧栏里那些行住进了「新局」卡片、「⋯」和设置弹层 ——
+    // 跟着东西走,三处都开着量(判据与 80 的覆盖线都不动)
+    const extra = [];
+    for (const [open, close] of [["btn-new", null], ["more-btn", null], ["settings-btn", "settings-close"]]) {
+      await page.evaluate((o) => document.getElementById(o).click(), open);
+      await page.waitForTimeout(300);
+      extra.push(await computed());
+      if (close) await page.evaluate((c) => document.getElementById(c).click(), close);
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(200);
+    }
+    const c = { checked: c1.checked + c2.checked + extra.reduce((a, x) => a + x.checked, 0),
+      out: [...c1.out, ...c2.out, ...extra.flatMap((x) => x.out)] };
     const pxBad = px.filter((x) => x.比值 < x.需要);
     seen[th] = { 算过: c.checked, 其中弹层: c2.checked, 取像素: px.length,
                  算出来不合格: c.out, 像素判不合格: pxBad };
@@ -2318,6 +2330,9 @@ async function enableSwap2Pvp(page) {
     if (lang === "en") {
       await setLang(page, "en");
     }
+    // v1.74:模式 / 难度 / 执子三排按钮住在「新局」卡片里 —— 开着量
+    await page.evaluate(() => document.getElementById("btn-new").click());
+    await page.waitForTimeout(150);
     const r = await page.evaluate(() => {
       const out = [];
       for (const el of document.querySelectorAll("*")) {
@@ -2333,6 +2348,7 @@ async function enableSwap2Pvp(page) {
       }
       return out;
     });
+    await page.keyboard.press("Escape");
     seen[lang] = r;
     // v1.71:空棋盘上学习区只有「练习」一个按钮(复盘不足两手不显示),它不再算一个网格
     if (r.length < 3) bad.push(lang + ": 只量到 " + r.length + " 个按钮网格，覆盖太少");
@@ -2690,7 +2706,7 @@ async function enableSwap2Pvp(page) {
     await page.waitForTimeout(300);
     const at = await readHelp();
     seen[lang + "/说明弹层"] = at;
-    if (at.rows < 11) bad.push(lang + ": 快捷键表只量到 " + at.rows + " 行 —— 覆盖不足"); // v1.71 删了「点击」「Tab」两行
+    if (at.rows < 10) bad.push(lang + ": 快捷键表只量到 " + at.rows + " 行 —— 覆盖不足"); // v1.71 删了「点击」「Tab」两行;v1.74 删了「[ ]」
     if (at.need > at.avail + 1) {
       bad.push(lang + ": 1280×720 下说明弹层要滚（need " + at.need + " > avail " + at.avail + "）");
     }
@@ -3258,10 +3274,7 @@ async function enableSwap2Pvp(page) {
   if (!rj.noteShown) bad.push("禁手档:没显示「曲线仍按无禁手估」那条说明");
 
   // ── 自由档:同样开得出来,但那条说明必须收起来
-  await openPanel(page);          // 侧栏可能已被别处收起,重开一次再点里面的控件
-  await page.evaluate(() => document.querySelector("#btn-new").click());
-  await page.waitForTimeout(150);
-  await dismissConfirm(page); await page.waitForTimeout(150);
+  await setupGame(page, {});
   await ensureSetupPhase(page);
   await pickRule(page, "free"); await page.waitForTimeout(150);
   await dismissConfirm(page); await page.waitForTimeout(300);
