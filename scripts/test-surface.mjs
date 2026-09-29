@@ -322,6 +322,95 @@ async function newGame(page) {
   await page.close();
 }
 
+// ---- S7. 侧栏「轮到谁」:棋子本身不许退后(v1.66)----
+// v1.65 把不轮到的一侧整体调到 0.55:夜 / 木盘上不轮到的黑子几乎消失,日间的白子融进米色。
+// 四套主题 × 轮到黑 / 轮到白:两颗小棋子的有效不透明度都是 1,轮廓(边线或渐变最外一圈,
+// 取对比最大的那一个)与侧栏底色对比 ≥ 3:1。练习本主题的棋子是字形,量字色。
+{
+  const page = await newPage();
+  await toPvp(page);
+  const click = clicker(page);
+  const out = {};
+  for (const [label, moves] of [["轮到白", [[7, 7]]], ["轮到黑", [[7, 8]]]]) {
+    for (const [r, c] of moves) { await click(r, c); await page.waitForTimeout(150); }
+    for (const th of ["wood", "night", "day", "notebook"]) {
+      out[th + "·" + label] = await page.evaluate((t) => {
+        document.documentElement.setAttribute("data-theme", t);
+        const parse = (str) => { const m = str.match(/rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)/); return m ? [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]] : null; };
+        const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+        const cr = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+        const blend = ([r, g, b, a], [R, G, B]) => [r * a + R * (1 - a), g * a + G * (1 - a), b * a + B * (1 - a)];
+        let el = document.getElementById("side"), panel = null;
+        while (el && !panel) { const c = parse(getComputedStyle(el).backgroundColor); if (c && c[3] > 0.5) panel = c; el = el.parentElement; }
+        if (!panel) panel = parse(getComputedStyle(document.body).backgroundColor);
+        return [...document.querySelectorAll(".vs .stone")].map((st) => {
+          let op = 1; for (let e = st; e; e = e.parentElement) op *= +getComputedStyle(e).opacity;
+          const cs = getComputedStyle(st);
+          const cands = [];
+          if (t === "notebook") cands.push(parse(cs.color));
+          else {
+            const stops = [...cs.backgroundImage.matchAll(/rgba?\([^)]*\)/g)].map((m) => parse(m[0]));
+            if (stops.length) cands.push(stops[stops.length - 1]);
+            for (const sh of cs.boxShadow.split(/,(?![^(]*\))/)) {
+              const col = parse(sh); const nums = sh.replace(/rgba?\([^)]*\)/, "").trim().split(/\s+/).map(parseFloat);
+              if (col && nums.length >= 4 && nums[3] >= 1) cands.push(blend(col, panel));
+            }
+          }
+          const best = Math.max(...cands.filter(Boolean).map((c) => cr(c, panel)));
+          return { opacity: Math.round(op * 100) / 100, contrast: Math.round(best * 100) / 100 };
+        });
+      }, th);
+    }
+  }
+  const bad = Object.entries(out).filter(([, v]) => v.some((x) => x.opacity < 1 || x.contrast < 3)).map(([k]) => k);
+  report("S7 侧栏小棋子:四套主题、轮到谁都不退后,轮廓对比 ≥ 3:1", bad.length === 0, JSON.stringify({ bad, out, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- S8. 棋子轮廓(v1.66)----
+// 沿每颗子的边取 24 个方向,比较边内(边缘一带)与边外 3px 的亮度:差 ≥ 20 算这个方向「看得见」。
+// 三套实物主题上每颗子至少 80% 的方向看得见。v1.65 夜盘黑子只有 54–71%(反光只在左上一角)。
+// 在 2× 屏上量(Mac 视网膜屏是这个应用的主要屏幕;1× 下子的半径只有十几个像素,取样太粗)。
+{
+  const ctx2 = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
+  const page = await ctx2.newPage();
+  page.__errors = [];
+  page.on("pageerror", (e) => page.__errors.push("PAGEERR " + e.message));
+  await page.goto(ORIGIN + "/index.html", { waitUntil: "networkidle" });
+  await page.evaluate(() => { if (window.GobanHost) window.GobanHost.storageSet = function () {}; localStorage.clear(); });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(250);
+  await toPvp(page);
+  const click = clicker(page);
+  for (const [r, c] of [[7, 7], [7, 8], [3, 3], [3, 4], [11, 11], [11, 10]]) { await click(r, c); await page.waitForTimeout(120); }
+  await page.mouse.move(5, 5);
+  const out = {};
+  for (const th of ["night", "wood", "day"]) {
+    await page.evaluate((t) => { document.getElementById("settings-btn").click(); document.querySelector(`#theme-seg button[data-theme="${t}"]`).click(); document.getElementById("settings-close").click(); }, th);
+    await page.waitForTimeout(600);
+    out[th] = await page.evaluate(() => {
+      const cv = document.getElementById("board"); const g = window.GobanDraw.pitchFor(cv.width); const ctx = cv.getContext("2d");
+      const rr = g.step * window.GobanDraw.STONE_R; const Y = (d) => 0.2126 * d[0] + 0.7152 * d[1] + 0.0722 * d[2];
+      const px = (x, y) => ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
+      const res = {};
+      for (const [r, c] of [[7, 7], [3, 3], [11, 11], [7, 8], [3, 4], [11, 10]]) {
+        const x = g.pad + c * g.step, y = g.pad + r * g.step; let ok = 0;
+        for (let k = 0; k < 24; k++) {
+          const a = (k / 24) * Math.PI * 2, cx = Math.cos(a), sy = Math.sin(a);
+          const o = Y(px(x + cx * (rr + 3), y + sy * (rr + 3)));
+          const d = Math.max(Math.abs(Y(px(x + cx * (rr - 2), y + sy * (rr - 2))) - o), Math.abs(Y(px(x + cx * (rr - 0.6), y + sy * (rr - 0.6))) - o));
+          if (d >= 20) ok++;
+        }
+        res[r + "," + c] = Math.round((ok / 24) * 100);
+      }
+      return res;
+    });
+  }
+  const bad = Object.entries(out).flatMap(([th, v]) => Object.entries(v).filter(([, p]) => p < 80).map(([k, p]) => th + "@" + k + "=" + p + "%"));
+  report("S8 棋子轮廓:三套实物主题上每颗子至少 80% 的边看得见", bad.length === 0, JSON.stringify({ bad, out, errs: page.__errors }));
+  await ctx2.close();
+}
+
 await browser.close();
 server.close();
 fs.rmSync(WORKER_SRC_DIR, { recursive: true, force: true });

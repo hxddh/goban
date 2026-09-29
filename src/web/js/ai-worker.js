@@ -39,7 +39,7 @@ self.onmessage = function (ev) {
       } else if (difficulty === "hard") {
         timeMs = think === "fast" ? 800 : think === "deep" ? 3500 : 2000;
       } else if (difficulty === "normal") timeMs = 400;
-      else timeMs = 30;
+      else timeMs = 240;
     }
     const engine = self.GobanTier ? self.GobanTier.engineFor(difficulty) : self.GobanAi;
     const move = engine.aiMove({

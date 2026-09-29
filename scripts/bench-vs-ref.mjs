@@ -56,7 +56,7 @@ const SCALE = num("SCALE", 0.25);
 const MS = { easy: 30, normal: 250, hard: 2000, ext: 5000 };
 const DIFF = { easy: "easy", normal: "normal", hard: "hard", ext: "extreme" };
 // v1.65 起普档的发布时限是 400ms(C3);旧版仍按它当时的 250ms
-const MS_NEW = { easy: 30, normal: 400, hard: 2000, ext: 5000 };
+const MS_NEW = { easy: 240, normal: 400, hard: 2000, ext: 5000 };
 
 function player(E, spec, msTable) {
   // "hard@8000" = 困难档,但按 8000ms(发布口径)思考;再乘 SCALE
