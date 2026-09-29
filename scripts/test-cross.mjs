@@ -2308,6 +2308,12 @@ async function enableSwap2Pvp(page) {
       }
     }
     for (let i = 0; i < 3; i++) S.record({ mode: "pvp", result: "b", moves: 30, durationMs: 60000, endedAt: t++ });
+    // v1.72 拆掉命名存档与「复盘分析」后,弹层里的文字少了一截,覆盖数落到 80 上下、随对局走向时过时不过。
+    // 往对局库里放三局,让「记录」弹层里「最近对局」那几行(文字 + 按钮)确定地在场 —— 判据不动。
+    const games = [];
+    for (let i = 0; i < 3; i++) games.push({ id: "aj" + i, history: [{ r: 7, c: 7 }, { r: 6, c: 6 }], ruleSet: "free", mode: "ai",
+      difficulty: "normal", humanColor: "b", result: i ? "w" : "b", startedAt: t, endedAt: t++, durationMs: 60000, lines: [] });
+    localStorage.setItem("goban.v12.games", JSON.stringify(games));
   });
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(300);
@@ -2845,6 +2851,8 @@ async function enableSwap2Pvp(page) {
     }
   }
   // 浏览器自己算的无障碍名，和上面的结构判据对一遍（只查结构不查计算值是同义反复）
+  // v1.73 起「回到最新」在最新一手时不显示（也就不在无障碍树里），先退到旧手让它出现
+  await page.evaluate(() => document.getElementById("rep-prev").click()); await page.waitForTimeout(100);
   for (const id of ["rep-prev", "rep-live", "settings-btn", "toggle-panel"]) {
     const snap = await page.locator("#" + id).ariaSnapshot().catch(() => "");
     const m = /button "([^"]*)"/.exec(snap || "");

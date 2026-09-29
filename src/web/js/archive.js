@@ -14,7 +14,7 @@
  *   history     手顺 [{r,c}]
  *   ruleSet     'free' | 'renju' —— 复盘、出题都按这局**当时**的规则算
  *   mode / difficulty / humanColor
- *   result      'b' | 'w' | 'draw'
+ *   result      'b' | 'w' | 'draw';'play' 是没下完的(v1.72 由旧命名存档迁来)
  *   startedAt / endedAt / durationMs
  *   lines       [{ply, moves:[{r,c}]}] 复盘里重下关键一手留下的分支(v1.63)
  *
@@ -89,6 +89,19 @@
     return persist(arr);
   }
 
+  /**
+   * 原地更新一条(v1.73):打开库里「进行中」的一局接着下完,结果写回原来那一条,
+   * id、分支都不变 —— 不另添一条。
+   */
+  function update(id, patch) {
+    const arr = load();
+    const g = arr.find((x) => x.id === id);
+    if (!g) return false;
+    if (patch.history) g.history = patch.history.map((p) => ({ r: p.r, c: p.c }));
+    for (const k of ["result", "endedAt", "durationMs"]) if (patch[k] !== undefined) g[k] = patch[k];
+    return persist(arr);
+  }
+
   function remove(id) {
     return persist(load().filter((g) => g.id !== id));
   }
@@ -108,5 +121,5 @@
 
   function clear() { Host.storageRemove(KEY); }
 
-  global.GobanArchive = { KEY, MAX, load, add, get, remove, removeByEndedAt, addLine, clear };
+  global.GobanArchive = { KEY, MAX, load, add, get, update, remove, removeByEndedAt, addLine, clear };
 })(typeof window !== "undefined" ? window : globalThis);

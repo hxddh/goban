@@ -173,8 +173,10 @@
       --muted: #6b6358;
       --accent: #b8894a;
       /* v1.32: #b8894a is 2.75:1 on --bg — unreadable as text. Same hue,
-         deepened to 4.84:1 on the sidebar / 5.23:1 on cards. */
-      --accent-text: #8c6026;
+         deepened to 4.84:1 on the sidebar / 5.23:1 on cards.
+         v1.73: in the History modal's game rows (a card on a card) #8c6026 measured 4.44:1 —
+         one notch deeper, same hue: ~5.0:1 there. */
+      --accent-text: #82581f;
       --btn: #e0d9cc;
       --btn-hover: #d2c9b8;
       --win: #a65d2e;
@@ -1313,6 +1315,10 @@
       background: color-mix(in srgb, var(--accent) 32%, transparent);
     }
     .review-explain { font-size: var(--fs-ui); line-height: var(--lh-text); color: var(--text); }
+    /* v1.73:按词均衡换行,关键一句不再单字掉到下一行 */
+    .end-card-body, .review-explain, .rs-head { text-wrap: balance; }
+    /* v1.73:在最新一手时「回到最新」「下一手」不显示,位置保留 */
+    #replay-seg.at-live #rep-live, #replay-seg.at-live #rep-next { visibility: hidden; }
     .rs-head { font-weight: 600; font-size: var(--fs-body); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
     .rs-lines { margin: 6px 0 0; padding-left: 18px; }
     .rs-lines li { margin: 2px 0; }

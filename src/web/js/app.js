@@ -1276,7 +1276,7 @@
   }
 
   // --- v1.63: 对局库 ---
-  /** 打开对局库里的一局(纯复盘),停在第 ply 手,侧栏复盘面板打开。 */
+  /** 打开对局库里的一局:下完的以复盘打开(停在第 ply 手、侧栏复盘面板打开);没下完的接着下。 */
   async function openArchivedGame(id, ply) {
     const g = Archive.get(id);
     if (!g) { toast(t("games.missing")); return; }
@@ -1300,13 +1300,18 @@
     if (result !== "play") statsRecordedGen = gameGen; // 已经记过,不再记
     closeSlots();
     clearAnalysis();
-    Review.setSideOpen(true);
-    Review.compute();
-    startDeepen();
+    // v1.73(B9):没下完的局是「接着下」,不是复盘
+    const resume = result === "play";
+    if (!resume) {
+      Review.setSideOpen(true);
+      Review.compute();
+      startDeepen();
+    }
     setViewIndex(typeof ply === "number" ? Math.max(0, Math.min(ply, history.length)) : history.length);
-    if (!isPanelOpen()) setPanelOpen(true);
+    if (!resume && !isPanelOpen()) setPanelOpen(true);
     saveGame();
-    toast(t("games.opened"));
+    toast(t(resume ? "games.resumed" : "games.opened"));
+    if (resume) maybeAiTurn();
   }
 
   function renderGamesList() {
@@ -1675,7 +1680,12 @@
       showEndCard();
       return;
     }
-    lastArchiveId = Archive.add({
+    // v1.73(B8):从库里打开的「进行中」一局接着下完,写回原来那一条
+    const prev = lastArchiveId ? Archive.get(lastArchiveId) : null;
+    const done = { history, result, endedAt: lastStatsEndedAt, durationMs: nowElapsed() };
+    if (prev && prev.result === "play" && Archive.update(prev.id, done)) {
+      // lastArchiveId 不变
+    } else lastArchiveId = Archive.add({
       history, ruleSet, mode,
       difficulty: mode === "ai" ? difficulty : null,
       humanColor: mode === "ai" ? humanColor : null,
@@ -2095,6 +2105,10 @@
     document.getElementById("rep-prev").disabled = viewIndex <= 0;
     document.getElementById("rep-next").disabled = viewIndex >= history.length;
     document.getElementById("rep-live").disabled = live;
+    // v1.73:在最新一手时「回到最新」「下一手」不显示,但位置保留 —— 看旧手时原位出现,不跳
+    document.getElementById("replay-seg").classList.toggle("at-live", live);
+    // v1.73:「新局」只在一局结束后是主按钮
+    document.getElementById("btn-new").classList.toggle("primary", result !== "play");
     document.getElementById("sgf-copy").disabled = history.length === 0;
     document.getElementById("sgf-download").disabled = history.length === 0;
     const contBtn = document.getElementById("sgf-continue");
@@ -2113,6 +2127,7 @@
           ? result === "play" && !(mode === "ai" && !isHumanTurn())
           : true);
       hintBtn.disabled = !canHint;
+      hintBtn.hidden = result !== "play"; // v1.73:终局后不显示(复盘面板接手)
       hintBtn.classList.toggle("busy", hintBusy);
     }
 

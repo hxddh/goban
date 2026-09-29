@@ -309,7 +309,7 @@ async function newGame(page) {
       };
       const acc = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
       const a = acc.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
-      const bg = getComputedStyle(document.getElementById("btn-new")).backgroundImage;
+      const bg = getComputedStyle(document.getElementById("settings-close")).backgroundImage;
       const m = bg.match(/rgb\((\d+), (\d+), (\d+)\)/);
       if (!a || !m) return null;
       const ha = hue(parseInt(a[1], 16), parseInt(a[2], 16), parseInt(a[3], 16));
@@ -679,6 +679,66 @@ async function newGame(page) {
   report("S13 继续减:首开 ≤ 15、复盘开着不显示复盘、记录里无清除存档 / 命名存档 / 主按钮、设置无复盘分析且写「完成」、旧存档并进最近对局", ok,
     JSON.stringify({ first, newOnEmpty, newAfterMove, reviewOpen, reviewBtnWhileOpen, rec, set,
       mig: { key: mig.key, n: (mig.top.history || []).length }, rowText, opened, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- S14. 修 B8 / B9,收掉此刻用不上的按钮(v1.73)----
+// 对局中(在最新一手)≤ 13、终局 ≤ 15(按「真看得见」数:visibility:hidden 不算);
+// 「回到最新」「下一手」在最新一手时不显示、看旧手时原位出现;终局不显示「提示」;
+// 「新局」对局中不是主按钮、终局后是;B8:打开库里进行中的一局下完,库里仍一条;B9:打开时不展开复盘面板。
+{
+  const page = await newPage();
+  const click = clicker(page);
+  const count = () => page.evaluate(() => [...document.querySelectorAll("button, [role=button], input, select")]
+    .filter((e) => e.offsetParent !== null && e.getBoundingClientRect().width > 0 &&
+      getComputedStyle(e).visibility !== "hidden" && !e.closest("#move-list")).length);
+  const vis = (id) => page.evaluate((i) => { const e = document.getElementById(i);
+    return !!e && e.offsetParent !== null && getComputedStyle(e).visibility !== "hidden"; }, id);
+  const rect = (id) => page.evaluate((i) => { const r = document.getElementById(i).getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y)]; }, id);
+  const primary = () => page.evaluate(() => document.getElementById("btn-new").classList.contains("primary"));
+  for (const [r, c] of [[7, 7], [6, 8], [8, 6]]) { await click(r, c); await page.waitForTimeout(900); }
+  const mid = await count();
+  const liveHidden = !(await vis("rep-live")) && !(await vis("rep-next"));
+  const posLive = [await rect("rep-live"), await rect("rep-next")];
+  const newPrimaryMid = await primary();
+  await page.keyboard.press("ArrowLeft"); await page.waitForTimeout(100);
+  const oldShown = (await vis("rep-live")) && (await vis("rep-next"));
+  const posOld = [await rect("rep-live"), await rect("rep-next")];
+  const samePos = JSON.stringify(posLive) === JSON.stringify(posOld);
+  await page.keyboard.press("End"); await page.waitForTimeout(100);
+  for (let i = 0; i < 40; i++) {
+    if (await page.evaluate(() => !document.getElementById("end-card").hidden)) break;
+    await click(1 + (i % 13), 1 + ((i * 5) % 13)); await page.waitForTimeout(500);
+  }
+  const over = await page.evaluate(() => !document.getElementById("end-card").hidden);
+  const endCount = await count();
+  const hintAtEnd = await vis("btn-hint");
+  const newPrimaryEnd = await primary();
+  const balance = await page.evaluate(() => getComputedStyle(document.querySelector(".end-card-body")).textWrap || "");
+  // B8 / B9:库里放一局没下完的双人局(黑三连,黑先),打开接着下完
+  const seed = [[7, 7], [0, 0], [7, 8], [0, 1], [7, 9], [0, 2]].map(([r, c]) => ({ r, c }));
+  await page.evaluate((h) => {
+    localStorage.clear();
+    localStorage.setItem("goban.v12.games", JSON.stringify([{ id: "g-play", history: h, ruleSet: "free", mode: "pvp",
+      difficulty: null, humanColor: null, result: "play", startedAt: 1, endedAt: 2, durationMs: 0, lines: [] }]));
+  }, seed);
+  await page.reload({ waitUntil: "networkidle" }); await page.waitForTimeout(300);
+  const toasts = [];
+  await page.exposeFunction("__toastSeen14", (x) => toasts.push(x));
+  await page.evaluate(() => { const el = document.getElementById("toast");
+    new MutationObserver(() => window.__toastSeen14(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true }); });
+  await page.evaluate(() => document.getElementById("sgf-slots").click()); await page.waitForTimeout(250);
+  await page.evaluate(() => document.querySelector("#games-list .game-open").click()); await page.waitForTimeout(400);
+  const reviewOnOpen = await page.evaluate(() => !document.getElementById("review-side").hidden);
+  const resumedToast = toasts.some((x) => /接着下/.test(x));
+  for (const [r, c] of [[7, 10], [0, 3], [7, 11]]) { await click(r, c); await page.waitForTimeout(300); }
+  const lib = await page.evaluate(() => JSON.parse(localStorage.getItem("goban.v12.games") || "[]").map((g) => ({ id: g.id, result: g.result, n: g.history.length })));
+  const ok = mid <= 13 && liveHidden && oldShown && samePos && !newPrimaryMid && over && endCount <= 15 && !hintAtEnd &&
+    newPrimaryEnd && balance === "balance" && !reviewOnOpen && resumedToast &&
+    lib.length === 1 && lib[0].id === "g-play" && lib[0].result === "b" && lib[0].n === 9;
+  report("S14 对局中 ≤ 13、终局 ≤ 15;翻页原位出现;终局无提示;新局终局后才是主按钮;B8 库里仍一条;B9 接着下不开复盘", ok,
+    JSON.stringify({ mid, liveHidden, oldShown, samePos, posLive, posOld, newPrimaryMid, over, endCount, hintAtEnd, newPrimaryEnd,
+      balance, reviewOnOpen, toasts, lib, errs: page.__errors }));
   await page.close();
 }
 
