@@ -37,7 +37,6 @@
       lastW: "rgba(58,40,22,0.62)",
       win: "rgba(160, 70, 50, 0.55)",
       hint: "rgba(40, 110, 180, 0.75)",
-      analysis: "rgba(210, 150, 30, 0.9)",
       forbid: "rgba(122, 38, 24, 0.85)",
     },
     night: {
@@ -52,7 +51,6 @@
       lastW: "rgba(16,40,32,0.66)",
       win: "rgba(125, 206, 160, 0.55)",
       hint: "rgba(120, 220, 180, 0.8)",
-      analysis: "rgba(240, 190, 90, 0.95)",
       forbid: "rgba(232, 119, 106, 0.85)",
     },
     day: {
@@ -67,7 +65,6 @@
       lastW: "rgba(110,70,36,0.7)",
       win: "rgba(140, 90, 50, 0.5)",
       hint: "rgba(50, 100, 170, 0.75)",
-      analysis: "rgba(190, 130, 20, 0.9)",
       forbid: "rgba(160, 58, 36, 0.85)",
     },
     notebook: {
@@ -88,7 +85,6 @@
       lastW: "rgba(154,52,18,0.4)",
       win: "rgba(120, 60, 55, 0.5)",
       hint: "rgba(30, 100, 160, 0.85)",
-      analysis: "rgba(180, 120, 20, 0.9)",
       forbid: "rgba(192, 57, 43, 0.85)",
     },
   };
@@ -749,27 +745,6 @@
       ctx.lineTo(x + s, y);
       ctx.moveTo(x, y - s);
       ctx.lineTo(x, y + s);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Analysis marker (replay coach's better move) — a dashed diamond, gold,
-    // distinct from the blue hint ring so review vs live-hint never blur.
-    const analysis = m.analysis;
-    if (analysis && analysis.r >= 0 && analysis.c >= 0 && !board[analysis.r][analysis.c]) {
-      const x = pad + analysis.c * step;
-      const y = pad + analysis.r * step;
-      const rr = Math.max(5, step * 0.32);
-      ctx.save();
-      ctx.strokeStyle = th.analysis || "rgba(210,150,30,0.9)";
-      ctx.lineWidth = Math.max(1.8, step * 0.07);
-      ctx.setLineDash([Math.max(3, step * 0.12), Math.max(2.5, step * 0.09)]);
-      ctx.beginPath();
-      ctx.moveTo(x, y - rr);
-      ctx.lineTo(x + rr, y);
-      ctx.lineTo(x, y + rr);
-      ctx.lineTo(x - rr, y);
-      ctx.closePath();
       ctx.stroke();
       ctx.restore();
     }

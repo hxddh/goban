@@ -181,7 +181,6 @@
             <button type="button" id="rep-live" disabled title="回到最新" data-i18n-title="rep.live.title" aria-label="回到最新" data-i18n-aria="aria.repLive"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-live"/></svg></button>
             <button type="button" id="rep-next" title="下一手 (→)" data-i18n-title="rep.next.title" aria-label="下一手" data-i18n-aria="aria.repNext"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-next"/></svg></button>
           </div>
-          <div class="coach-verdict" id="coach-verdict" hidden aria-live="polite"></div>
           <!-- v1.64:复盘只有这一个面。v1.63 时它是弹层(曲线 + 总览)与这里(跟着查看的
                那一手走)两处,用户得先知道那条隐含分工。现在曲线、失着、解释、重下 / 练 /
                推演 / 导出都在这里;弹层退役。只有静态分差的「局势波动」默认折叠。 -->
@@ -279,12 +278,6 @@
               </button>
             </div>
             <div class="setting-row">
-              <span class="setting-k" data-i18n="set.analysis">复盘分析</span>
-              <button type="button" class="switch" id="opt-analysis" aria-pressed="false" title="复盘时标注手数优劣与更优点" data-i18n-title="set.analysis.title">
-                <span class="switch-knob"></span>
-              </button>
-            </div>
-            <div class="setting-row">
               <span class="setting-k" data-i18n="set.lang">语言</span>
               <div class="pill" id="lang-seg" role="group" aria-label="界面语言" data-i18n-aria="aria.lang">
                 <button type="button" data-lang="zh" class="active" data-i18n-raw>中文</button>
@@ -301,7 +294,7 @@
         <!-- v1.71:快捷键从顶栏挪到这里(按 ? 仍直接打开)—— 一年用不了几次的东西不和「新局」并排常驻 -->
         <div class="close-row" style="display:flex;gap:8px;justify-content:space-between;align-items:center">
           <button type="button" class="text-link" id="open-help" data-i18n="help.title">快捷键</button>
-          <button type="button" class="tool-btn primary" id="settings-close" data-i18n="dlg.gotIt">知道了</button>
+          <button type="button" class="tool-btn primary" id="settings-close" data-i18n="dlg.done">完成</button>
         </div>
       </div>
     </div>
@@ -340,10 +333,6 @@
         </div>
         <div id="stats-empty" class="muted" hidden data-i18n="stats.empty">还没有完成的对局</div>
         <div id="stats-body" hidden></div>
-        <div class="slots-head">
-          <button type="button" class="tool-btn primary" id="slot-save-current" data-i18n="slots.saveCurrent">另存当前对局</button>
-          <span class="muted" id="slots-empty" hidden data-i18n="slots.empty">还没有存档</span>
-        </div>
         <!-- v1.70:棋谱文件从侧栏挪到这里 —— 它们是「文件」,和存档、备份住在一起;侧栏只留下棋要用的 -->
         <div class="backup-row sgf-row">
           <span class="muted" data-i18n="sgf.label">棋谱文件</span>
@@ -352,7 +341,6 @@
           <button type="button" class="text-link" id="sgf-import" data-i18n="sgf.import">导入</button>
           <button type="button" class="text-link" id="sgf-paste" title="从剪贴板粘贴 SGF" data-i18n="sgf.paste" data-i18n-title="sgf.paste.title">粘贴</button>
         </div>
-        <div class="slots-list" id="slots-list"></div>
         <!-- v1.63:对局库。每一局下完自动留存,不用手动存档;这里列最近 20 局,
              点「复盘」以纯复盘态打开并停在终局。 -->
         <div class="games-head">
@@ -364,7 +352,6 @@
           <span class="muted" data-i18n="backup.label">全部数据</span>
           <button type="button" class="text-link" id="backup-export" title="把存档、统计、每日打卡与练习进度导出为一个文件" data-i18n="backup.export" data-i18n-title="backup.export.title">备份</button>
           <button type="button" class="text-link" id="backup-import" title="用备份文件覆盖当前全部数据" data-i18n="backup.import" data-i18n-title="backup.import.title">恢复</button>
-          <button type="button" class="text-link danger" id="clear-save" data-i18n="foot.clear">清除存档</button>
         </div>
         <div class="close-row">
           <button type="button" class="tool-btn" id="slots-close" data-i18n="dlg.close">关闭</button>
@@ -424,7 +411,6 @@
   <script src="js/sgfio.js"></script>
   <script src="js/engine.js"></script>
   <script src="js/audio.js"></script>
-  <script src="js/slots.js"></script>
   <script src="js/archive.js"></script>
   <script src="js/backup.js"></script>
   <script src="js/review.js"></script>

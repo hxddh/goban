@@ -234,7 +234,9 @@ async function newGame(page) {
     const b = document.getElementById("daily-badge");
     return {
       tool: ["sgf-review", "open-practice"].every((id) => document.getElementById(id).classList.contains("tool-btn")),
-      h: [h("open-practice"), h("btn-new")], // v1.71:不足两手时「复盘」不显示
+      // v1.71:不足两手时「复盘」不显示;v1.72:空棋盘不显示「新局」—— 量它的高度时临时撤掉空盘态
+      h: (() => { const app = document.getElementById("app"); const was = app.classList.contains("is-empty");
+        app.classList.remove("is-empty"); const out = [h("open-practice"), h("btn-new")]; if (was) app.classList.add("is-empty"); return out; })(),
       quiet: ["sgf-slots"].every((id) => document.getElementById(id).classList.contains("text-link")),
       badge: b && !b.hidden ? b.textContent : null,
     };
@@ -613,6 +615,70 @@ async function newGame(page) {
   report("S12 再简一层:控件 ≤ 16 / 15 / 18、弹层 5 种;挪走的都在;B1–B5 修好;提示条减半", ok,
     JSON.stringify({ first, mid, endCount, over, modalKinds, home, end, helpViaSettings, helpViaKey, statsInSlots,
       swap2BarStale, askedAfterEnd, offered, empty, reviewHiddenEmpty, reviewShownMid, stale, toastCount, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- S13. 继续减,拿掉重复与误导(v1.72)----
+// 首次打开 ≤ 15(空棋盘不显示「新局」);复盘面板开着时不显示「复盘」;「记录」里没有「清除存档」、
+// 没有命名存档、没有主按钮,打开时焦点在「关闭」;设置里没有「复盘分析」、关闭按钮写「完成」;
+// 老用户的命名存档启动时并进「最近对局」(没下完的标「进行中」,打开能接着下),原键删除。
+{
+  const page = await newPage();
+  const click = clicker(page);
+  const count = () => page.evaluate(() => [...document.querySelectorAll("button, [role=button], input, select")]
+    .filter((e) => e.offsetParent !== null && e.getBoundingClientRect().width > 0 && !e.closest("#move-list")).length);
+  const shownId = (id) => page.evaluate((i) => { const e = document.getElementById(i); return !!e && e.offsetParent !== null; }, id);
+  const first = await count();
+  const newOnEmpty = await shownId("btn-new");
+  await click(7, 7); await page.waitForTimeout(900);
+  const newAfterMove = await shownId("btn-new");
+  // 下到终局,打开复盘
+  for (let i = 0; i < 40; i++) {
+    if (await page.evaluate(() => !document.getElementById("end-card").hidden)) break;
+    await click(1 + (i % 13), 1 + ((i * 5) % 13)); await page.waitForTimeout(500);
+  }
+  await page.evaluate(() => (document.getElementById("end-card-review") || { click() {} }).click()); await page.waitForTimeout(600);
+  const reviewOpen = await page.evaluate(() => !document.getElementById("review-side").hidden);
+  const reviewBtnWhileOpen = await shownId("sgf-review");
+  // 「记录」
+  await page.evaluate(() => document.getElementById("sgf-slots").click()); await page.waitForTimeout(250);
+  const rec = await page.evaluate(() => {
+    const m = document.getElementById("slots-modal");
+    return { clearSave: !!document.getElementById("clear-save"), slotsList: !!document.getElementById("slots-list"),
+      primary: [...m.querySelectorAll(".tool-btn.primary")].filter((e) => e.offsetParent !== null).length,
+      focus: document.activeElement && document.activeElement.id };
+  });
+  await page.evaluate(() => document.getElementById("slots-close").click());
+  // 设置
+  await page.evaluate(() => document.getElementById("settings-btn").click()); await page.waitForTimeout(150);
+  const set = await page.evaluate(() => ({ analysis: !!document.getElementById("opt-analysis"),
+    close: document.getElementById("settings-close").textContent.trim(),
+    rows: document.querySelectorAll("#settings-modal .setting-row").length }));
+  await page.evaluate(() => document.getElementById("settings-close").click());
+  // 迁移:放一个旧的命名存档(没下完的 3 手),重开
+  await page.evaluate(() => {
+    localStorage.setItem("goban.v12.slots", JSON.stringify([{ id: "s1", name: "old", savedAt: 5,
+      snap: { v: 4, history: [{ r: 7, c: 7 }, { r: 6, c: 6 }, { r: 8, c: 8 }], result: "play", mode: "pvp",
+        ruleSet: "free", humanColor: "b", elapsedBaseMs: 0 } }]));
+    window.GobanHost.storageSet = function () { return true; }; // 别让卸载时的自动存档盖掉上面这一条之外的东西
+  });
+  await page.reload({ waitUntil: "networkidle" }); await page.waitForTimeout(400);
+  const mig = await page.evaluate(() => ({ key: localStorage.getItem("goban.v12.slots"),
+    top: (JSON.parse(localStorage.getItem("goban.v12.games") || "[]")[0] || {}) }));
+  await page.evaluate(() => document.getElementById("sgf-slots").click()); await page.waitForTimeout(250);
+  const rowText = await page.evaluate(() => (document.querySelector("#games-list .game-name") || {}).textContent || "");
+  await page.evaluate(() => { const b = document.querySelector("#games-list .game-open"); if (b) b.click(); });
+  await page.waitForTimeout(300);
+  if (await page.evaluate(() => document.getElementById("confirm-modal").classList.contains("show"))) await page.click("#confirm-ok");
+  await page.waitForTimeout(300);
+  const opened = await page.evaluate(() => document.getElementById("replay-pos").textContent.trim());
+  const ok = first <= 15 && !newOnEmpty && newAfterMove && reviewOpen && !reviewBtnWhileOpen &&
+    !rec.clearSave && !rec.slotsList && rec.primary === 0 && rec.focus === "slots-close" &&
+    !set.analysis && set.close === "完成" && set.rows === 5 &&
+    mig.key === null && (mig.top.history || []).length === 3 && /进行中/.test(rowText) && opened === "3 / 3";
+  report("S13 继续减:首开 ≤ 15、复盘开着不显示复盘、记录里无清除存档 / 命名存档 / 主按钮、设置无复盘分析且写「完成」、旧存档并进最近对局", ok,
+    JSON.stringify({ first, newOnEmpty, newAfterMove, reviewOpen, reviewBtnWhileOpen, rec, set,
+      mig: { key: mig.key, n: (mig.top.history || []).length }, rowText, opened, errs: page.__errors }));
   await page.close();
 }
 

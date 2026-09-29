@@ -166,6 +166,24 @@ async function pasteViaSlots(page) {
   await page.click("#sgf-paste");
 }
 
+/** v1.72 起命名存档退役,「最近对局」是唯一的对局库:测试直接往库里放一局,再从「记录」里打开。 */
+async function seedGame(page, rec) {
+  await page.evaluate((r) => {
+    const arr = JSON.parse(localStorage.getItem("goban.v12.games") || "[]");
+    arr.unshift(Object.assign({ id: "t" + Math.random().toString(36).slice(2), ruleSet: "free", mode: "pvp",
+      difficulty: null, humanColor: "b", result: "play", startedAt: 1, endedAt: 2, durationMs: 0, lines: [] }, r));
+    localStorage.setItem("goban.v12.games", JSON.stringify(arr));
+  }, rec);
+}
+async function openFirstGame(page) {
+  await page.evaluate(() => document.getElementById("sgf-slots").click());
+  await page.waitForTimeout(150);
+  await page.click("#games-list .game-open");
+  await page.waitForTimeout(150);
+  await dismissConfirm(page); // 盘上有没下完的棋时会先问一句
+  await page.waitForTimeout(250);
+}
+
 async function ensureSetupPhase(page) {
   const playing = await page.evaluate(() => {
     const m = document.getElementById("replay-pos"); // v1.70:顶栏不再写手数,侧栏的「a / b」是唯一一处
@@ -443,59 +461,40 @@ async function enableSwap2Pvp(page) {
   await page.close();
 }
 
-// ---- Test C: loading a normal slot mid-swap2 cancels the opening ----
+// ---- Test C: opening a stored game mid-swap2 cancels the opening ----
+// v1.72:命名存档退役,同一条路径(把一局快照载进来)现在由「最近对局 → 复盘」走。
 {
   const page = await newPage();
   const click = clicker(page);
   await openPanel(page);
   await page.waitForTimeout(80);
-  await ensureSetupPhase(page);
-  await page.click('button[data-mode="pvp"]');
-  await page.waitForTimeout(100);
-  await dismissConfirm(page);
-  await click(7, 7); await page.waitForTimeout(80);
-  await click(7, 8); await page.waitForTimeout(120);
-  await page.click("#sgf-slots"); await page.waitForTimeout(120);
-  await page.click("#slot-save-current"); await page.waitForTimeout(120);
-  await page.click("#slots-close"); await page.waitForTimeout(80);
-  await ensureSetupPhase(page);
-  await pickRule(page, "swap2");
-  await page.waitForTimeout(120);
-  await dismissConfirm(page);
+  await seedGame(page, { history: [{ r: 7, c: 7 }, { r: 7, c: 8 }] });
+  await enableSwap2Pvp(page);
   await click(10, 10); await page.waitForTimeout(120);
   const mid = await snap(page);
-  await page.click("#sgf-slots"); await page.waitForTimeout(120);
-  await page.click(".slot-load"); await page.waitForTimeout(150);
-  await dismissConfirm(page);
-  await page.waitForTimeout(150);
+  await openFirstGame(page);
   const loaded = await snap(page);
   await click(8, 8); await page.waitForTimeout(150);
   const end = await snap(page);
-  report("C slot load mid-swap2 cancels opening",
+  report("C stored game opened mid-swap2 cancels opening",
     mid.bar && loaded.bar === false && loaded.moves === "2 / 2" && end.moves === "3 / 3" &&
       page.__errors.length === 0,
     JSON.stringify({ mid: mid.bar, loaded: loaded.moves, end: end.moves, errs: page.__errors }));
   await page.close();
 }
 
-// ---- Test D: mid-swap2 slot round-trip restores the opening phase ----
+// ---- Test D: mid-swap2 autosave round-trip restores the opening phase ----
+// v1.72:命名存档退役;布子中途关掉再开(自动存档)必须回到布子那一步,而不是一盘普通棋。
 {
   const page = await newPage();
   const click = clicker(page);
   await enableSwap2Pvp(page);
   await click(7, 7); await page.waitForTimeout(80);
   await click(7, 8); await page.waitForTimeout(150);
-  await page.click("#sgf-slots"); await page.waitForTimeout(120);
-  await page.click("#slot-save-current"); await page.waitForTimeout(120);
-  await page.click("#slots-close"); await page.waitForTimeout(80);
-  await click(2, 2); await page.waitForTimeout(150);
-  await page.click('.swap2-btn:has-text("执白")'); await page.waitForTimeout(150);
-  await page.click("#sgf-slots"); await page.waitForTimeout(120);
-  await page.click(".slot-load"); await page.waitForTimeout(150);
-  await dismissConfirm(page);
-  await page.waitForTimeout(200);
+  await page.reload({ waitUntil: "networkidle" }); // 卸载时自动存档
+  await page.waitForTimeout(400);
   const restored = await snap(page);
-  report("D mid-swap2 slot restores opening phase",
+  report("D mid-swap2 autosave restores opening phase",
     restored.bar && /第 3 子/.test(restored.msg) && restored.moves === "2 / 2" &&
       page.__errors.length === 0,
     JSON.stringify({ msg: restored.msg, moves: restored.moves, errs: page.__errors }));
@@ -2061,9 +2060,10 @@ async function enableSwap2Pvp(page) {
     await page.evaluate(() => { const x = document.getElementById("sgf-slots"); if (x) x.click(); });
     await page.waitForTimeout(350);
     if (lang === "zh") {
-      await page.evaluate(() => { const x = document.getElementById("slot-save-current"); if (x) x.click(); });
-      await page.waitForTimeout(450);
-      await dismissConfirm(page);
+      // v1.72:命名存档退役,量「最近对局」的行(同一套 .slot-row / .slot-ops)
+      await page.evaluate(() => document.getElementById("slots-close").click());
+      await seedGame(page, { history: [{ r: 7, c: 7 }, { r: 7, c: 8 }], result: "b" });
+      await page.evaluate(() => document.getElementById("sgf-slots").click());
       await page.waitForTimeout(250);
     }
     const r = await page.evaluate(() => {
@@ -2103,7 +2103,7 @@ async function enableSwap2Pvp(page) {
   }
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
-  report("AH 存档行的两个按钮跟随语言", bad.length === 0, JSON.stringify({ bad, seen }));
+  report("AH 对局行的两个按钮跟随语言", bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
 // ---- Test AI: 帮助弹层里写的快捷键，一条条按下去都得真的管用 ----
@@ -2596,125 +2596,49 @@ async function enableSwap2Pvp(page) {
   report("AL 按钮网格的列数与按钮数相容（末行不留孤儿）", bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
-// ---- Test AM: 复盘逐手评语必须覆盖到最后一手，且不能和整局复盘打架 ----
-// 此前 scheduleAnalysis() 与渲染都卡在光秃秃的 isLive()（viewIndex === history.length）。
-// 对局进行中封住头部是对的 —— 评它等于给提示。但那条判据不区分「棋还在下」和「棋已经
-// 下完」，于是终局之后、以及导入的纯复盘里，最后一手也被一并封了口。
-//
-// 而 review.js 的循环是 `for (i = 1; i <= N; i++)`，**包含**最后一手。走过一遍：整局
-// 复盘列出「第 9 手 黑错失胜着」，面板自己写着「点下方失着可跳转」，点下去跳到 9/9 ——
-// 逐手评语一片空白。同一个功能，两套说法，而那一手往往正是最该有评语的。
-//
-// 这条闸门守三件事，缺一不可：
-//   ① 对局**进行中**停在头部，仍然不许有评语（这是原判据在保护的东西）；
-//   ② 终局之后，最后一手要有评语；
-//   ③ 整局复盘列为失着的**每一手**，逐手评语都得说得出话 —— 两处不许打架。
+// ---- Test AM: 整局复盘列出的每一手失着,复盘面板都说得出话 ----
+// v1.72 起「复盘分析」开关连同它那一行逐手评语一起退役 —— 它和复盘面板说的是同一件事,
+// 而且默认关着。原闸门守的是「两处不许打架」;现在只剩一处,守的就是这一处不许哑:
+//   ① 设置里不再有那个开关,侧栏里也不再有那一行;
+//   ② 整局复盘列为失着的每一手,点过去,面板的解释都不空;构造的第 9 手(错失胜着)要说对。
 {
   const bad = [];
   const seen = {};
   const P = (r, c) => String.fromCharCode(97 + c) + String.fromCharCode(97 + r);
   const sgfOf = (moves) => "(;GM[1]FF[4]SZ[15]" +
     moves.map(([r, c], i) => ";" + (i % 2 === 0 ? "B" : "W") + "[" + P(r, c) + "]").join("") + ")";
-  const turnOnAnalysis = async (page) => {
-    await openPanel(page);
-    await page.evaluate(() => {
-      const x = document.getElementById("opt-analysis");
-      if (x && x.getAttribute("aria-pressed") !== "true") x.click();
-    });
+  const page = await newPage();
+  await openPanel(page);
+  seen["①开关与评语行"] = await page.evaluate(() => ({
+    toggle: !!document.getElementById("opt-analysis"), line: !!document.getElementById("coach-verdict") }));
+  if (seen["①开关与评语行"].toggle || seen["①开关与评语行"].line) bad.push("「复盘分析」开关或逐手评语行还在");
+  // 第 9 手黑走 (14,14)，放着 (7,7) 的连五不下 —— 真值：错失胜着
+  const moves = [[7, 3], [7, 2], [7, 4], [0, 0], [7, 5], [0, 2], [7, 6], [0, 4], [14, 14]];
+  await page.evaluate(async (s) => { await navigator.clipboard.writeText(s); }, sgfOf(moves));
+  await page.evaluate(() => { const x = document.getElementById("sgf-paste"); if (x) x.click(); });
+  await page.waitForTimeout(700);
+  await dismissConfirm(page);
+  await page.waitForTimeout(600);
+  await page.evaluate(() => { const x = document.getElementById("sgf-review"); if (x && !x.disabled) x.click(); });
+  await page.waitForTimeout(900);
+  await page.evaluate(() => { const m = document.querySelector("#review-side-chips [data-more]"); if (m) m.click(); });
+  await page.waitForTimeout(150);
+  const nums = await page.evaluate(() => [...document.querySelectorAll("#review-side-chips .review-chip[data-i]")]
+    .map((x) => Number(x.dataset.i)).filter(Boolean));
+  const said = {};
+  for (const n of nums) {
+    await page.evaluate((k) => { const b = document.querySelector('#review-side-chips .review-chip[data-i="' + k + '"]'); if (b) b.click(); }, n);
     await page.waitForTimeout(250);
-  };
-  const gotoMove = async (page, n) => {
-    await page.evaluate((k) => {
-      const bs = [...document.querySelectorAll("#move-list button")];
-      if (bs[k - 1]) bs[k - 1].click();
-    }, n);
-    await page.waitForTimeout(700);
-  };
-  const verdictNow = (page) => page.evaluate(() => {
-    const e = document.getElementById("coach-verdict");
-    return e && !e.hidden ? e.textContent.trim() : null;
-  });
-
-  // ① 对局进行中、停在头部 —— 必须没有评语
-  {
-    const page = await newPage();
-    const click = clicker(page);
-    await turnOnAnalysis(page);
-    await page.evaluate(() => { const x = document.querySelector('button[data-mode="pvp"]'); if (x) x.click(); });
-    await page.waitForTimeout(200);
-    await dismissConfirm(page);
-    for (const [r, c] of [[7, 3], [0, 0], [7, 4], [0, 2], [7, 5]]) { await click(r, c); await page.waitForTimeout(150); }
-    await page.waitForTimeout(500);
-    const n = await page.evaluate(() => document.querySelectorAll("#move-list button").length);
-    await gotoMove(page, n - 1);
-    await gotoMove(page, n);
-    const v = await verdictNow(page);
-    seen["①对局进行中头部"] = v;
-    if (v !== null) bad.push("对局还在进行中，头部那一手却给了评语「" + v + "」—— 这是提示泄露");
-    await page.close();
+    said[n] = await page.evaluate(() => (document.getElementById("review-side-explain").textContent || "").trim());
   }
-  // ② 终局之后的最后一手（制胜一手）
-  {
-    const page = await newPage();
-    const click = clicker(page);
-    await turnOnAnalysis(page);
-    await page.evaluate(() => { const x = document.querySelector('button[data-mode="pvp"]'); if (x) x.click(); });
-    await page.waitForTimeout(200);
-    await dismissConfirm(page);
-    for (const [r, c] of [[7, 3], [0, 0], [7, 4], [0, 2], [7, 5], [0, 4], [7, 6], [0, 6], [7, 7]]) {
-      await click(r, c); await page.waitForTimeout(150);
-    }
-    await page.waitForTimeout(700);
-    const over = await page.evaluate(() => document.getElementById("status").textContent.trim());
-    const n = await page.evaluate(() => document.querySelectorAll("#move-list button").length);
-    await gotoMove(page, n - 1);
-    await gotoMove(page, n);
-    const v = await verdictNow(page);
-    seen["②终局后最后一手"] = { 状态: over, 手数: n, 评语: v };
-    if (n !== 9) bad.push("这局应当 9 手，实得 " + n);
-    if (!v) bad.push("终局之后最后一手没有评语");
-    else if (!/制胜|winning/i.test(v)) bad.push("终局那一手是连五取胜，评语却是「" + v + "」");
-    await page.close();
-  }
-  // ③ 整局复盘列为失着的每一手，逐手评语都得说得出话
-  {
-    const page = await newPage();
-    await turnOnAnalysis(page);
-    // 第 9 手黑走 (14,14)，放着 (7,7) 的连五不下 —— 真值：错失胜着
-    const moves = [[7, 3], [7, 2], [7, 4], [0, 0], [7, 5], [0, 2], [7, 6], [0, 4], [14, 14]];
-    await page.evaluate(async (s) => { await navigator.clipboard.writeText(s); }, sgfOf(moves));
-    await page.evaluate(() => { const x = document.getElementById("sgf-paste"); if (x) x.click(); });
-    await page.waitForTimeout(700);
-    await dismissConfirm(page);
-    await page.waitForTimeout(600);
-    await page.evaluate(() => { const x = document.getElementById("sgf-review"); if (x && !x.disabled) x.click(); });
-    await page.waitForTimeout(900);
-    // v1.64:复盘在侧栏面板里;「局势波动」默认折叠,先展开,整局列出的每一手都要查
-    await page.evaluate(() => { const m = document.querySelector("#review-side-chips [data-more]"); if (m) m.click(); });
-    await page.waitForTimeout(150);
-    const rows = await page.evaluate(() => [...document.querySelectorAll("#review-side-chips .review-chip[data-i]")]
-      .map((x) => x.dataset.i));
-    await page.waitForTimeout(350);
-    const nums = rows.map((t) => { const m = t.match(/(\d+)/); return m ? Number(m[1]) : null; }).filter(Boolean);
-    const said = {};
-    for (const n of nums) {
-      await gotoMove(page, n === 1 ? 2 : n - 1);   // 先离开，逼它重算
-      await gotoMove(page, n);
-      said[n] = await verdictNow(page);
-    }
-    seen["③整局复盘列出的失着"] = { 行: rows, 逐手评语: said };
-    if (!nums.length) bad.push("整局复盘一条失着都没列出来，这条闸门等于没测");
-    if (!nums.includes(9)) bad.push("整局复盘没把第 9 手列为失着（构造的真值就是错失胜着）");
-    for (const n of nums) {
-      if (!said[n]) bad.push("整局复盘把第 " + n + " 手列为失着，逐手评语却一言不发 —— 两处打架");
-    }
-    if (said[9] && !/错失|missed the win/i.test(said[9])) {
-      bad.push("第 9 手真值是错失胜着，评语却是「" + said[9] + "」");
-    }
-    if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
-    await page.close();
-  }
-  report("AM 复盘逐手评语覆盖到最后一手，且与整局复盘不打架", bad.length === 0, JSON.stringify({ bad, seen }));
+  seen["②整局复盘列出的失着"] = { 手: nums, 解释: said };
+  if (!nums.length) bad.push("整局复盘一条失着都没列出来，这条闸门等于没测");
+  if (!nums.includes(9)) bad.push("整局复盘没把第 9 手列为失着（构造的真值就是错失胜着）");
+  for (const n of nums) if (!said[n]) bad.push("整局复盘把第 " + n + " 手列为失着，面板却一言不发");
+  if (said[9] && !/错失|missed/i.test(said[9])) bad.push("第 9 手真值是错失胜着，解释却是「" + said[9].slice(0, 40) + "」");
+  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
+  await page.close();
+  report("AM 整局复盘列出的每一手失着，复盘面板都说得出话（复盘分析开关已退役）", bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
 // ---- Test AN: 设置行的控件同高、行距同节奏，且控件不许撑起行高 ----
@@ -3361,17 +3285,17 @@ async function enableSwap2Pvp(page) {
     mode: (document.querySelector("#mode-seg button.active") || {}).dataset?.mode || null,
     moves: Number((document.getElementById("replay-pos").textContent.split("/")[1] || "0").trim()),
   }));
+  // v1.72:命名存档退役 —— 「存」就是把这一局原样放进对局库,「读」就是从「记录」里打开它
   const saveSlot = async (pg) => {
-    await pg.click("#sgf-slots"); await pg.waitForTimeout(150);
-    await pg.click("#slot-save-current"); await pg.waitForTimeout(150);
-    await pg.click("#slots-close"); await pg.waitForTimeout(120);
+    const rec = await pg.evaluate(() => {
+      const sgf = window.GobanSgfIo.buildSgf();
+      const hist = [...sgf.matchAll(/;[BW]\[([a-o])([a-o])\]/g)].map((m) => ({ r: m[2].charCodeAt(0) - 97, c: m[1].charCodeAt(0) - 97 }));
+      return { history: hist, ruleSet: document.getElementById("app").dataset.rule === "renju" ? "renju" : "free",
+        mode: (document.querySelector("#mode-seg button.active") || {}).dataset.mode, difficulty: "normal" };
+    });
+    await seedGame(pg, rec);
   };
-  const loadSlot = async (pg) => {
-    await pg.click("#sgf-slots"); await pg.waitForTimeout(150);
-    await pg.click(".slot-load"); await pg.waitForTimeout(150);
-    await dismissConfirm(pg);          // 盘上有子时载入会先问一句
-    await pg.waitForTimeout(250);
-  };
+  const loadSlot = async (pg) => { await openFirstGame(pg); };
   // 换规则 / 换模式在有棋时都要确认(确认即新局)—— 不答这一句,后面的点击全被弹层拦掉
   const segClick = async (pg, sel) => {
     await pg.click(sel); await pg.waitForTimeout(150);
@@ -3434,7 +3358,7 @@ async function enableSwap2Pvp(page) {
     await page.close();
   }
 
-  report("AT 存档带着规则走（两个方向）", bad.length === 0, JSON.stringify({ bad, seen }));
+  report("AT 存下的对局带着规则走（两个方向）", bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
 // AU 禁手档下的人机这条**通路**是通的:renju 一路传到 worker 里的引擎,电脑真在

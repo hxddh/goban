@@ -726,41 +726,6 @@
     }
     .replay-bar button:disabled { opacity: 0.28; cursor: default; }
 
-    .coach-verdict {
-      margin-top: 8px;
-      padding: 8px 12px;
-      border-radius: var(--radius-sm);
-      font-size: var(--fs-body); font-weight: 600;
-      line-height: 1.35;
-      border: 1px solid var(--card-border);
-      background: var(--btn-ghost);
-      color: var(--fg);
-    }
-    .coach-verdict.grade-best {
-      color: #2f9e5e;
-      color: color-mix(in srgb, #2f9e5e 82%, var(--fg));
-      border-color: var(--card-border);
-      border-color: color-mix(in srgb, #2f9e5e 40%, var(--card-border));
-      background: var(--btn-ghost);
-      background: color-mix(in srgb, #2f9e5e 10%, transparent);
-    }
-    .coach-verdict.grade-ok {
-      color: #c9911e;
-      color: color-mix(in srgb, #c9911e 85%, var(--fg));
-      border-color: var(--card-border);
-      border-color: color-mix(in srgb, #c9911e 40%, var(--card-border));
-      background: var(--btn-ghost);
-      background: color-mix(in srgb, #c9911e 10%, transparent);
-    }
-    .coach-verdict.grade-blunder {
-      color: var(--win);
-      color: color-mix(in srgb, var(--win) 88%, var(--fg));
-      border-color: var(--card-border);
-      border-color: color-mix(in srgb, var(--win) 42%, var(--card-border));
-      background: var(--btn-ghost);
-      background: color-mix(in srgb, var(--win) 10%, transparent);
-    }
-    .coach-verdict.grade-pending { opacity: 0.72; font-weight: 500; }
 
     .slots-head {
       display: flex; align-items: center; gap: 8px;
@@ -963,6 +928,7 @@
     #app.is-empty #clock,
     #app.is-empty #undo,
     #app.is-empty #btn-hint,
+    #app.is-empty #btn-new,
     #app.is-empty #replay-pos { display: none; }
     /* v1.70:棋谱文件挪进存档弹层,与备份同一行式;行间不再画第二条分隔线 */
     .backup-row.sgf-row { border-top: 0; margin-top: 8px; padding-top: 0; }
