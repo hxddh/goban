@@ -20,7 +20,8 @@
  *   杀     原生 VCF:只走冲四,对手唯一的挡点就是下一层;根上先查己方 VCF,再用对手的
  *          VCF 过滤候选(找不到不被连四杀的手时,退回搜索的结果)。
  *
- * 规则:搜索按自由式算(与 C1 / C2 相同),连珠档的合法性由出口的 C1.legalizeRenju 保证。
+ * 规则:搜索按自由式算(与 C1 相同);连珠档黑方在根上剔除禁手点、连杀的第一手须合法,
+ *      出口的 C1.legalizeRenju 仍兜底。
  * 开局 ≤ 2 子时交给 C1 的开局册。
  * @module ai3
  */
@@ -669,7 +670,9 @@
 
     // 2) 自己的冲四连杀
     vcfNodes = 0;
-    const own = vcf(side, prof.vcfAttack);
+    let own = vcf(side, prof.vcfAttack);
+    // 连珠档黑方:连杀的第一手若是禁手,这条杀不存在(后面几手仍按自由式算,见文件头)
+    if (own >= 0 && opts.renju && side === 0 && Core.renjuForbidden(board2d, (own / SZ) | 0, own % SZ)) own = -1;
     if (own >= 0) { lastStage = "vcf"; return toRC(own); }
 
     // 2b) 极档:自己的活三连杀(占用至多 30% 的预算)
@@ -742,6 +745,13 @@
       }
       aborted = false;
       deadline = saveDeadline;
+    }
+    // 连珠档黑方:根上先剔除禁手点。此前搜索常把禁手点选成最好的一手,交货时才被出口兜底
+    // 换掉,换上的那手与搜索的计划无关(v1.68 连珠自对弈 24 局 40 次)。只在根上判:每点约
+    // 13.5 µs,放进搜索内部则每手多出几秒(v1.55 量过)。全是禁手时不动,交给出口兜底。
+    if (opts.renju && side === 0) {
+      const legal = cands.filter((c) => !Core.renjuForbidden(board2d, (c / SZ) | 0, c % SZ));
+      if (legal.length) cands = legal;
     }
     if (easySkipOwnF4) {
       easySkipOwnF4 = false;
