@@ -1306,9 +1306,36 @@
     return t("practice.task.defend", { who: who });
   }
 
+  // v1.76(B17):卡片上从状态拼出来的文字都记下「怎么拼」,换语言时照原样重拼一遍
+  let titleKey = null, taskKey = null, nextKey = null, fbFn = null, fbCls = "";
   function setFeedback(html, cls) {
+    fbFn = typeof html === "function" ? html : null;
+    fbCls = cls || "";
     const el = document.getElementById("practice-feedback");
-    if (el) { el.innerHTML = html; el.className = "practice-feedback " + (cls || ""); }
+    if (el) { el.innerHTML = fbFn ? fbFn() : html; el.className = "practice-feedback " + fbCls; }
+  }
+  /** key 为 null 时是当前这道题的题面 */
+  function setTask(key) {
+    taskKey = key;
+    const el = document.getElementById("practice-task");
+    if (el) el.textContent = key ? t(key) : (cur ? taskText() : "");
+  }
+  function setNext(key) {
+    nextKey = key;
+    const el = document.getElementById("practice-next");
+    if (el) el.textContent = t(key);
+  }
+  function relabel() {
+    if (!isOpen()) return;
+    redraw();
+    if (titleKey) setTitle(titleKey);
+    setTask(taskKey);
+    if (fbFn) setFeedback(fbFn, fbCls);
+    if (nextKey) setNext(nextKey);
+    syncHintButtons();
+    syncWrongButton();
+    setProgress();
+    setModalLabel(titleKey ? t(titleKey) : "");
   }
 
   function setProgress() {
@@ -1337,9 +1364,10 @@
     notify();
   }
 
-  function setTitle(text) {
+  function setTitle(key) {
+    titleKey = key;
     const el = document.getElementById("practice-title");
-    if (el) el.textContent = text;
+    if (el) el.textContent = t(key);
     notify();
   }
 
@@ -1387,7 +1415,7 @@
     hintLevel = 0;
     attempts = 0;
     const task = document.getElementById("practice-task");
-    if (task) task.textContent = taskText();
+    setTask(null);
     setFeedback("", "");
     const next = document.getElementById("practice-next");
     if (next) next.hidden = true;
@@ -1410,24 +1438,24 @@
       // streak but never re-counts it.
       const st = advanceDaily(loadDaily() || {}, dailyDate, score, pool.length);
       saveDaily(st);
-      if (task) task.textContent = t("daily.done");
-      setFeedback(
+      setTask("daily.done");
+      setFeedback(() => 
         t("daily.summary", { score: score, total: pool.length, streak: st.streak || 1 }),
         "good");
-      if (next) { next.hidden = false; next.textContent = t("daily.replay"); }
+      if (next) { next.hidden = false; setNext("daily.replay"); }
     } else if (runMode === "wrong") {
-      if (task) task.textContent = t("practice.book.done");
+      setTask("practice.book.done");
       const left = unmastered(buildCandidates(), loadProgress()).length;
-      setFeedback(
+      setFeedback(() => 
         t(left ? "practice.book.left" : "practice.book.cleared",
           { score: score, total: pool.length, left: left }),
         left ? "" : "good");
       if (next) {
         next.hidden = false;
-        next.textContent = t(left ? "practice.again" : "practice.book.backToPractice");
+        setNext(left ? "practice.again" : "practice.book.backToPractice");
       }
     } else {
-      if (task) task.textContent = t("practice.roundDone");
+      setTask("practice.roundDone");
       // 一轮结束给一句具体的下一步:到期复习还有几题、错题本还有几题
       const cands = buildCandidates();
       const prog = progressFor(cands);
@@ -1437,8 +1465,8 @@
       if (wrong) tail = t("practice.round.nextWrong", { n: wrong });
       else if (due) tail = t("practice.round.nextDue", { n: due });
       else tail = t("practice.round.nextTomorrow");
-      setFeedback(t("practice.roundScore", { score: score, total: pool.length }) + " " + tail, "good");
-      if (next) { next.hidden = false; next.textContent = t("practice.again"); }
+      setFeedback(() => t("practice.roundScore", { score: score, total: pool.length }) + " " + tail, "good");
+      if (next) { next.hidden = false; setNext("practice.again"); }
     }
     syncWrongButton();
     syncHintButtons();
@@ -1512,7 +1540,7 @@
     hintLevel++;
     const marks = hintLevel === 1 ? threatMarks(cur) : threatMarks(cur).concat(candidateMarks(cur));
     drawBoard(marks, null);
-    setFeedback(hintText(hintLevel), "hint");
+    setFeedback(() => hintText(hintLevel), "hint");
     syncHintButtons();
   }
 
@@ -1549,7 +1577,7 @@
     syncHintButtons();
     setProgress(); // reflect the score immediately, not only on the next puzzle
     const next = document.getElementById("practice-next");
-    if (next) { next.hidden = false; next.textContent = t(idx + 1 < pool.length ? "practice.next" : "practice.seeResult"); }
+    if (next) { next.hidden = false; setNext(idx + 1 < pool.length ? "practice.next" : "practice.seeResult"); }
   }
 
   function reveal() {
@@ -1567,7 +1595,8 @@
       saveProgress(st);
     }
     showAnswer(null, false);
-    setFeedback(t("practice.revealed", { cells: answerCoords() }) + " " + wrongText(), "bad");
+    // v1.76(B18):一手没下就看答案,不该说「✗ 这一手……」—— 用户根本没下。只给答案和为什么
+    setFeedback(() => t("practice.revealed", { cells: answerCoords() }) + " " + t("practice.explain." + cur.type), "hint");
     endPuzzle();
   }
 
@@ -1599,7 +1628,7 @@
       if (attempts === 1) saveProgress(recordAnswer(loadProgress(), puzzleKey(cur), false, todayStr(), "solo"));
       if (attempts >= 2) {
         showAnswer({ r, c }, false);
-        setFeedback(wrongText(), "bad");
+        setFeedback(() => wrongText(), "bad");
         endPuzzle();
         return;
       }
@@ -1607,7 +1636,7 @@
       if (hintLevel < 1) hintLevel = 1;
       const marks = threatMarks(cur).concat([{ r, c, color: "rgba(192,57,43,0.95)", label: "✗" }]);
       drawBoard(marks, null);
-      setFeedback(t("practice.retry") + " " + hintText(1), "bad");
+      setFeedback(() => t("practice.retry") + " " + hintText(1), "bad");
       syncWrongButton();
       syncHintButtons();
       return;
@@ -1616,7 +1645,7 @@
     if (how === "solo") score++;
     saveProgress(recordAnswer(loadProgress(), puzzleKey(cur), true, todayStr(), how));
     showAnswer({ r, c }, true);
-    setFeedback(t(how === "solo" ? "practice.correct" : "practice.correct.hinted"), "good");
+    setFeedback(() => t(how === "solo" ? "practice.correct" : "practice.correct.hinted"), "good");
     endPuzzle();
   }
 
@@ -1641,8 +1670,8 @@
     if (!pool.length) {
       cur = null;
       const task = document.getElementById("practice-task");
-      if (task) task.textContent = t("practice.empty");
-      setFeedback(skill === "forbid" ? t("practice.empty.forbid") : "", "");
+      setTask("practice.empty");
+      setFeedback(() => skill === "forbid" ? t("practice.empty.forbid") : "", "");
       clearMiniBoard();
       setProgress();
       syncHintButtons();
@@ -1660,13 +1689,13 @@
     pool = unmastered(cands, progressFor(cands));
     idx = 0;
     score = 0;
-    setTitle(t("practice.wrongBook"));
+    setTitle("practice.wrongBook");
     setModalLabel(t("practice.wrongBook"));
     if (!pool.length) {
       cur = null;
       const task = document.getElementById("practice-task");
-      if (task) task.textContent = t("practice.book.empty");
-      setFeedback(t("practice.book.emptyHint"), "");
+      setTask("practice.book.empty");
+      setFeedback(() => t("practice.book.emptyHint"), "");
       clearMiniBoard();
       setProgress();
       syncHintButtons();
@@ -1722,7 +1751,7 @@
     syncSkillButtons();
     if (!pool.length) {
       const task = document.getElementById("practice-task");
-      if (task) task.textContent = t("practice.empty");
+      setTask("practice.empty");
       return;
     }
     if (r.state.lastDoneDate === dailyDate) {
@@ -1730,8 +1759,8 @@
       cur = null;
       score = r.state.lastScore != null ? r.state.lastScore : 0;
       const task = document.getElementById("practice-task");
-      if (task) task.textContent = t("daily.doneToday");
-      setFeedback(
+      setTask("daily.doneToday");
+      setFeedback(() => 
         t("daily.summaryToday", {
           score: r.state.lastScore != null ? r.state.lastScore : 0,
           total: r.state.lastTotal || pool.length,
@@ -1739,7 +1768,7 @@
         }),
         "good");
       const next = document.getElementById("practice-next");
-      if (next) { next.hidden = false; next.textContent = t("daily.replay"); }
+      if (next) { next.hidden = false; setNext("daily.replay"); }
       setProgress();
       syncHintButtons();
       clearMiniBoard();
@@ -1758,7 +1787,7 @@
     // v1.70:侧栏不再有单独的「每日」—— 今天的题没做时,点「练习」先看到它们
     if (!(opts && (opts.skill || opts.free)) && !dailyDoneToday()) { openDaily(); return; }
     showCard();
-    setTitle(t("practice.title"));
+    setTitle("practice.title");
     setModalLabel(t("practice.title"));
     const wrongBtn = document.getElementById("practice-wrong");
     if (wrongBtn) wrongBtn.hidden = false;
@@ -1783,7 +1812,7 @@
     const hit = cands.filter((p) => p.gameId === gameId && p.ply === ply);
     if (!hit.length) { open({ free: true }); return false; }
     showCard();
-    setTitle(t("practice.title"));
+    setTitle("practice.title");
     setModalLabel(t("practice.title"));
     const wrongBtn = document.getElementById("practice-wrong");
     if (wrongBtn) wrongBtn.hidden = false;
@@ -1800,7 +1829,7 @@
 
   function openDaily() {
     showCard();
-    setTitle(t("daily.title"));
+    setTitle("daily.title");
     setModalLabel(t("daily.title"));
     const wrongBtn = document.getElementById("practice-wrong");
     if (wrongBtn) wrongBtn.hidden = true; // 每日 is its own fixed set
@@ -1854,28 +1883,28 @@
       const wrongBtn = document.getElementById("practice-wrong");
       if (b.dataset.skill === "daily") {
         if (runMode === "daily") return;
-        setTitle(t("daily.title")); setModalLabel(t("daily.title"));
+        setTitle("daily.title"); setModalLabel(t("daily.title"));
         if (wrongBtn) wrongBtn.hidden = true;
         startDaily();
         return;
       }
       if (runMode === "free" && b.dataset.skill === skill) return;
       skill = b.dataset.skill;
-      setTitle(t("practice.title")); setModalLabel(t("practice.title"));
+      setTitle("practice.title"); setModalLabel(t("practice.title"));
       if (wrongBtn) wrongBtn.hidden = false;
       start();
       syncWrongButton();
     });
     const wrongBtn = document.getElementById("practice-wrong");
     if (wrongBtn) wrongBtn.addEventListener("click", () => {
-      if (runMode === "wrong") { setTitle(t("practice.title")); setModalLabel(t("practice.title")); start(); }
+      if (runMode === "wrong") { setTitle("practice.title"); setModalLabel(t("practice.title")); start(); }
       else startWrong();
       syncWrongButton();
     });
   }
 
   global.GobanPractice = {
-    init, wire, open, openFor, hasPuzzleFor, openDaily, close, isOpen, redraw, dailySummary, practiceSummary, dueCount,
+    init, wire, open, openFor, hasPuzzleFor, openDaily, close, isOpen, redraw, relabel, dailySummary, practiceSummary, dueCount,
     // pure daily helpers, exposed for unit tests
     daily: { pickForDate, pickDaily, advanceDaily, prevDayStr, seededRng },
     // pure puzzle predicates + the curated bank, exposed for unit tests

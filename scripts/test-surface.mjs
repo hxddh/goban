@@ -416,7 +416,8 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
   });
   const withWelcome = await count();
   const emptyHidden = !(await shown("timeline"));
-  const ruleInSettings = await page.evaluate(() => { const r = document.getElementById("rule-field"); return !!r && !!r.closest("#settings-modal"); });
+  // v1.76:规则从设置挪进了「新局」卡片(是这一局怎么下,不是偏好)
+  const ruleInSettings = await page.evaluate(() => { const r = document.getElementById("rule-field"); return !!r && !!r.closest("#new-sheet") && !document.querySelector("#settings-modal #rule-field"); });
   await clicker(page)(7, 7);
   await page.waitForTimeout(400);
   const afterMove = await shown("timeline");
@@ -546,9 +547,11 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
   // B1:双人下 swap2 → 自由,提示条收起
   await setup(page, { mode: "pvp" });
   for (const rule of ["swap2", "free"]) {
-    await page.evaluate(() => (document.getElementById("settings-btn") || { click() {} }).click()); await page.waitForTimeout(80);
+    // v1.76:规则在「新局」卡片里
+    await page.evaluate(() => document.getElementById("btn-new").click()); await page.waitForTimeout(80);
     await page.click('#rule-seg button[data-rule="' + rule + '"]'); await page.waitForTimeout(80);
-    await page.evaluate(() => (document.getElementById("settings-close") || { click() {} }).click()); await page.waitForTimeout(150);
+    await page.evaluate(() => document.getElementById("new-start").click()); await page.waitForTimeout(150);
+    await dismissConfirm(page);
   }
   const swap2BarStale = await page.evaluate(() => !document.getElementById("swap2-bar").hidden);
   // B5:文案
@@ -625,7 +628,7 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
   // v1.74:「新局」打开对局卡片(对手 / 难度 / 执子),空棋盘上也有用 —— 撤回 v1.72 的「空盘不显示」
   const ok = first <= 15 && newOnEmpty && newAfterMove && reviewOpen && !reviewBtnWhileOpen &&
     !rec.clearSave && !rec.slotsList && rec.primary === 0 && rec.focus === "slots-close" &&
-    !set.analysis && set.close === "完成" && set.rows === 5 &&
+    !set.analysis && set.close === "完成" && set.rows === 4 &&
     mig.key === null && (mig.top.history || []).length === 3 && /进行中/.test(rowText) && opened === "3 / 3";
   report("S13 继续减:首开 ≤ 15、复盘开着不显示复盘、记录里无清除存档 / 命名存档 / 主按钮、设置无复盘分析且写「完成」、旧存档并进最近对局", ok,
     JSON.stringify({ first, newOnEmpty, newAfterMove, reviewOpen, reviewBtnWhileOpen, rec, set,
@@ -860,6 +863,97 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
     b14.before === b14.after;
   report("S16 小窗口棋盘 ≥ 460 / 420;练习在主棋盘上(一块棋盘、同位置同大小、≤ 11 个控件、回到对局原样);B13 B14", ok,
     JSON.stringify({ sizes, before, pr, free, after, b13, b14, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- S17. 每一层都进得去、出得来,出来时什么都没丢(v1.76)----
+// 复盘:Esc / 关闭都能离开,离开后回到最后一手、终局卡回来、顶栏写结果;复盘时没有「悔棋」、Z 不悔;
+// 终局 ↔ 复盘棋盘不动(1280×800、1024×600);翻看前面的手时顶栏不写「复盘」;
+// 规则在「新局」卡片里、选了开始即生效;练习时换主题题盘换色(B16)、换语言卡片与顶栏换(B17)、
+// 没下就看答案不说「✗ 这一手」(B18)、对局时钟停走(B19)。
+{
+  const page = await newPage();
+  const click = clicker(page);
+  const rect = (id) => page.evaluate((i) => { const r = document.getElementById(i).getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round).join(","); }, id);
+  const st = () => page.evaluate(() => ({ status: document.getElementById("status").textContent, pos: document.getElementById("replay-pos").textContent,
+    end: !document.getElementById("end-card").hidden, reviewing: document.getElementById("app").classList.contains("reviewing"),
+    undo: (() => { const u = document.getElementById("undo"); return u.offsetParent !== null && getComputedStyle(u).visibility !== "hidden"; })() }));
+  const toEnd = async () => { for (let i = 0; i < 40; i++) { if (await page.evaluate(() => !document.getElementById("end-card").hidden)) return; await click(1 + (i % 13), 1 + ((i * 5) % 13)); await page.waitForTimeout(450); } };
+  // 翻看前面的手
+  for (const [r, c] of [[7, 7], [6, 8]]) { await click(r, c); await page.waitForTimeout(900); }
+  await page.keyboard.press("ArrowLeft"); await page.waitForTimeout(150);
+  const browsing = (await st()).status;
+  await page.keyboard.press("End");
+  const still = {};
+  for (const [w, h] of [[1280, 800], [1024, 600]]) {
+    await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(400);
+    await toEnd(); await page.waitForTimeout(600);
+    const a = await rect("board");
+    await page.evaluate(() => document.getElementById("end-card-review").click()); await page.waitForTimeout(1000);
+    const b = await rect("board");
+    still[w + "x" + h] = { end: a, review: b };
+    if (w === 1280) break;
+  }
+  const inReview = await st();
+  const n0 = inReview.pos;
+  await page.keyboard.press("z"); await page.waitForTimeout(250);
+  const afterZ = (await st()).pos;
+  await page.keyboard.press("Escape"); await page.waitForTimeout(500);
+  const afterEsc = await st();
+  // 关闭按钮同样
+  await page.evaluate(() => document.getElementById("end-card-review").click()); await page.waitForTimeout(800);
+  await page.evaluate(() => document.getElementById("review-side-close").click()); await page.waitForTimeout(500);
+  const afterClose = await st();
+  // 1024×600 下终局 ↔ 复盘
+  await page.setViewportSize({ width: 1024, height: 600 }); await page.waitForTimeout(500);
+  const e2 = await rect("board");
+  await page.evaluate(() => document.getElementById("end-card-review").click()); await page.waitForTimeout(1000);
+  still["1024x600"] = { end: e2, review: await rect("board") };
+  await page.keyboard.press("Escape"); await page.waitForTimeout(300);
+  await page.setViewportSize({ width: 1280, height: 800 }); await page.waitForTimeout(400);
+  // 规则在卡片里,开始即生效
+  await setup(page, { mode: "pvp" });
+  await page.evaluate(() => document.getElementById("btn-new").click()); await page.waitForTimeout(100);
+  await page.click('#rule-seg button[data-rule="renju"]'); await page.waitForTimeout(80);
+  await page.evaluate(() => document.getElementById("new-start").click()); await page.waitForTimeout(250);
+  const rule = await page.evaluate(() => ({ now: document.getElementById("app").dataset.rule, inSheet: !!document.querySelector("#new-sheet #rule-seg"),
+    inSettings: !!document.querySelector("#settings-modal #rule-seg"), match: document.getElementById("match").textContent }));
+  await setup(page, { mode: "ai" });
+  await page.evaluate(() => document.getElementById("btn-new").click()); await page.waitForTimeout(100);
+  await page.click('#rule-seg button[data-rule="free"]'); await page.evaluate(() => document.getElementById("new-start").click()); await page.waitForTimeout(250);
+  // 练习:时钟、主题、语言、看答案
+  for (const [r, c] of [[7, 7], [6, 8]]) { await click(r, c); await page.waitForTimeout(900); }
+  const secs = () => page.evaluate(() => { const [m, s] = document.getElementById("clock").textContent.split(":").map(Number); return m * 60 + s; });
+  const c0 = await secs();
+  await page.evaluate(() => document.getElementById("open-practice").click()); await page.waitForTimeout(3500);
+  await page.evaluate(() => document.getElementById("practice-close").click()); await page.waitForTimeout(200);
+  const c1 = await secs();
+  await page.evaluate(() => document.getElementById("open-practice").click()); await page.waitForTimeout(500);
+  const px = () => page.evaluate(() => [...document.getElementById("practice-board").getContext("2d").getImageData(20, 20, 1, 1).data].slice(0, 3).join(","));
+  const p0 = await px();
+  await page.evaluate(() => { document.getElementById("settings-btn").click(); document.querySelector('#settings-modal [data-theme="night"]').click(); }); await page.waitForTimeout(300);
+  const p1 = await px();
+  await page.evaluate(() => document.querySelector('#lang-seg [data-lang="en"]').click()); await page.waitForTimeout(300);
+  await page.evaluate(() => document.getElementById("settings-close").click()); await page.waitForTimeout(200);
+  const en = await page.evaluate(() => ({ status: document.getElementById("status").textContent, task: document.getElementById("practice-task").textContent }));
+  await page.evaluate(() => document.getElementById("practice-reveal").click()); await page.waitForTimeout(300);
+  const revealEn = await page.evaluate(() => document.getElementById("practice-feedback").textContent);
+  await page.evaluate(() => document.querySelector('#lang-seg [data-lang="zh"]').click()); await page.waitForTimeout(300);
+  const revealZh = await page.evaluate(() => document.getElementById("practice-feedback").textContent);
+  const cjk = /[一-鿿]/;
+  const ok =
+    !/复盘|Review/.test(browsing) &&
+    Object.values(still).every((v) => v.end === v.review) &&
+    inReview.reviewing && !inReview.undo && afterZ === n0 &&
+    !afterEsc.reviewing && afterEsc.end && /胜|负|平/.test(afterEsc.status) && !/复盘/.test(afterEsc.status) && afterEsc.pos.split(" / ")[0] === afterEsc.pos.split(" / ")[1] &&
+    !afterClose.reviewing && afterClose.end && afterClose.pos.split(" / ")[0] === afterClose.pos.split(" / ")[1] &&
+    rule.now === "renju" && rule.inSheet && !rule.inSettings &&
+    Math.abs(c1 - c0) <= 1 &&
+    p0 !== p1 &&
+    !cjk.test(en.status) && !cjk.test(en.task) &&
+    !/✗|That move|That point/.test(revealEn) && !/✗|这一手|这一点/.test(revealZh) && /答案/.test(revealZh);
+  report("S17 复盘进得去出得来(Esc / 关闭 → 最后一手 + 终局卡)、终局 ↔ 复盘棋盘不动、复盘无悔棋、翻看不写复盘、规则在新局卡片、B16–B19", ok,
+    JSON.stringify({ browsing, still, inReview, afterZ, afterEsc, afterClose, rule, clock: [c0, c1], px: [p0, p1], en, revealEn, revealZh, errs: page.__errors }));
   await page.close();
 }
 

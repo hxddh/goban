@@ -650,12 +650,11 @@
       margin: 0 0 4px; font-size: var(--fs-ui); color: var(--muted); line-height: 1.4;
     }
     .review-curve {
-      flex: 1; min-width: 0; height: 56px; display: block;
+      flex: 1; min-width: 0; height: var(--tl-h); display: block;
       border-radius: var(--radius-md);
       cursor: pointer;
     }
     #app:not(.reviewing) .review-curve { display: none; }
-    #app.reviewing { --tl-h: 64px; }
     #app.reviewing #timeline { display: none; }
     .review-stat { font-size: var(--fs-ui); font-variant-numeric: tabular-nums; margin-left: 6px; }
     .swap2-bar {
