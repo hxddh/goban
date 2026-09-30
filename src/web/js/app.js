@@ -31,6 +31,8 @@
   const menuEl = document.getElementById("more-menu");
   /** 卡片里还没生效的选择;null = 卡片关着(四格显示偏好)。 */
   let sheet = null;
+  /** v1.75:练习开着时顶栏那一句(题集 · 进度);空串 = 没在练习 */
+  let practiceStatus = "";
   const THEMES = Draw.THEMES;
 
   function emptyBoard() { return Core.emptyBoard(); }
@@ -1440,30 +1442,66 @@
   function resizeCanvas() { Draw.resizeCanvas(); }
 
   /**
-   * v1.74:坞(终局卡 / 重下 / 复盘 / 初见一句话)放在哪。棋盘在横向窗口里是被高度限住的,
-   * 左右各空着一大块 —— 放得下就放在棋盘右侧的空白里,棋盘不动;放不下(窄窗口、竖窗口)
-   * 就放在棋盘下方,棋盘让出坞的高度。
+   * 坞(终局卡 / 重下 / 复盘 / 练习卡片 / 初见一句话)放在哪、棋盘多大。
+   *
+   * v1.74 只在「宽 − 高 ≥ 480」时把坞放在棋盘右侧,其余一律放在下方、棋盘让出坞的高度 ——
+   * 1024×600 复盘时棋盘只剩 239px(B15)。v1.75:**横向窗口(宽 ≥ 高)一律放在旁边**。
+   * 棋盘两侧放得下,棋盘原地不动;放不下,棋盘与坞当成一组居中(棋盘左移,必要时略缩),
+   * 但永远不再为坞让出高度。只有竖长窗口才放在下方。
    */
-  const DOCK_W = 280;
+  const DOCK_W = 280, DOCK_MIN = 240, DOCK_GAP = 24;
   let dockAnimUntil = 0;
   let dockAnimActive = false;
+  let lastLayout = "";
   function layoutDock() {
     const dock = document.getElementById("dock");
-    const side = window.innerWidth - window.innerHeight >= 2 * DOCK_W - 80;
-    appEl.classList.toggle("dock-side", side);
-    const empty = !dock || ![...dock.children].some((c) => !c.hidden);
+    const root = document.documentElement;
+    const css = getComputedStyle(appEl);
+    const px = (name, dflt) => { const v = parseFloat(css.getPropertyValue(name)); return isNaN(v) ? dflt : v; };
+    const W = window.innerWidth, H = window.innerHeight;
+    const pad = px("--stage-pad", 12), chrome = px("--chrome-h", 44), tl = px("--tl-h", 36);
+    // 看的是真的显示没有:练习卡片靠 .show、练习时对局那几张靠样式收起,都不是 hidden 属性
+    const empty = !dock || ![...dock.children].some((c) => !c.hidden && getComputedStyle(c).display !== "none");
     appEl.classList.toggle("dock-empty", empty);
-    const h = side || empty ? 0 : Math.ceil(dock.getBoundingClientRect().height);
-    const prev = document.documentElement.style.getPropertyValue("--dock-h");
-    document.documentElement.style.setProperty("--dock-h", h + "px");
+    const side = W >= H;
+    appEl.classList.toggle("dock-side", side);
+    let board, shift = 0, dockH = 0;
+    const b0 = Math.floor(Math.min(W - 2 * pad, H - chrome - 2 * pad - tl));
+    if (side) {
+      board = b0;
+      if (!empty) {
+        // 两侧空白放得下一张不窄于 240 的卡片,棋盘就原地不动(1280×800 空 250);放不下才让棋盘让位
+        const room = (W - b0) / 2 - pad - DOCK_GAP;
+        if (room < DOCK_MIN) {
+          board = Math.floor(Math.min(b0, W - 2 * pad - DOCK_GAP - DOCK_W));
+          shift = -Math.round((DOCK_GAP + DOCK_W) / 2);
+        }
+        const top = chrome + pad + Math.max(0, (H - chrome - 2 * pad - board - tl) / 2);
+        dock.style.left = Math.round(W / 2 + shift + board / 2 + DOCK_GAP) + "px";
+        dock.style.top = Math.round(top) + "px";
+        dock.style.width = Math.round(Math.min(DOCK_W, W - (W / 2 + shift + board / 2 + DOCK_GAP) - pad)) + "px";
+        dock.style.maxHeight = Math.round(board + tl) + "px";
+      }
+    } else {
+      dock.style.left = dock.style.top = dock.style.width = dock.style.maxHeight = "";
+      dockH = empty ? 0 : Math.ceil(dock.getBoundingClientRect().height);
+      board = Math.floor(Math.min(W - 2 * pad, H - chrome - 2 * pad - tl - dockH - (dockH ? pad : 0)));
+    }
+    board = Math.max(160, board);
+    root.style.setProperty("--board-size", board + "px");
+    root.style.setProperty("--board-shift", shift + "px");
+    root.style.setProperty("--dock-h", dockH + "px");
+    const sig = board + "/" + shift + "/" + dockH;
     // 棋盘尺寸带 .28s 过渡:逐帧跟着重画,停下再定一次(一次性 resize 会停在半路的尺寸)
-    if (prev === h + "px" && dockAnimActive) return;
+    if (sig === lastLayout && dockAnimActive) return;
+    lastLayout = sig;
     dockAnimUntil = performance.now() + 340;
     if (dockAnimActive) return;
     dockAnimActive = true;
     const tick = () => {
       resizeCanvas();
       draw();
+      Practice.redraw();
       if (performance.now() < dockAnimUntil) requestAnimationFrame(tick);
       else dockAnimActive = false;
     };
@@ -2097,6 +2135,10 @@
     else if (hintBusy) status.textContent = t("status.hintCalc");
     else if (hintCell) status.textContent = t("status.withHint", { turn: t(turn === "b" ? "status.blackTurn" : "status.whiteTurn") });
     else status.textContent = t(turn === "b" ? "status.blackTurn" : "status.whiteTurn");
+    if (practiceStatus) {
+      status.textContent = practiceStatus;
+      status.classList.remove("win", "thinking", "replay");
+    }
 
     syncSettingsUI();
     // v1.74:复盘开着时,时间线那一行换成局势曲线(见 styles.css #app.reviewing)
@@ -2226,6 +2268,14 @@
       return out;
     },
     openSource: (id, ply) => { openArchivedGame(id, ply); },
+    // v1.75:练习在主棋盘上。开着时把对局那一套让出来,顶栏写「每日挑战 · 第 1 / 5 题」
+    onState: (st) => {
+      const was = appEl.classList.contains("practicing");
+      appEl.classList.toggle("practicing", !!st.open);
+      practiceStatus = st.open ? [st.title, st.progress].filter(Boolean).join(" · ") : "";
+      if (st.open !== was) { closePopovers(); layoutDock(); }
+      sync();
+    },
   });
   Practice.wire();
   const practiceEl = document.getElementById("open-practice");
@@ -2438,7 +2488,10 @@
     pick("color-seg", "data-human", (v) => { sheet.color = v; sheet.colorTouched = true; });
     document.getElementById("new-start").onclick = () => { startFromSheet(); };
     sheetEl.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") { ev.preventDefault(); ev.stopPropagation(); startFromSheet(); }
+      if (ev.key !== "Enter") return;
+      // v1.75(B13):焦点在某个选项上时,回车就是选它(按钮自己的点击);其余时候回车 = 开始
+      if (ev.target.closest && ev.target.closest(".pill button")) return;
+      ev.preventDefault(); ev.stopPropagation(); startFromSheet();
     });
     // 点在卡片 / 菜单与各自按钮之外就收起
     document.addEventListener("pointerdown", (ev) => {
@@ -2486,10 +2539,10 @@
     if (ev.key === "Escape") {
       if (confirmModal.classList.contains("show")) { finishConfirm(false); return; }
       if (slotsModal && slotsModal.classList.contains("show")) { closeSlots(); return; }
-      if (Practice.isOpen()) { Practice.close(); return; }
       if (settingsModal.classList.contains("show")) { closeSettings(); return; }
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
       if (closePopovers()) return;
+      if (Practice.isOpen()) { Practice.close(); return; }
       // 棋盘有焦点时 Esc 交给棋盘(「Esc 离开」是它播报过的承诺)
       if (document.activeElement === canvas && handleBoardKey(ev)) return;
       return;
@@ -2510,8 +2563,10 @@
       trapModalTab(ev, slotsModal);
       return;
     }
-    if (practiceModal && practiceModal.classList.contains("show")) {
-      trapModalTab(ev, practiceModal);
+    // v1.75:练习不再是弹层 —— Tab 照常走(「⋯」也走得到);对局的快捷键在练习时一概不响
+    if (practiceModal && practiceModal.classList.contains("show") &&
+        !settingsModal.classList.contains("show") && !helpModal.classList.contains("show")) {
+      if (ev.key === "?" || (ev.shiftKey && k === "/")) openHelp();
       return;
     }
     if (settingsModal.classList.contains("show")) {
@@ -2521,6 +2576,12 @@
     if (helpModal.classList.contains("show")) {
       if (ev.key === "?" || (ev.shiftKey && k === "/")) { closeHelp(); return; }
       trapModalTab(ev, helpModal);
+      return;
+    }
+    // v1.75(B14):「⋯」或「新局」卡片开着时,快捷键不许穿过它去动底下那一局。
+    // 焦点在浮层里:键是给浮层的(回车、方向键、空格);焦点在别处:这一下只把浮层收起来
+    if (!sheetEl.hidden || !menuEl.hidden) {
+      if (!(sheetEl.contains(ev.target) || menuEl.contains(ev.target)) && ev.key !== "Tab" && ev.key !== "Shift") closePopovers();
       return;
     }
     if (ev.key === "?" || (ev.shiftKey && k === "/")) { openHelp(); return; }

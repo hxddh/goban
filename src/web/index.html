@@ -46,6 +46,8 @@
              region 播报坐标、占用与禁手原因 —— 此前 AX 树里棋盘只是一张图。 -->
         <canvas id="board" width="900" height="900" tabindex="0" role="application" aria-label="棋盘" data-i18n-aria="aria.board" aria-describedby="board-announce"></canvas>
         <div class="sr-only" id="board-announce" role="status" aria-live="polite"></div>
+        <!-- v1.75:练习时题目画在这里,与对局棋盘同一个位置、同样大 -->
+        <canvas id="practice-board" class="practice-board" hidden title="点击落子作答" data-i18n-title="practice.board.title"></canvas>
         <div class="think-dot" id="think-dot" hidden aria-hidden="true"></div>
         <div class="swap2-bar" id="swap2-bar" hidden role="group" aria-label="平衡开局选择" data-i18n-aria="aria.swap2">
           <span class="swap2-msg" id="swap2-msg" role="status" aria-live="polite"></span>
@@ -104,6 +106,40 @@
         </div>
       </section>
       <button type="button" class="continue-btn" id="sgf-continue" hidden title="从导入局面继续对局" data-i18n="sgf.continue" data-i18n-title="sgf.continue.title">续下</button>
+      <!-- v1.75:练习搬到主棋盘上 —— 弹层退役。题目画在棋盘的位置上(#practice-board 叠在 #board 上),
+           题型、题目、反馈、提示 · 看答案 · 下一题在这张卡片里;「回到对局」回到刚才那一局。
+           id 与 .show 沿用弹层时的,题目逻辑一行不动。 -->
+      <section class="practice-card" id="practice-modal" aria-label="战术练习" data-i18n-aria="practice.title">
+        <div class="practice-card-head">
+          <h3 id="practice-title" data-i18n="practice.title">战术练习</h3>
+          <span id="practice-progress" class="muted practice-progress"></span>
+        </div>
+        <div class="pill practice-skill" id="practice-skill" role="group" aria-label="题型" data-i18n-aria="practice.skill.aria">
+          <button type="button" data-skill="daily" data-i18n="practice.skill.daily">今日</button>
+          <button type="button" data-skill="all" class="active" data-i18n="practice.skill.all">全部</button>
+          <button type="button" data-skill="win1" data-i18n="practice.skill.win1">成五</button>
+          <button type="button" data-skill="defend" data-i18n="practice.skill.defend">防守</button>
+          <button type="button" data-skill="vcf" data-i18n="practice.skill.vcf">VCF</button>
+          <button type="button" data-skill="forbid" data-i18n="practice.skill.forbid">禁手</button>
+        </div>
+        <div id="practice-task" class="practice-task"></div>
+        <div class="practice-source-row">
+          <span id="practice-source" class="muted practice-source"></span>
+          <button type="button" class="text-link" id="practice-source-open" hidden data-i18n="practice.src.open">回到原局</button>
+        </div>
+        <div id="practice-feedback" class="practice-feedback"></div>
+        <div class="practice-actions">
+          <!-- v1.63:分层提示。一级指出威胁,二级缩小候选,看答案是最后一步 -->
+          <button type="button" class="tool-btn" id="practice-hint" hidden data-i18n="practice.hint">提示</button>
+          <button type="button" class="tool-btn" id="practice-reveal" hidden data-i18n="practice.reveal">看答案</button>
+          <button type="button" class="tool-btn primary" id="practice-next" hidden data-i18n="practice.next">下一题</button>
+        </div>
+        <div class="practice-foot-row">
+          <button type="button" class="text-link" id="practice-wrong" title="只做做错过、还没做对的题" data-i18n="practice.wrongBook" data-i18n-title="practice.wrongBook.title">错题本</button>
+          <span class="spacer"></span>
+          <button type="button" class="text-link" id="practice-close" data-i18n="practice.back">回到对局</button>
+        </div>
+      </section>
     </div>
 
     <!-- v1.74:「新局」是一张小卡片:对手 · 难度 · 执子(困难 / 极限另有思考时长)。
@@ -286,41 +322,6 @@
       </div>
     </div>
 
-    <div class="modal-bg" id="practice-modal" role="dialog" aria-modal="true" aria-label="战术练习" data-i18n-aria="practice.title">
-      <div class="modal practice-modal">
-        <h3 id="practice-title" data-i18n="practice.title">战术练习</h3>
-        <!-- v1.63:题型筛选 —— 随机题库变成技能训练:成五 / 防守 / VCF / 禁手 -->
-        <div class="pill practice-skill" id="practice-skill" role="group" aria-label="题型" data-i18n-aria="practice.skill.aria">
-          <button type="button" data-skill="daily" data-i18n="practice.skill.daily">今日</button>
-          <button type="button" data-skill="all" class="active" data-i18n="practice.skill.all">全部</button>
-          <button type="button" data-skill="win1" data-i18n="practice.skill.win1">成五</button>
-          <button type="button" data-skill="defend" data-i18n="practice.skill.defend">防守</button>
-          <button type="button" data-skill="vcf" data-i18n="practice.skill.vcf">VCF</button>
-          <button type="button" data-skill="forbid" data-i18n="practice.skill.forbid">禁手</button>
-        </div>
-        <div class="practice-head">
-          <span id="practice-task" class="practice-task"></span>
-          <span id="practice-progress" class="muted practice-progress"></span>
-        </div>
-        <canvas id="practice-board" class="practice-board" title="点击落子作答" data-i18n-title="practice.board.title"></canvas>
-        <div class="practice-foot">
-          <div class="practice-source-row">
-            <span id="practice-source" class="muted practice-source"></span>
-            <button type="button" class="text-link" id="practice-source-open" hidden data-i18n="practice.src.open">回到原局</button>
-          </div>
-          <div id="practice-feedback" class="practice-feedback"></div>
-        </div>
-        <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
-          <button type="button" class="text-link" id="practice-wrong" title="只做做错过、还没做对的题" data-i18n="practice.wrongBook" data-i18n-title="practice.wrongBook.title">错题本</button>
-          <span class="spacer" style="flex:1"></span>
-          <!-- v1.63:分层提示。一级指出威胁,二级缩小候选,看答案是最后一步 -->
-          <button type="button" class="text-link" id="practice-hint" hidden data-i18n="practice.hint">提示</button>
-          <button type="button" class="text-link" id="practice-reveal" hidden data-i18n="practice.reveal">看答案</button>
-          <button type="button" class="tool-btn primary" id="practice-next" hidden data-i18n="practice.next">下一题</button>
-          <button type="button" class="tool-btn" id="practice-close" data-i18n="dlg.close">关闭</button>
-        </div>
-      </div>
-    </div>
 
   </div>
   

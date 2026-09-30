@@ -1212,9 +1212,14 @@
    * 与威胁棋子). `dots` draws the verdict dots on top of a sequence so the
    * answer given is still visible.
    */
+  /** v1.75:题盘叠在主棋盘的位置上,窗口 / 坞一变它就跟着变大小 —— 记住上一帧画了什么,好原样重画 */
+  let lastMarks = null, lastDots = null;
+  function redraw() { if (isOpen() && cur) drawBoard(lastMarks, lastDots); }
+
   function drawBoard(marks, dots) {
     const cv = document.getElementById("practice-board");
     if (!cv || !cur) return;
+    lastMarks = marks || null; lastDots = dots || null;
     const D = global.GobanDraw;
     // 位图按内容框算(clientWidth 不含边框),并和主棋盘用同一条 dpr 上限。
     // 上限存在的理由在主棋盘那边实测过:3× 重建 74.2ms 对 2× 的 33.5ms。
@@ -1329,11 +1334,29 @@
     }
     const back = document.getElementById("practice-source-open");
     if (back) back.hidden = !(cur && cur.gameId && deps.openSource);
+    notify();
   }
 
   function setTitle(text) {
     const el = document.getElementById("practice-title");
     if (el) el.textContent = text;
+    notify();
+  }
+
+  /** v1.75:练习不再是弹层,开合与标题 / 进度交给 app.js(它把主棋盘让出来、在顶栏写一句) */
+  function notify() {
+    if (deps && typeof deps.onState === "function") {
+      const title = document.getElementById("practice-title");
+      const prog = document.getElementById("practice-progress");
+      deps.onState({ open: isOpen(), title: title ? title.textContent : "", progress: prog ? prog.textContent : "" });
+    }
+  }
+  function showCard() {
+    const m = document.getElementById("practice-modal");
+    if (m) m.classList.add("show");
+    const cv = document.getElementById("practice-board");
+    if (cv) cv.hidden = false;
+    notify();
   }
 
   function setModalLabel(label) {
@@ -1734,8 +1757,7 @@
   function open(opts) {
     // v1.70:侧栏不再有单独的「每日」—— 今天的题没做时,点「练习」先看到它们
     if (!(opts && (opts.skill || opts.free)) && !dailyDoneToday()) { openDaily(); return; }
-    const m = document.getElementById("practice-modal");
-    if (m) m.classList.add("show");
+    showCard();
     setTitle(t("practice.title"));
     setModalLabel(t("practice.title"));
     const wrongBtn = document.getElementById("practice-wrong");
@@ -1760,8 +1782,7 @@
     const cands = buildCandidates();
     const hit = cands.filter((p) => p.gameId === gameId && p.ply === ply);
     if (!hit.length) { open({ free: true }); return false; }
-    const m = document.getElementById("practice-modal");
-    if (m) m.classList.add("show");
+    showCard();
     setTitle(t("practice.title"));
     setModalLabel(t("practice.title"));
     const wrongBtn = document.getElementById("practice-wrong");
@@ -1778,8 +1799,7 @@
   }
 
   function openDaily() {
-    const m = document.getElementById("practice-modal");
-    if (m) m.classList.add("show");
+    showCard();
     setTitle(t("daily.title"));
     setModalLabel(t("daily.title"));
     const wrongBtn = document.getElementById("practice-wrong");
@@ -1791,7 +1811,10 @@
   function close() {
     const m = document.getElementById("practice-modal");
     if (m) m.classList.remove("show");
+    const cv = document.getElementById("practice-board");
+    if (cv) cv.hidden = true;
     cur = null;
+    notify();
   }
 
   function isOpen() {
@@ -1849,12 +1872,10 @@
       else startWrong();
       syncWrongButton();
     });
-    const m = document.getElementById("practice-modal");
-    if (m) m.addEventListener("click", (ev) => { if (ev.target === m) close(); });
   }
 
   global.GobanPractice = {
-    init, wire, open, openFor, hasPuzzleFor, openDaily, close, isOpen, dailySummary, practiceSummary, dueCount,
+    init, wire, open, openFor, hasPuzzleFor, openDaily, close, isOpen, redraw, dailySummary, practiceSummary, dueCount,
     // pure daily helpers, exposed for unit tests
     daily: { pickForDate, pickDaily, advanceDaily, prevDayStr, seededRng },
     // pure puzzle predicates + the curated bank, exposed for unit tests

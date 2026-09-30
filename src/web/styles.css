@@ -127,15 +127,6 @@
          再宽一点内容也不会更矮,所以就停在这里。窄窗口由 min(…, 100vw-32px) 兜底。 */
       --modal-w: 380px;
       --modal-w-table: 640px;
-      /* v1.53 —— 练习/每日的题面是这个应用里信息密度最高的一块,却一直被挤在
-         338px 里(15 路,每格 22.5)。它跟表格弹层同一档宽,但**还得受窗口高度管**:
-         棋盘是方的,只按宽度给就会在矮窗口里把弹层撑到要滚。
-         --modal-board-chrome 是弹层里除棋盘之外的高度(标题 + 题面行 + 反馈行 +
-         按钮行),实测 181,留 3px 余量写 184。它是个量出来的常数,所以配了闸门:
-         有人往弹层里加内容而不调这个数,闸门会报,而不是让弹层悄悄开始滚。
-         v1.63 加了题型筛选一行与来源/回原局一行:实测 221,写 224。 */
-      --modal-w-board: 640px;
-      --modal-board-chrome: 224px;
       --icon-size: 18px;
       --icon-stroke: 2;
       /* v1.65:数字不再用等宽字体 —— 顶栏的 16/16 · 00:03 读起来像调试输出。对齐靠
@@ -326,7 +317,7 @@
 
     /* v1.74:只剩一块棋盘。棋盘居中,下面一条时间线;坞(终局卡 / 复盘 …)放得下就在棋盘
        右侧的空白里(棋盘不动),放不下就在棋盘下方(棋盘让出 --dock-h)。 */
-    :root { --tl-h: 36px; --dock-h: 0px; --dock-w: 280px; }
+    :root { --tl-h: 36px; --dock-h: 0px; }
     .stage {
       position: absolute; inset: 0;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -334,13 +325,17 @@
          stage, so in wide windows (maximize/fullscreen) a height-limited board
          otherwise slides under its gradient — a dark band over the top rows. */
       padding: calc(var(--chrome-h) + var(--stage-pad)) var(--stage-pad) calc(var(--stage-pad) + var(--dock-h));
+      /* v1.75:两侧放不下坞时,棋盘与坞当成一组居中 —— 棋盘让到左边一点(app.js layoutDock 算) */
+      transform: translateX(var(--board-shift, 0px));
+      transition: transform var(--dur-panel) var(--ease);
     }
     #board-wrap {
       position: relative; flex-shrink: 0;
       --free-w: calc(100vw - 2 * var(--stage-pad));
       --free-h: calc(100vh - var(--chrome-h) - 2 * var(--stage-pad) - var(--tl-h) - var(--dock-h));
-      width: min(var(--free-w), var(--free-h));
-      height: min(var(--free-w), var(--free-h));
+      /* 边长由 app.js layoutDock 算好写进 --board-size;脚本还没跑时退回纯 CSS 的算法 */
+      width: var(--board-size, min(var(--free-w), var(--free-h)));
+      height: var(--board-size, min(var(--free-w), var(--free-h)));
       padding: var(--wood-pad); border-radius: var(--radius-lg);
       box-shadow: var(--board-shadow);
       transition: width var(--dur-panel) var(--ease), height var(--dur-panel) var(--ease), background var(--dur-panel) var(--ease), box-shadow var(--dur-panel) var(--ease);
@@ -348,7 +343,7 @@
     /* 时间线:与棋盘同宽,永远占着一行(空棋盘时看不见但不收起,第一手落下时棋盘不跳) */
     .timeline {
       height: var(--tl-h); flex-shrink: 0;
-      width: min(calc(100vw - 2 * var(--stage-pad)), calc(100vh - var(--chrome-h) - 2 * var(--stage-pad) - var(--tl-h) - var(--dock-h)));
+      width: var(--board-size, min(calc(100vw - 2 * var(--stage-pad)), calc(100vh - var(--chrome-h) - 2 * var(--stage-pad) - var(--tl-h) - var(--dock-h))));
       display: flex; align-items: center; gap: 12px;
       padding: 0 4px;
       transition: width var(--dur-panel) var(--ease);
@@ -383,15 +378,13 @@
       z-index: 20;
     }
     #app.dock-empty .dock { pointer-events: none; }
-    /* 宽窗口:放在棋盘右侧的空白里,顶端与棋盘对齐,棋盘不动 */
+    /* 横向窗口(v1.75 起是所有宽 ≥ 高的窗口):放在棋盘旁边,顶端与棋盘对齐。
+       left / top / width / max-height 由 app.js layoutDock 按棋盘实际位置写 */
     #app.dock-side .dock {
-      left: calc(50vw + (100vh - var(--chrome-h) - 2 * var(--stage-pad) - var(--tl-h)) / 2 + 24px);
       transform: none;
-      top: calc(var(--chrome-h) + var(--stage-pad));
       bottom: auto;
-      width: min(var(--dock-w), calc(50vw - (100vh - var(--chrome-h) - 2 * var(--stage-pad) - var(--tl-h)) / 2 - 24px - var(--stage-pad)));
-      max-height: calc(100vh - var(--chrome-h) - 2 * var(--stage-pad));
       overflow-y: auto;
+      transition: left var(--dur-panel) var(--ease), top var(--dur-panel) var(--ease);
     }
 
     /* v1.74:「新局」卡片与「⋯」菜单 —— 挂在各自按钮下方的小浮层 */
@@ -712,35 +705,40 @@
       border-color: color-mix(in srgb, var(--accent) 60%, var(--card-border));
     }
 
-    /* v1.24 起这里写的是 `width: min(440px, …)` —— 它**从来没生效过**:`.modal`
-       在表里更靠后、同特异性(都是单个类),源序赢,于是弹层实际一直是 380,
-       整整 28 个版本。现在改成设 token,由 `.modal` 那条统一的 width 去用它。 */
-    #practice-modal .modal { --modal-w: var(--modal-w-board); }
-    .practice-head {
-      display: flex; justify-content: space-between; align-items: baseline;
-      gap: 8px; margin: 2px 0 8px; flex-wrap: wrap;
-    }
-    .practice-task { font-size: var(--fs-body); font-weight: 600; color: var(--fg); }
-    .practice-progress { white-space: nowrap; }
+    /* v1.75:练习搬到主棋盘上 —— 题盘叠在对局棋盘的位置上,同样大;题型 / 题目 / 反馈 / 按钮在坞里的卡片上 */
     .practice-board {
-      /* 两个预算取小,始终是方的:宽度给满弹层,高度不超过「视口减去弹层其余部分」。
-         130 道题实测包围盒边长 最小 5 / 中位 9 / 最大 13,面积占比中位只有 32% ——
-         裁到题目那一块能省地方,但五子棋里「这条线撞不撞得到边」是战术信息,
-         裁掉就改了题。所以不裁,改成让盘面随窗口长大。 */
-      width: min(100%, calc(100vh - 32px - var(--modal-board-chrome)));
-      margin-inline: auto;
-      aspect-ratio: 1 / 1; display: block;
-      border: 1px solid var(--card-border);
-      border-radius: var(--radius-md);
-      /* 画布自己画满整块盘面(v1.39 起与主棋盘同一个画家),这条底色只在
-         首帧之前露一下。留着是因为 canvas 尚未绘制时不该是一个透明洞。 */
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      border-radius: var(--radius-lg);
       background: var(--btn-ghost);
       cursor: crosshair;
-      /* 主棋盘的木框有阴影托着,弹层里这块也该有同样的重量,否则它像一张贴纸。 */
-      box-shadow: 0 4px 14px rgba(0,0,0,.18);
     }
-    .practice-foot { margin: 8px 0 4px; min-height: 34px; }
-    .practice-source { display: block; margin-bottom: 2px; }
+    .practice-card {
+      padding: 12px;
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-md);
+      background: var(--btn-ghost);
+      font-size: var(--fs-body); line-height: var(--lh-text);
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .practice-card:not(.show) { display: none; }
+    /* 题集与进度只在顶栏说一次(「每日挑战 · 第 1 / 5 题」);卡片里那一行留给读屏与 app.js 取字 */
+    .practice-card-head { display: none; }
+    .practice-task { font-size: var(--fs-body); font-weight: 600; color: var(--fg); }
+    .practice-progress { white-space: nowrap; }
+    .practice-source { display: block; }
+    .practice-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .practice-actions:not(:has(> :not([hidden]))) { display: none; }
+    .practice-actions .tool-btn { flex: 1 1 auto; }
+    .practice-foot-row { display: flex; align-items: center; gap: 4px; }
+    .practice-foot-row .spacer { flex: 1; }
+    /* 练习时:对局那一套(棋盘、时间线、悔棋 · 提示 · 新局、对局的卡片)让位 */
+    #app.practicing .timeline { visibility: hidden; } /* 占位不收:题盘与对局棋盘同一个位置、同样大 */
+    #app.practicing #board,
+    #app.practicing #undo, #app.practicing #btn-hint, #app.practicing #btn-new,
+    #app.practicing #match, #app.practicing #clock,
+    #app.practicing #welcome-bar, #app.practicing #end-card, #app.practicing #retry-bar,
+    #app.practicing #review-side, #app.practicing #sgf-continue,
+    #app.practicing #swap2-bar, #app.practicing #think-dot { display: none !important; }
     .practice-feedback { font-size: var(--fs-body); font-weight: 600; line-height: 1.4; }
     .practice-feedback.good { color: #2f9e5e; }
     /* 同一处错借:答错的反馈用「胜」色。--bad 在四套主题对 --panel 实测 5.1–7.2:1,
@@ -1095,7 +1093,9 @@
     .game-name { font-size: var(--fs-ui); color: var(--text); min-width: 0; }
 
     /* —— 练习:题型筛选、提示、来源 —— */
-    .practice-skill { margin: 0 0 8px; width: 100%; }
+    /* 六个题型在 280 宽的卡片里排成两行三列 */
+    .practice-skill { width: 100%; grid-auto-flow: row; grid-template-columns: repeat(3, 1fr); height: auto; }
+    .practice-skill button { min-height: calc(var(--ctl-h) - 6px); }
     .practice-skill[hidden] { display: none; }
     .practice-source-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
     .practice-source-row .text-link { padding: 2px 6px; }
