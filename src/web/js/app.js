@@ -420,6 +420,7 @@
     saveSettings();
     syncSettingsUI();
     draw();
+    Practice.redraw(); // v1.76(B16):练习时题目那块棋盘也当场换色
   }
 
   function isLive() {
@@ -552,7 +553,17 @@
   function nowElapsed() {
     if (result !== "play") return elapsedBaseMs;
     if (!history.length && !swap2) return elapsedBaseMs;
-    return elapsedBaseMs + (Date.now() - startedAt);
+    return elapsedBaseMs + Math.max(0, (clockPausedAt || Date.now()) - startedAt);
+  }
+  /**
+   * v1.76(B19):练习时对局时钟停走。此前只是藏起来,做 9 秒题回来,这一局多了 9 秒。
+   * 停的那段从 startedAt 里扣掉,回来接着走。
+   */
+  let clockPausedAt = 0;
+  function pauseClock(on) {
+    if (on && !clockPausedAt) clockPausedAt = Date.now();
+    // 停着时若开了新局 / 换了一局(startedAt 被重置),只扣重置之后停着的那段
+    else if (!on && clockPausedAt) { startedAt += Date.now() - Math.max(clockPausedAt, startedAt); clockPausedAt = 0; }
   }
 
   /** 设置存储里从来没有东西 = 第一次启动(启动末尾会写一次,所以第二次就不是了) */
@@ -947,6 +958,7 @@
    */
   function openReview() {
     if (history.length < 2) { toast(t("review.empty")); return; }
+    // v1.76:进了复盘也要出得来 —— 关闭时回到最后一手,终局卡回来(见 closeReview)
     // v1.64:复盘只有侧栏这一个面。终局卡是它的摘要,复盘一开,摘要让位。
     hideEndCard();
     Review.setSideOpen(true);
@@ -960,6 +972,20 @@
       if (key) { setViewIndex(key.i); return; }
     }
     sync();
+  }
+
+  /**
+   * v1.76:离开复盘(卡片上「关闭」或 Esc)。复盘是看这一局的一种方式,看完回到这一局的结局:
+   * 最后一手、终局卡在、顶栏写结果。此前停在失着那一手,终局卡没了,顶栏还写着「复盘 13/14」。
+   * 重下线上不动查看位置(那条线的「最后一手」不是原局的结局)。
+   */
+  function closeReview() {
+    if (!Review.isSideOpen()) return false;
+    Review.setSideOpen(false);
+    if (retry) { sync(); return true; }
+    if (result !== "play" && history.length) endCardOn = true;
+    goLive();
+    return true;
   }
 
   /** SGF with per-move 失着 comments + a summary root comment (复盘评注导出). */
@@ -1268,7 +1294,7 @@
     const pvBtn = document.getElementById("review-side-pv");
     if (pvBtn) pvBtn.onclick = () => { runVariation(); };
     const closeBtn = document.getElementById("review-side-close");
-    if (closeBtn) closeBtn.onclick = () => { Review.setSideOpen(false); sync(); };
+    if (closeBtn) closeBtn.onclick = () => { closeReview(); };
     const retryBack = document.getElementById("retry-back");
     if (retryBack) retryBack.onclick = () => { endRetry(true); toast(t("retry.back")); };
   }
@@ -1826,6 +1852,8 @@
 
   function undo() {
     if (swap2) return; // no undo mid-opening
+    if (appEl.classList.contains("reviewing")) return; // v1.76:复盘时没有「悔棋」,Z 也不悔
+
     // The guards come FIRST, and that ordering is the whole point. v1.33.0
     // aborted before them, so pressing z while the computer thought its
     // opening move (human plays white ⇒ thinking with an empty history) killed
@@ -1946,7 +1974,8 @@
     if (c1) c1.textContent = el;
     // The same 500ms tick advances the think counter; sync() only runs at the
     // start and end of a think, so without this the seconds would never move.
-    if (aiThinking) {
+    // 练习时顶栏写的是题目进度,不让思考计时把它盖掉
+    if (aiThinking && !practiceStatus) {
       const st = document.getElementById("status");
       if (st) st.textContent = thinkingText();
     }
@@ -1981,9 +2010,8 @@
     document.querySelectorAll("#theme-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.theme === themeId);
     });
-    // 亮的是偏好:对局中在设置里改了规则,这一局照旧,新规则从下一局起
     document.querySelectorAll("#rule-seg button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.rule === prefs.rule);
+      b.classList.toggle("active", b.dataset.rule === S.rule);
     });
     const aiOnly = S.mode === "ai";
     const diffField = document.getElementById("diff-field");
@@ -2010,8 +2038,8 @@
       }
     }
     // swap2 decides the human's color via the opening protocol, so hide 执子 then
-    // swap2 由开局协议定执子 —— 看的是下一局的规则(偏好)
-    if (colorField) colorField.hidden = !aiOnly || prefs.rule === "swap2";
+    // swap2 由开局协议定执子 —— 看的是卡片里选的规则
+    if (colorField) colorField.hidden = !aiOnly || S.rule === "swap2";
     const sbOn = document.getElementById("opt-sound");
     if (sbOn) {
       sbOn.classList.toggle("active", soundOn);
@@ -2119,9 +2147,7 @@
         swap2.phase === "place" || swap2.phase === "place2"
           ? t("swap2.placing")
           : t("swap2.choosing");
-    } else if (!live) {
-      status.textContent = t("status.replay", { n: viewIndex, total: history.length });
-      if (winLine) status.textContent += t("status.five");
+    // v1.76:翻看前面的手时顶栏仍说这一局的状态 —— 「复盘」是另一个状态,位置在时间线右端
     } else if (result === "b") status.textContent = t("status.blackWin");
     else if (result === "w") status.textContent = t("status.whiteWin");
     else if (result === "draw") status.textContent = t("result.draw");
@@ -2147,6 +2173,9 @@
       appEl.classList.toggle("reviewing", reviewing);
       layoutDock();
     }
+    // v1.76:复盘是看,不是下 —— 顶栏不留一个灰掉的「悔棋」
+    const undoTop = document.getElementById("undo");
+    if (undoTop) undoTop.hidden = reviewing;
     Review.renderSide();
     // 重下线上第 ply 手之后的着法不在原局里:从那里「重下」或「练这一手」都会落到原局
     // 同号的另一手上(v1.63.1)。只留推演。
@@ -2273,7 +2302,7 @@
       const was = appEl.classList.contains("practicing");
       appEl.classList.toggle("practicing", !!st.open);
       practiceStatus = st.open ? [st.title, st.progress].filter(Boolean).join(" · ") : "";
-      if (st.open !== was) { closePopovers(); layoutDock(); }
+      if (st.open !== was) { closePopovers(); layoutDock(); pauseClock(!!st.open); }
       sync();
     },
   });
@@ -2303,10 +2332,8 @@
       const rd = Review.getData();
       if (!rd || rd.adv.length < 2) return;
       const rect = reviewCurveEl.getBoundingClientRect();
-      const pad = 6;
-      const frac = (ev.clientX - rect.left - pad) / Math.max(1, rect.width - pad * 2);
-      const i = Math.round(Math.min(1, Math.max(0, frac)) * (rd.adv.length - 1));
-      setViewIndex(i);
+      const i = Review.curveIndexAt(ev.clientX - rect.left, rect.width);
+      if (i >= 0) setViewIndex(i);
     });
   }
   const slotsCloseEl = document.getElementById("slots-close");
@@ -2327,32 +2354,6 @@
     });
   }
 
-  const ruleSeg = document.getElementById("rule-seg");
-  if (ruleSeg) {
-    ruleSeg.onclick = async (ev) => {
-      const b = ev.target.closest("button[data-rule]");
-      if (!b) return;
-      const val = b.dataset.rule;
-      if (val !== "free" && val !== "swap2" && val !== "renju") return;
-      if (val === prefs.rule && val === ruleChoice()) return;
-      prefs.rule = val;
-      saveSettings();
-      // v1.68:规则在设置弹层里。对局中改不打断这一局(也就不必在弹层上再叠一个确认框),
-      // 从下一局起生效;空棋盘上改立即换
-      if (history.length) {
-        syncSettingsUI();
-        toast(t("toast.ruleNext", { name: t("rule." + val) }));
-        return;
-      }
-      reset({ keepSettings: true });
-      toast(t(
-        val === "renju" ? "toast.ruleRenju"
-          : val === "swap2"
-            ? (mode === "ai" ? "toast.ruleSwap2Ai" : "toast.ruleSwap2")
-            : "toast.ruleFree"
-      ));
-    };
-  }
   const langSeg = document.getElementById("lang-seg");
   if (langSeg) langSeg.onclick = (ev) => {
     const b = ev.target.closest("button[data-lang]");
@@ -2360,6 +2361,7 @@
     I18n.setLang(b.dataset.lang); // rewrites the static markup
     // …and everything drawn from state has to be rebuilt in the new language
     syncSettingsUI();
+    Practice.relabel(); // v1.76(B17):练习卡片上从状态拼出来的文字、顶栏那一句也换
     sync();
   };
   document.getElementById("theme-seg").onclick = (ev) => {
@@ -2396,7 +2398,7 @@
   const confirmModal = document.getElementById("confirm-modal");
   // --- v1.74: 「新局」卡片与「⋯」菜单 ---
   function sheetChoice() {
-    return sheet || { mode: mode, difficulty: difficulty, think: thinkLevel, color: Session.colorChoice(prefs) };
+    return sheet || { mode: mode, difficulty: difficulty, think: thinkLevel, color: Session.colorChoice(prefs), rule: prefs.rule };
   }
   function placePopover(el, anchor) {
     const r = anchor.getBoundingClientRect();
@@ -2406,7 +2408,7 @@
   function openSheet() {
     closeMenu();
     // 执子偏好里有「auto」(低档执黑、高档轮流),三格里没有它 —— 没点过执子就不改偏好
-    sheet = { mode: mode, difficulty: prefs.difficulty || difficulty, think: thinkLevel, color: Session.colorChoice(prefs), colorTouched: false };
+    sheet = { mode: mode, difficulty: prefs.difficulty || difficulty, think: thinkLevel, color: Session.colorChoice(prefs), colorTouched: false, rule: prefs.rule };
     // 上一局是库里的旧局 / 重下时,这一局的模式可能不是偏好;新局从偏好开
     sheet.mode = prefs.mode || mode;
     const anchor = document.getElementById("btn-new");
@@ -2437,8 +2439,15 @@
     difficulty = prefs.difficulty = S.difficulty;
     thinkLevel = S.think;
     if (S.colorTouched) prefs.humanColor = S.color;
+    const ruleChanged = S.rule !== ruleChoice();
+    prefs.rule = S.rule;
     saveSettings();
     reset({ keepSettings: true });
+    // 换了规则,开局时说一句这个规则是什么(swap2 人机还要说清你执白)
+    if (ruleChanged) toast(t(
+      S.rule === "renju" ? "toast.ruleRenju"
+        : S.rule === "swap2" ? (mode === "ai" ? "toast.ruleSwap2Ai" : "toast.ruleSwap2")
+          : "toast.ruleFree"));
   }
   function openMenu() {
     closeSheet();
@@ -2486,6 +2495,7 @@
     pick("diff-seg", "data-diff", (v) => { sheet.difficulty = v; });
     pick("think-seg", "data-think", (v) => { sheet.think = v; });
     pick("color-seg", "data-human", (v) => { sheet.color = v; sheet.colorTouched = true; });
+    pick("rule-seg", "data-rule", (v) => { if (v === "free" || v === "swap2" || v === "renju") sheet.rule = v; });
     document.getElementById("new-start").onclick = () => { startFromSheet(); };
     sheetEl.addEventListener("keydown", (ev) => {
       if (ev.key !== "Enter") return;
@@ -2543,6 +2553,7 @@
       if (helpModal.classList.contains("show")) { closeHelp(); return; }
       if (closePopovers()) return;
       if (Practice.isOpen()) { Practice.close(); return; }
+      if (closeReview()) return;
       // 棋盘有焦点时 Esc 交给棋盘(「Esc 离开」是它播报过的承诺)
       if (document.activeElement === canvas && handleBoardKey(ev)) return;
       return;

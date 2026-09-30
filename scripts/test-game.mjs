@@ -1921,7 +1921,7 @@ const Practice = ctx.GobanPractice;
   // practice.wrong.<type> / practice.hint.<type>.<level> are assembled from the
   // puzzle type (v1.63); the 题型 gate right below asserts every type has all
   // three strings in both dictionaries.
-  const DYNAMIC = /^(diff|think|coach|status|result|practice\.kind|practice\.wrong|practice\.hint|renju\.blocked)\./;
+  const DYNAMIC = /^(diff|think|coach|status|result|practice\.kind|practice\.wrong|practice\.explain|practice\.hint|renju\.blocked)\./;
   const deadKeys = dictKeys.filter((k) => !DYNAMIC.test(k) && !uses.includes('"' + k + '"'));
   const KNOWN_ORPHANS = ["slots.saved", "practice.src.game", "practice.src.builtin"];
   const fresh = deadKeys.filter((k) => !KNOWN_ORPHANS.includes(k));
@@ -1932,7 +1932,7 @@ const Practice = ctx.GobanPractice;
     const I18n = ctx.GobanI18n;
     const missing = [];
     for (const type of ["win1", "defend", "vcf", "forbid"]) {
-      for (const k of ["practice.wrong." + type, "practice.hint." + type + ".1", "practice.hint." + type + ".2", "practice.task." + type]) {
+      for (const k of ["practice.wrong." + type, "practice.explain." + type, "practice.hint." + type + ".1", "practice.hint." + type + ".2", "practice.task." + type]) {
         if (!I18n.DICT.zh[k]) missing.push("zh:" + k);
         if (!I18n.DICT.en[k]) missing.push("en:" + k);
       }

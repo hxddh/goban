@@ -390,6 +390,9 @@ const CJK = /[\u4e00-\u9fff]/;
   await dismissConfirm(page);
   await page.waitForTimeout(300);
   const cardHidden = await hidden(page, "end-card");
+  // v1.76:旧局以复盘打开,复盘时没有「悔棋」—— 先离开复盘(Esc),再悔
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
   await page.evaluate(() => document.getElementById("undo").click());
   await page.waitForTimeout(300);
   const s = await save(page);

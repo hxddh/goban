@@ -275,6 +275,15 @@
       .slice(0, 3);
   }
 
+  let curveX0 = 6, curveW = 0;
+  /** 曲线上横坐标 px(相对画布左缘)对应第几手 —— 与 drawCurve 同一套几何 */
+  function curveIndexAt(px, cssW) {
+    if (!data || data.adv.length < 2) return -1;
+    const w = curveW || Math.max(1, cssW - curveX0 - 4);
+    const frac = (px - curveX0) / w;
+    return Math.round(Math.min(1, Math.max(0, frac)) * (data.adv.length - 1));
+  }
+
   function drawCurve() {
     const cv = document.getElementById("review-curve");
     if (!cv || !data) return;
@@ -290,10 +299,17 @@
     g.clearRect(0, 0, cssW, cssH);
     const adv = data.adv;
     const n = adv.length;
-    const pad = 6;
-    const w = cssW - pad * 2;
+    const pad = 4;
+    // v1.76:曲线与时间线同一行高(36),棋盘在终局 ↔ 复盘之间不再缩放。「黑优 / 白优」
+    // 放在曲线左边一列,不再压在线上
+    const font = "10px " + (getComputedStyle(document.body).fontFamily || "sans-serif");
+    g.font = font;
+    const labW = Math.ceil(Math.max(g.measureText(t("review.curve.black")).width, g.measureText(t("review.curve.white")).width));
+    const x0 = pad + labW + 8;
+    const w = Math.max(1, cssW - x0 - pad);
     const h = cssH - pad * 2;
-    const x = (i) => pad + (n <= 1 ? 0 : (i / (n - 1)) * w);
+    curveX0 = x0; curveW = w;
+    const x = (i) => x0 + (n <= 1 ? 0 : (i / (n - 1)) * w);
     const y = (v) => pad + (1 - (v + 1) / 2) * h; // +1 top (black), −1 bottom (white)
     const css = getComputedStyle(document.documentElement);
     const line = css.getPropertyValue("--accent").trim() || "#3b82f6";
@@ -302,7 +318,7 @@
     // 光栅化成两行半调,落在 x.5 上奇数宽度才盖满整行 —— 与主棋盘 crisp() 同一条规则。
     const snap = (v) => Math.round(v * dpr) / dpr + 0.5 / dpr;
     g.strokeStyle = mid; g.lineWidth = 1 / dpr * Math.max(1, Math.round(dpr));
-    g.beginPath(); g.moveTo(pad, snap(y(0))); g.lineTo(pad + w, snap(y(0))); g.stroke();
+    g.beginPath(); g.moveTo(x0, snap(y(0))); g.lineTo(x0 + w, snap(y(0))); g.stroke();
     // advantage area
     g.beginPath();
     g.moveTo(x(0), y(adv[0]));
@@ -338,11 +354,11 @@
     }
     // 零线两侧各是谁占优 —— v1.63 时这句只写在弹层标题里,曲线本身读不出方向
     g.fillStyle = css.getPropertyValue("--muted").trim() || "#888";
-    g.font = "10px " + (getComputedStyle(document.body).fontFamily || "sans-serif");
+    g.font = font;
     g.textBaseline = "top";
-    g.fillText(t("review.curve.black"), pad + 2, pad);
+    g.fillText(t("review.curve.black"), pad, pad);
     g.textBaseline = "bottom";
-    g.fillText(t("review.curve.white"), pad + 2, pad + h);
+    g.fillText(t("review.curve.white"), pad, pad + h);
     // current view marker
     const viewIndex = deps.getViewIndex();
     if (viewIndex >= 0 && viewIndex < n) {
@@ -452,7 +468,7 @@
   }
 
   global.GobanReview = {
-    init, invalidate, getData, compute, deepen, explain, keyMoves,
+    init, invalidate, getData, compute, deepen, explain, keyMoves, curveIndexAt,
     render: renderSide, renderSide, setSideOpen, isSideOpen, toggleSoft,
     ENGINE_GAP,
   };

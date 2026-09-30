@@ -295,14 +295,17 @@ async function newAudioPage() {
 const notes = (audio) =>
   audio.filter((a) => a.node === "osc" && a.freq > 0).map((a) => Math.round(a.freq * 100) / 100);
 
-/** v1.68 起规则在设置弹层里:打开设置 → 点规则 → 关。只在空棋盘上调用(对局中改规则从下一局起生效)。 */
+/** v1.76 起规则在「新局」卡片里:打开卡片 → 点规则 → 开始(对局中会先问一句,替它点确定)。 */
 async function pickRule(page, rule) {
-  await page.evaluate(() => document.getElementById("settings-btn").click());
+  await page.evaluate(() => { const s = document.getElementById("new-sheet"); if (s.hidden) document.getElementById("btn-new").click(); });
   await page.waitForTimeout(120);
   await page.click('#rule-seg button[data-rule="' + rule + '"]');
-  await page.waitForTimeout(120);
-  await page.evaluate(() => document.getElementById("settings-close").click());
+  await page.waitForTimeout(80);
+  await page.evaluate(() => document.getElementById("new-start").click());
   await page.waitForTimeout(150);
+  if (await page.evaluate(() => document.getElementById("confirm-modal").classList.contains("show"))) {
+    await page.click("#confirm-ok"); await page.waitForTimeout(150);
+  }
 }
 
 /** v1.70 起人机 · 自由时信息行是空的(档名不再重复);它最长的形态是「双人 · 禁手」 */
@@ -3285,7 +3288,7 @@ async function enableSwap2Pvp(page) {
 // AW 开局设置住在「新局」卡片里(v1.74 改;v1.61 起它们只在开局态出现在侧栏)。
 //
 // 守三件事:① 卡片里模式 / 难度 / 执子三行一直都在 —— 空棋盘和对局中一样(对局中改它们
-// 本来就是开新局);② 规则仍在设置弹层里,不回到卡片;③ 五种高度下卡片整张都在窗口里。
+// 本来就是开新局);② 规则也在卡片里(v1.76 从设置挪来:它是这一局怎么下);③ 五种高度下卡片整张都在窗口里。
 {
   const bad = [], seen = {};
   const vis = (page) => page.evaluate(() => {
@@ -3309,8 +3312,8 @@ async function enableSwap2Pvp(page) {
     await page.click("#btn-new"); await page.waitForTimeout(150);
     const before = await vis(page);
     if (h === 800) seen.开局态 = before;
-    if (before.模式 !== "显示" || before.难度 !== "显示" || before.执子 !== "显示" || before.规则 !== "在设置")
-      bad.push(h + "高 空棋盘:卡片里应有模式/难度/执子、规则在设置弹层(得到 " + JSON.stringify(before) + ")");
+    if (before.模式 !== "显示" || before.难度 !== "显示" || before.执子 !== "显示" || before.规则 !== "在卡片")
+      bad.push(h + "高 空棋盘:卡片里应有模式/难度/执子与规则(v1.76 起规则也在卡片里)(得到 " + JSON.stringify(before) + ")");
     if (before.出屏) bad.push(h + "高:卡片出了窗口 " + before.出屏 + "px");
     await page.keyboard.press("Escape");
     await clicker(page)(7, 7);
@@ -3323,7 +3326,7 @@ async function enableSwap2Pvp(page) {
     if (page.__errors.length) bad.push(h + "高 errs " + page.__errors.join("|"));
     await page.close();
   }
-  report("AW 模式 / 难度 / 执子在「新局」卡片里(空盘与对局中都在)、规则在设置里、五种高度下卡片不出屏",
+  report("AW 模式 / 难度 / 执子在「新局」卡片里(空盘与对局中都在)与规则(v1.76)、五种高度下卡片不出屏",
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 

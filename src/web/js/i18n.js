@@ -314,8 +314,6 @@
       "game.restored": "已恢复上次对局",
 
       // —— runtime: status line ——
-      "status.replay": "复盘 {n}/{total}",
-      "status.five": " · 已成五",
       "status.blackWin": "黑棋胜",
       "status.whiteWin": "白棋胜",
       "status.importAi": "导入复盘 · 点「续下」让电脑走",
@@ -340,7 +338,6 @@
       "toast.ruleSwap2": "平衡开局 swap2",
       "toast.ruleSwap2Ai": "平衡开局：你放 3 子后电脑挑边 —— 它几乎总选黑，你执白",
       "toast.ruleRenju": "禁手规则：黑不得长连、双四、双三",
-      "toast.ruleNext": "规则改为「{name}」，从下一局起生效",
       "review.renjuNote": "禁手档：胜负判定与更优点已按规则算；优劣曲线仍按无禁手估，黑方略偏乐观",
       // —— v1.63:学习闭环 ——
       "import.hint.ruleRenju": " · 棋谱标注连珠规则，本局按禁手读",
@@ -442,6 +439,10 @@
       "practice.retry": "✗ 不在这里，再试一次。",
       "practice.correct.hinted": "✓ 答对了（用了提示或第二次）· 到期后再独立做对一次才算掌握",
       "practice.revealed": "答案：{cells}。",
+      "practice.explain.win1": "这一手直接连成五（盘上绿色带坐标）。",
+      "practice.explain.vcf": "棋盘上按序号摆出：绿圈是你的冲四，对方每一手应手都是唯一的，最终成五。",
+      "practice.explain.defend": "对方下一手就会成五，必须挡在这里（或自己抢先成五）。",
+      "practice.explain.forbid": "黑在这里会同时形成两个活三 / 两个四，或六连。",
       "practice.wrong.forbid": "✗ 这一点黑可以走。禁手点是 {cells}：黑在那里会同时形成两个活三 / 两个四，或六连。",
       "practice.empty.forbid": "禁手题来自内置题和你的连珠对局——下几盘禁手局再来",
       "practice.round.nextWrong": "错题本还有 {n} 题，建议先清。",
@@ -766,8 +767,6 @@
       "stats.cleared": "Statistics cleared",
       "game.restored": "Previous game restored",
 
-      "status.replay": "Review {n}/{total}",
-      "status.five": " · five in a row",
       "status.blackWin": "Black wins",
       "status.whiteWin": "White wins",
       "status.importAi": "Imported · press “Continue” to let the computer play",
@@ -791,7 +790,6 @@
       "toast.ruleSwap2": "Swap2 opening",
       "toast.ruleSwap2Ai": "Swap2: you lay 3 stones, then the computer picks — it almost always takes black, so you play white",
       "toast.ruleRenju": "Renju: black may not overline, double-four or double-three",
-      "toast.ruleNext": "Rule set to {name} — takes effect from the next game",
       "review.renjuNote": "Renju: win verdicts and better-move suggestions follow the rule; the advantage curve still judges by free-style, so it reads slightly optimistic for Black",
       // —— v1.63: the learning loop ——
       "import.hint.ruleRenju": " · record says Renju, read with forbidden moves",
@@ -893,6 +891,10 @@
       "practice.retry": "✗ Not there — try once more.",
       "practice.correct.hinted": "✓ Correct (with a hint or on the second try) · solve it unaided after the review date to count as mastered",
       "practice.revealed": "Answer: {cells}.",
+      "practice.explain.win1": "This move makes five (green, labelled on the board).",
+      "practice.explain.vcf": "Played out on the board in order: the green rings are your fours, every reply is forced, and the last move makes five.",
+      "practice.explain.defend": "The opponent makes five next move — block here (or win first).",
+      "practice.explain.forbid": "Black would make two open threes / two fours, or an overline here.",
       "practice.wrong.forbid": "✗ Black may play there. The forbidden point is {cells}: Black would make two open threes / two fours, or an overline.",
       "practice.empty.forbid": "Forbidden-move puzzles come from the built-ins and your own Renju games — play a few and come back",
       "practice.round.nextWrong": "{n} still in the mistakes book — clear those first.",
