@@ -1276,9 +1276,10 @@ async function enableSwap2Pvp(page) {
     await page.evaluate((i) => document.getElementById(i).click(), id);
     await page.waitForTimeout(400);
     const r = await page.evaluate(() => {
-      const m = [...document.querySelectorAll(".modal-bg")].find((e) => e.classList.contains("show"));
+      // v1.75:练习不再是弹层,是坞里的卡片(#practice-modal.show)—— 同一条规矩照样量它
+      const m = [...document.querySelectorAll(".modal-bg, .practice-card")].find((e) => e.classList.contains("show"));
       if (!m) return null;
-      const box = m.querySelector(".modal");
+      const box = m.querySelector(".modal") || m;
       const btns = [...box.querySelectorAll("button")].filter((b) => b.offsetParent !== null);
       return btns.map((b) => ({ txt: (b.textContent || "").trim(), cls: b.className, dis: b.disabled }));
     });
@@ -2805,12 +2806,9 @@ async function enableSwap2Pvp(page) {
 
 // ---- Test AR: 练习题面随窗口长大，且一处不滚 ----
 // 题面是这个应用里信息密度最高的一块，却一直被挤在 338px 里（15 路，每格 22.5）。
-// 130 道题实测：包围盒边长 最小 5 / 中位 9 / 最大 13，占棋盘面积 中位只有 32% ——
-// 裁到题目那一块能省地方，但五子棋里「这条线撞不撞得到边」是战术信息，裁掉就改了题。
-// 所以不裁，改成让盘面吃掉两个预算里小的那个（宽度给满弹层，高度不超过视口余量）。
-//
-// ② 是**相对判据**：窗口从矮拉到高，棋盘必须跟着变大 —— 写死一个尺寸会立刻被抓，
-//    而任何具体数字都会随字号/文案变化而过期。
+// 五子棋里「这条线撞不撞得到边」是战术信息，所以不裁题，让盘面随窗口长大。
+// v1.75:练习弹层退役,题目直接画在主棋盘的位置上 —— 判据跟着改:题盘就是棋盘那一块(同位置、方的),
+// 旁边的卡片在四档窗口里都不用滚;② 窗口越高,题盘越大(相对判据,不写死尺寸)。
 {
   const bad = [];
   const seen = {};
@@ -2821,33 +2819,28 @@ async function enableSwap2Pvp(page) {
     await page.setViewportSize({ width: vw, height: vh });
     await page.waitForTimeout(250);
     await page.evaluate(() => document.getElementById("open-practice").click());
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(700);
     const r = await page.evaluate(() => {
-      const m = document.querySelector("#practice-modal .modal");
-      const cv = m.querySelector("canvas");
+      const cv = document.getElementById("practice-board");
       const cr = cv.getBoundingClientRect();
+      const wr = document.getElementById("board-wrap").getBoundingClientRect();
+      const dock = document.getElementById("dock");
       return {
         board: +cr.width.toFixed(0), boardH: +cr.height.toFixed(0),
-        need: m.scrollHeight, avail: m.clientHeight,
-        // 弹层里除棋盘之外的高度 —— 它必须留在声明的预算之内
-        chrome: +(m.scrollHeight - cr.height).toFixed(0),
-        budget: parseFloat(getComputedStyle(document.documentElement)
-          .getPropertyValue("--modal-board-chrome")) || 0,
+        sameAsBoard: Math.abs(cr.left - wr.left) < 1 && Math.abs(cr.top - wr.top) < 1 && Math.abs(cr.width - wr.width) < 1,
+        need: dock.scrollHeight, avail: dock.clientHeight,
+        inView: cr.bottom <= innerHeight + 0.5 && cr.right <= innerWidth + 0.5 && cr.left >= -0.5,
       };
     });
     seen[vw + "×" + vh] = r;
     boards.push(r.board);
     if (!r.board) bad.push(vw + "×" + vh + ": 量不到练习棋盘 —— 覆盖不足");
     if (Math.abs(r.board - r.boardH) > 1) bad.push(vw + "×" + vh + ": 棋盘不是方的 " + r.board + "×" + r.boardH);
-    if (r.need > r.avail + 1) bad.push(vw + "×" + vh + ": 练习弹层要滚（need " + r.need + " > avail " + r.avail + "）");
-    // 常数守卫：有人往弹层里加内容而不调预算，这里报，而不是让弹层悄悄开始滚
-    if (!r.budget) bad.push("--modal-board-chrome 读不到 —— 预算没有声明处");
-    else if (r.chrome > r.budget) {
-      bad.push(vw + "×" + vh + ": 弹层里除棋盘之外占了 " + r.chrome +
-        "px，超过声明的预算 " + r.budget + " —— 加了内容就得同步调这个数");
-    }
+    if (!r.sameAsBoard) bad.push(vw + "×" + vh + ": 题盘不在棋盘那一块上");
+    if (!r.inView) bad.push(vw + "×" + vh + ": 题盘出了窗口");
+    if (r.need > r.avail + 1) bad.push(vw + "×" + vh + ": 练习卡片要滚（need " + r.need + " > avail " + r.avail + "）");
     await page.evaluate(() => document.getElementById("practice-close").click());
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(300);
   }
   // ② 相对判据：窗口越高，棋盘越大（允许相等——宽度那一侧可能先封顶）
   for (let i = 1; i < boards.length; i++) {
@@ -2861,7 +2854,7 @@ async function enableSwap2Pvp(page) {
   }
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
-  report("AR 练习题面随窗口长大，四档窗口一处不滚",
+  report("AR 练习题面就是棋盘那一块、随窗口长大，四档窗口一处不滚",
     bad.length === 0, JSON.stringify({ bad, seen }));
 }
 

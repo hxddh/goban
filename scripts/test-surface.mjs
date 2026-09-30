@@ -557,7 +557,7 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
     return [t("practice.round.nextDue", { n: 1 })].concat([...document.querySelectorAll("#help-modal td")].map((e) => e.textContent))
       .filter((x) => /侧栏「棋谱」|「每日」|☰|统计 \/ 练习/.test(x));
   });
-  const ok = first <= 16 && mid <= 15 && over && endCount <= 18 && modalKinds === 5 &&
+  const ok = first <= 16 && mid <= 15 && over && endCount <= 18 && modalKinds === 4 && /* v1.75:练习弹层退役,5 → 4 */
     home.startsWith("0 /") && end.split("/")[0].trim() === end.split("/")[1].trim() &&
     helpViaSettings && helpViaKey && statsInSlots && !swap2BarStale && !askedAfterEnd &&
     empty === 0 && reviewHiddenEmpty && reviewShownMid && stale.length === 0 && toastCount <= 2 &&
@@ -791,6 +791,75 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
   report("S15 只剩一块棋盘:控件 ≤ 3 / 6 / 8 / 9;新局卡片、时间线、⋯ 都到得了;B10 B11 B12;四档窗口无横滚、坞不压棋盘", ok,
     JSON.stringify({ first, mid, tl, b12, sheet, thinkShown, afterStart, menuItems, opens, badge, over, endCount, b10, overlap,
       reviewCount, b11, widths, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- S16. 真正只剩一块棋盘,小窗口也一样(v1.75)----
+// B15:横向窗口里坞放在棋盘旁边 —— 1024×600 首开 / 终局 / 复盘棋盘都 ≥ 460,760×600 都 ≥ 420;
+// 练习画在主棋盘的位置上(同一处、同样大),练习时对局那一套让位、看得见的控件 ≤ 11,
+// 「回到对局」回到原来那一手;弹层里的每一样都还在(六个题型、提示、看答案、错题本、回到对局);
+// B13:卡片里焦点在选项上按回车是选它;B14:菜单开着按 Z 不悔棋。
+{
+  const page = await newPage();
+  const click = clicker(page);
+  const bw = () => page.evaluate(() => Math.round(document.getElementById("board").getBoundingClientRect().width));
+  const toEnd = async () => { for (let i = 0; i < 40; i++) { if (await page.evaluate(() => !document.getElementById("end-card").hidden)) return; await click(1 + (i % 13), 1 + ((i * 5) % 13)); await page.waitForTimeout(500); } };
+  const sizes = {};
+  for (const [w, h, min] of [[1024, 600, 460], [760, 600, 420]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.evaluate(() => localStorage.clear()); await page.reload({ waitUntil: "networkidle" }); await page.waitForTimeout(400);
+    const first = await bw();
+    await toEnd(); await page.waitForTimeout(500);
+    const end = await bw();
+    await page.evaluate(() => { const b = document.getElementById("end-card-review"); if (b) b.click(); }); await page.waitForTimeout(900);
+    const review = await bw();
+    sizes[w + "x" + h] = { first, end, review, ok: Math.min(first, end, review) >= min };
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(() => localStorage.clear()); await page.reload({ waitUntil: "networkidle" }); await page.waitForTimeout(400);
+  for (const [r, c] of [[7, 7], [6, 8], [8, 6]]) { await click(r, c); await page.waitForTimeout(900); }
+  await page.keyboard.press("ArrowLeft"); await page.waitForTimeout(150);
+  const before = await page.evaluate(() => ({ pos: document.getElementById("replay-pos").textContent,
+    rect: (() => { const r = document.getElementById("board").getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width)]; })() }));
+  await page.evaluate(() => document.getElementById("open-practice").click()); await page.waitForTimeout(800);
+  const pr = await page.evaluate(() => {
+    const vis = (e) => !!e && e.offsetParent !== null && e.getBoundingClientRect().width > 0 && getComputedStyle(e).visibility !== "hidden";
+    const pb = document.getElementById("practice-board"); const r = pb ? pb.getBoundingClientRect() : { x: 0, y: 0, width: 0 };
+    return {
+      boards: [...document.querySelectorAll("canvas")].filter((c) => c.id !== "review-curve" && vis(c)).map((c) => c.id),
+      rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width)],
+      inWrap: !!(pb && pb.closest("#board-wrap")),
+      game: ["undo", "btn-hint", "btn-new", "timeline"].filter((id) => vis(document.getElementById(id))),
+      controls: [...document.querySelectorAll("button, [role=button], input, select")].filter(vis).length,
+      skills: [...document.querySelectorAll("#practice-skill button")].filter(vis).length,
+      status: document.getElementById("status").textContent,
+      modalBg: !!document.querySelector("#practice-modal.modal-bg, .modal-bg#practice-modal"),
+    };
+  });
+  await page.evaluate(() => document.querySelector('#practice-skill [data-skill="all"]').click()); await page.waitForTimeout(300);
+  const free = await page.evaluate(() => ["practice-hint", "practice-reveal", "practice-wrong", "practice-close"].filter((id) => { const e = document.getElementById(id); return e && e.offsetParent !== null; }));
+  await page.evaluate(() => document.getElementById("practice-close").click()); await page.waitForTimeout(600);
+  const after = await page.evaluate(() => ({ pos: document.getElementById("replay-pos").textContent,
+    practicing: document.getElementById("app").classList.contains("practicing"),
+    boardShown: document.getElementById("board").offsetParent !== null }));
+  // B13 / B14
+  await page.evaluate(() => document.getElementById("btn-new").click()); await page.waitForTimeout(150);
+  await page.focus('#mode-seg [data-mode="pvp"]'); await page.keyboard.press("Enter"); await page.waitForTimeout(250);
+  const b13 = await page.evaluate(() => ({ open: !document.getElementById("new-sheet").hidden,
+    picked: (document.querySelector("#mode-seg button.active") || {}).dataset.mode, pos: document.getElementById("replay-pos").textContent }));
+  await page.keyboard.press("Escape"); await page.keyboard.press("End"); await page.waitForTimeout(100);
+  const n0 = await page.evaluate(() => document.getElementById("replay-pos").textContent);
+  await page.evaluate(() => document.getElementById("more-btn").click()); await page.waitForTimeout(150);
+  await page.keyboard.press("z"); await page.waitForTimeout(300);
+  const b14 = { before: n0, after: await page.evaluate(() => document.getElementById("replay-pos").textContent) };
+  const ok = Object.values(sizes).every((v) => v.ok) &&
+    pr.boards.length === 1 && pr.boards[0] === "practice-board" && pr.inWrap && JSON.stringify(pr.rect) === JSON.stringify(before.rect) &&
+    pr.game.length === 0 && pr.controls <= 11 && pr.skills === 6 && /每日|练习/.test(pr.status) && !pr.modalBg &&
+    free.length === 4 && after.pos === before.pos && !after.practicing && after.boardShown &&
+    b13.open && b13.picked === "pvp" && b13.pos === before.pos.replace(/^\d+/, (m) => m) &&
+    b14.before === b14.after;
+  report("S16 小窗口棋盘 ≥ 460 / 420;练习在主棋盘上(一块棋盘、同位置同大小、≤ 11 个控件、回到对局原样);B13 B14", ok,
+    JSON.stringify({ sizes, before, pr, free, after, b13, b14, errs: page.__errors }));
   await page.close();
 }
 
