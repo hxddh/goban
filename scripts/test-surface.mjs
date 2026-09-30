@@ -557,7 +557,7 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
     return [t("practice.round.nextDue", { n: 1 })].concat([...document.querySelectorAll("#help-modal td")].map((e) => e.textContent))
       .filter((x) => /侧栏「棋谱」|「每日」|☰|统计 \/ 练习/.test(x));
   });
-  const ok = first <= 16 && mid <= 15 && over && endCount <= 18 && modalKinds === 5 &&
+  const ok = first <= 16 && mid <= 15 && over && endCount <= 18 && modalKinds === 4 && /* v1.75:练习弹层退役,5 → 4 */
     home.startsWith("0 /") && end.split("/")[0].trim() === end.split("/")[1].trim() &&
     helpViaSettings && helpViaKey && statsInSlots && !swap2BarStale && !askedAfterEnd &&
     empty === 0 && reviewHiddenEmpty && reviewShownMid && stale.length === 0 && toastCount <= 2 &&

@@ -1276,9 +1276,10 @@ async function enableSwap2Pvp(page) {
     await page.evaluate((i) => document.getElementById(i).click(), id);
     await page.waitForTimeout(400);
     const r = await page.evaluate(() => {
-      const m = [...document.querySelectorAll(".modal-bg")].find((e) => e.classList.contains("show"));
+      // v1.75:练习不再是弹层,是坞里的卡片(#practice-modal.show)—— 同一条规矩照样量它
+      const m = [...document.querySelectorAll(".modal-bg, .practice-card")].find((e) => e.classList.contains("show"));
       if (!m) return null;
-      const box = m.querySelector(".modal");
+      const box = m.querySelector(".modal") || m;
       const btns = [...box.querySelectorAll("button")].filter((b) => b.offsetParent !== null);
       return btns.map((b) => ({ txt: (b.textContent || "").trim(), cls: b.className, dis: b.disabled }));
     });
