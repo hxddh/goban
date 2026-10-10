@@ -51,7 +51,7 @@
     if (Host.hasZero()) {
       try {
         const path = await Host.saveFileDialog({ title: t("export.title"), defaultName: name });
-        if (path == null) { toast(t("export.cancelled")); return; }
+        if (path == null) return; // 取消了,不用说
         await Host.writeTextFile(path, sgf);
         await Host.revealPath(path);
         toast(t("export.done", { name: name }));
@@ -68,17 +68,9 @@
   }
 
   async function download() {
-    if (!deps.getGame().history.length) { deps.toast(t("export.nothing")); return; }
+    if (!deps.getGame().history.length) return;
     await exportString(buildSgf(), fileName());
   }
 
-  async function copy() {
-    if (!deps.getGame().history.length) { deps.toast(t("copy.nothing")); return; }
-    try {
-      await copyText(buildSgf());
-      deps.toast(t("copy.done"));
-    } catch (_) { deps.toast(t("copy.fail")); }
-  }
-
-  global.GobanSgfIo = { init, buildSgf, fileName, exportString, copyText, download, copy };
+  global.GobanSgfIo = { init, buildSgf, fileName, exportString, copyText, download };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -42,20 +42,16 @@
   function findWin(r, c, color) { return Core.findWinRule(board, r, c, color, isRenju()); }
   function boardFull() { return Core.boardFull(board); }
   function wouldWin(r, c, color) { return Core.wouldWin(board, r, c, color); }
-  /** @type {'fast' | 'normal' | 'deep'} hard-mode think budget */
-  let thinkLevel = "normal";
+  /**
+   * v2.0:新局卡片里的「思考」(快 · 标 · 深)退役 —— 它只在困难 / 极限出现,乘上四档难度是 12 种组合,
+   * 而「极限」本来就是「困难给更多时间」。困难、极限固定用「标」:每手约 2 秒 / 5 秒,棋力闸门测的也是这一档。
+   * 旧设置里存的思考档忽略。
+   */
+  const thinkLevel = "normal";
 
-  function hardTimeMs() {
-    if (thinkLevel === "fast") return 800;
-    if (thinkLevel === "deep") return 3500;
-    return 2000;
-  }
+  function hardTimeMs() { return 2000; }
 
-  function extremeTimeMs() {
-    if (thinkLevel === "fast") return 2500;
-    if (thinkLevel === "deep") return 8000;
-    return 5000;
-  }
+  function extremeTimeMs() { return 5000; }
 
   function budgetForDiff(diff) {
     if (diff === "extreme") return extremeTimeMs();
@@ -84,7 +80,6 @@
   async function exportSgfString(sgf, name) { return SgfIo.exportString(sgf, name); }
   async function downloadSgf() { return SgfIo.download(); }
   async function copySgfText(sgf) { return SgfIo.copyText(sgf); }
-  async function copySgf() { return SgfIo.copy(); }
 
   async function readTextFile(path) { return Host.readTextFile(path); }
 
@@ -115,7 +110,7 @@
       ruleSet: importRule,
     });
     if (!applied.ok) {
-      toast(applied.error || t("import.fail"));
+      toast(applied.error || t("import.parseFail"));
       return false;
     }
     const s = applied.session;
@@ -152,24 +147,15 @@
     if (result === "b" || result === "w") triggerWinFlash();
     sync();
     saveGame();
-    const tag = label ? " · " + label : "";
-    const end =
-      t(result === "b" ? "import.end.b" : result === "w" ? "import.end.w" : result === "draw" ? "import.end.draw" : "import.end.open");
-    const hint = t(importPaused ? "import.hint.continue" : "import.hint.reviewOnly")
-      + (ruleSwitched ? t(isRenju() ? "import.hint.ruleRenju" : "import.hint.ruleFree") : "");
-    toast(t("import.done", { n: history.length, end: end, tag: tag, hint: hint }));
+    // v2.0:导入完不再弹一句 —— 棋盘、座位、规则标签和「续下」已经说明了这是什么局
     return true;
   }
 
   /** After import: resume live play (and AI if needed). */
   function continueFromImport() {
-    if (!importPaused || result !== "play" || !history.length) {
-      toast(t(result !== "play" ? "continue.finished" : "continue.none"));
-      return;
-    }
+    if (!importPaused || result !== "play" || !history.length) return;
     importPaused = false;
-    goLive();
-    toast(t(mode === "ai" && !isHumanTurn() ? "continue.aiTurn" : "continue.yourTurn"));
+    goLive(); // 座位亮的那一方就是该走的(v2.0)
     maybeAiTurn();
   }
 
@@ -182,7 +168,7 @@
       return;
     }
     if (!text || !String(text).trim()) {
-      toast(t("clip.empty"));
+      toast(t("clip.fail"));
       return;
     }
     await importSgfFromText(String(text), t("clip.label"));
@@ -190,20 +176,19 @@
 
   async function importSgfFromPath(path) {
     if (!path) {
-      toast(t("file.badPath"));
+      toast(t("file.readFail"));
       return;
     }
     try {
       const text = await readTextFile(path);
       if (!text || !String(text).trim()) {
-        toast(t("file.empty"));
+        toast(t("file.readFail"));
         return;
       }
       const base = String(path).split(/[/\\]/).pop() || "sgf";
       await importSgfFromText(text, base);
     } catch (e) {
-      const msg = (e && e.message) || "";
-      toast(msg && msg.length < 48 ? t("file.readFail", { msg: msg }) : t("file.readFailGeneric"));
+      toast(t("file.readFail"));
     }
   }
 
@@ -218,13 +203,10 @@
         allowMultiple: false,
       });
       const paths = Host.normalizePaths(files);
-      if (!paths.length) {
-        toast(t("file.cancelled"));
-        return;
-      }
+      if (!paths.length) return; // 取消了,不用说
       await importSgfFromPath(paths[0]);
     } catch (e) {
-      toast(t("file.openFail"));
+      toast(t("file.readFail"));
     }
   }
 
@@ -467,31 +449,14 @@
   }
 
   async function requestHint() {
-    if (swap2) { toast(t("hint.swap2")); return; }
-    if (aiThinking || hintBusy) {
-      toast(t("hint.wait"));
-      return;
-    }
+    // v2.0:做不了的时候「提示」按钮本来就不可点 / 不在;按 H 也就安静地什么都不做,不再弹一句「不行」
+    if (swap2 || aiThinking || hintBusy) return;
     const live = isLive();
     if (live) {
-      if (result !== "play") {
-        toast(t("hint.over"));
-        return;
-      }
-      if (importPaused && mode === "ai" && !isHumanTurn()) {
-        toast(t("hint.needContinue"));
-        return;
-      }
-      // Hint for the side to move (human's turn in AI mode, or either in pvp)
-      if (mode === "ai" && !isHumanTurn()) {
-        toast(t("hint.aiTurn"));
-        return;
-      }
-    } else if (winLineAt(viewIndex)) {
-      // analysis mode works on any browsed position, except a finished one
-      toast(t("hint.alreadyFive"));
-      return;
-    }
+      if (result !== "play") return;
+      if (mode === "ai" && !isHumanTurn()) return; // 含导入后等「续下」的那一手
+    } else if (winLineAt(viewIndex)) return; // 翻到已成五的局面
+
     hintBusy = true;
     hoverCell = null;
     sync();
@@ -525,7 +490,7 @@
       }
     } catch (_) {
       if (gen === gameGen) {
-        toast(t("hint.fail"));
+        toast(t("hint.none"));
         hintCell = null;
       }
     } finally {
@@ -578,9 +543,6 @@
       if (s.lastHumanColor === "b" || s.lastHumanColor === "w") lastHumanColor = s.lastHumanColor;
       if (typeof s.soundOn === "boolean") soundOn = s.soundOn;
       if (s.themeId && THEMES[s.themeId]) themeId = s.themeId;
-      if (s.thinkLevel === "fast" || s.thinkLevel === "normal" || s.thinkLevel === "deep") {
-        thinkLevel = s.thinkLevel;
-      }
       if (typeof s.showCoords === "boolean") showCoords = s.showCoords;
       /* v1.72:analysisOn 已退役,旧设置里的这一项忽略 */
     } catch (_) {}
@@ -592,7 +554,7 @@
     // 临时改掉这一局的模式 / 执子 / 规则,但不该顺手改掉玩家在侧栏选的那几格。
     Host.storageSet(
       SETTINGS_KEY,
-      JSON.stringify(Object.assign(Session.prefsToStore(prefs), { soundOn, themeId, thinkLevel, showCoords, lastHumanColor }))
+      JSON.stringify(Object.assign(Session.prefsToStore(prefs), { soundOn, themeId, showCoords, lastHumanColor }))
     );
   }
 
@@ -730,11 +692,6 @@
     if (!winner) { Audio2.playEnd("draw"); return; }
     if (mode === "ai" && winner !== humanColor) { Audio2.playEnd("loss"); return; }
     Audio2.playEnd("win");
-  }
-
-  /** Point users at real macOS window chrome — not web Fullscreen API. */
-  function toggleFullscreen() {
-    toast(t("fs.tip"));
   }
 
   function serialize() {
@@ -957,7 +914,7 @@
    * 而不是藏进发布说明。
    */
   function openReview() {
-    if (history.length < 2) { toast(t("review.empty")); return; }
+    if (history.length < 2) return; // 「复盘」入口不足两手时本来就不在
     // v1.76:进了复盘也要出得来 —— 关闭时回到最后一手,终局卡回来(见 closeReview)
     // v1.64:复盘只有侧栏这一个面。终局卡是它的摘要,复盘一开,摘要让位。
     hideEndCard();
@@ -1022,7 +979,7 @@
   }
 
   async function exportReviewSgf() {
-    if (history.length < 2) { toast(t("review.tooShort")); return; }
+    if (history.length < 2) return;
     await exportSgfString(buildAnnotatedSgf(), "review-" + sgfFileName());
   }
 
@@ -1057,7 +1014,7 @@
     const pv = computePV(viewIndex);
     variationCells = pv.length ? pv : null;
     sync();
-    toast(pv.length ? t("pv.done", { n: pv.length }) : t("pv.none"));
+    if (!pv.length) toast(t("pv.none")); // 摆出来了就不用再说一遍
   }
 
   // --- v1.63: 复盘第二遍(引擎比较) ---
@@ -1127,7 +1084,7 @@
     Review.setSideOpen(false);
     sync();
     saveGame();
-    toast(t("retry.started", { n: ply }));
+    // v2.0:重下卡片已经写着「重下第 N 手」,不再弹一句同样的话(B26)
     maybeAiTurn();
   }
 
@@ -1241,7 +1198,10 @@
     if (reviewBtn) reviewBtn.hidden = !!retry;
     // v1.71:终局卡只留两个动作(重下关键一手 · 看复盘);「再来一局」就是顶栏高亮的「新局」,
     // 只在重下线上留一个「再试一次」—— 那是练习闭环里的下一步,顶栏没有它
-    if (againBtn) againBtn.hidden = !retry;
+    if (againBtn) {
+      againBtn.hidden = !retry;
+      if (retry) againBtn.textContent = t("endcard.retry", { n: retry.ply });
+    }
   }
 
 
@@ -1265,7 +1225,7 @@
     const retryBtn = document.getElementById("end-card-retry");
     if (retryBtn) retryBtn.onclick = () => { startRetry(Number(retryBtn.dataset.ply)); };
     const backBtn = document.getElementById("end-card-back");
-    if (backBtn) backBtn.onclick = () => { endRetry(true); toast(t("retry.back")); };
+    if (backBtn) backBtn.onclick = () => { endRetry(true); };
     const reviewBtn = document.getElementById("end-card-review");
     if (reviewBtn) reviewBtn.onclick = () => { openReview(); };
     const againBtn = document.getElementById("end-card-again");
@@ -1286,17 +1246,12 @@
     });
     const retryBtn = document.getElementById("review-side-retry");
     if (retryBtn) retryBtn.onclick = () => { if (Review.explain(viewIndex)) startRetry(viewIndex); };
-    const practiceBtn = document.getElementById("review-side-practice");
-    if (practiceBtn) practiceBtn.onclick = () => {
-      const gid = lastArchiveId;
-      if (!gid || !Practice.openFor(gid, viewIndex)) toast(t("practice.noneForMove"));
-    };
     const pvBtn = document.getElementById("review-side-pv");
     if (pvBtn) pvBtn.onclick = () => { runVariation(); };
     const closeBtn = document.getElementById("review-side-close");
     if (closeBtn) closeBtn.onclick = () => { closeReview(); };
     const retryBack = document.getElementById("retry-back");
-    if (retryBack) retryBack.onclick = () => { endRetry(true); toast(t("retry.back")); };
+    if (retryBack) retryBack.onclick = () => { endRetry(true); };
   }
 
   // --- v1.63: 对局库 ---
@@ -1333,7 +1288,6 @@
     }
     setViewIndex(typeof ply === "number" ? Math.max(0, Math.min(ply, history.length)) : history.length);
     saveGame();
-    toast(t(resume ? "games.resumed" : "games.opened"));
     if (resume) maybeAiTurn();
   }
 
@@ -1344,38 +1298,47 @@
     const arr = Archive.load();
     if (empty) empty.hidden = arr.length > 0;
     list.innerHTML = "";
+    // v2.0:一局一行 —— 「胜 · 今天 12:31 · 普通 · 23 手」,点整行以复盘打开(没下完的接着下);删除收在行尾
+    const now = new Date();
+    const dayKey = (d) => d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
+    const yest = new Date(now.getTime() - 86400000);
     for (const g of arr.slice(0, 20)) {
       const row = document.createElement("div");
       row.className = "slot-row game-row";
       row.dataset.id = g.id;
-      const name = document.createElement("div");
-      name.className = "game-name";
       const d = new Date(g.endedAt || Date.now());
       const p = (n) => String(n).padStart(2, "0");
-      const when = p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
-      const res = g.result === "play" ? t("result.playing") : g.mode === "ai"
-        ? t(g.result === "draw" ? "result.draw" : g.result === g.humanColor ? "games.win" : "games.loss")
-        : t(g.result === "b" ? "result.blackWin" : g.result === "w" ? "result.whiteWin" : "result.draw");
-      name.textContent = t("games.row", {
-        when: when, result: res, moves: g.history.length,
+      const hm = p(d.getHours()) + ":" + p(d.getMinutes());
+      const when = dayKey(d) === dayKey(now) ? t("games.today", { t: hm })
+        : dayKey(d) === dayKey(yest) ? t("games.yesterday", { t: hm })
+          : p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + hm;
+      const res = g.result === "play" ? t("games.res.playing") : g.mode === "ai"
+        ? t(g.result === "draw" ? "games.res.draw" : g.result === g.humanColor ? "games.res.win" : "games.res.loss")
+        : t(g.result === "b" ? "games.res.b" : g.result === "w" ? "games.res.w" : "games.res.draw");
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "game-open";
+      open.dataset.id = g.id;
+      const r = document.createElement("span");
+      r.className = "game-res" + (g.mode === "ai" && g.result === g.humanColor ? " won" : "");
+      r.textContent = res;
+      const w = document.createElement("span");
+      w.className = "game-when";
+      w.textContent = when;
+      const meta = document.createElement("span");
+      meta.className = "game-meta muted";
+      meta.textContent = t("games.meta", {
         mode: g.mode === "ai" ? t("diff." + (g.difficulty || "normal") + ".full") : t("mode.pvp"),
-        rule: g.ruleSet === "renju" ? t("rule.renju") : t("rule.free"),
+        moves: g.history.length,
+        rule: g.ruleSet === "renju" ? t("games.renjuTag") : "",
       });
-      const ops = document.createElement("div");
-      ops.className = "slot-ops";
-      for (const spec of [
-        { cls: "text-link game-open", key: "games.review" },
-        { cls: "text-link danger game-del", key: "slots.del" },
-      ]) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = spec.cls;
-        btn.dataset.id = g.id;
-        btn.textContent = t(spec.key);
-        ops.appendChild(btn);
-      }
-      row.appendChild(name);
-      row.appendChild(ops);
+      open.append(r, w, meta);
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "text-link danger game-del";
+      del.dataset.id = g.id;
+      del.textContent = t("slots.del");
+      row.append(open, del);
       list.appendChild(row);
     }
   }
@@ -1619,7 +1582,7 @@
 
   function hideSwap2Bar() { Ui.hideSwap2Bar(appEl); }
 
-  function renderSwap2Bar() { Ui.renderSwap2Bar(appEl, swap2, history.length); }
+  function renderSwap2Bar() { Ui.renderSwap2Bar(appEl, swap2, history.length, mode === "ai"); }
 
   /** Lay one opening stone (strictly alternating by parity). */
   function swap2PlaceStone(r, c, fromAi) {
@@ -1661,7 +1624,7 @@
     const evalB = Ai.evaluateBoard(bd, "b");
     const evalW = Ai.evaluateBoard(bd, "w");
     const aiTakesWhite = evalW >= evalB; // white also moves next → tempo
-    toast(t(aiTakesWhite ? "swap2.aiWhite" : "swap2.aiBlack"));
+    // 选完以后座位上写着谁执黑谁执白,不再弹一句
     settleSwap2(aiTakesWhite ? "b" : "w"); // human gets the other side
   }
 
@@ -1743,13 +1706,8 @@
     showEndCard();
   }
 
-  /** v1.71:战绩并进「对局记录」弹层,和存档、历史对局一处看 */
-  function renderStatsIn() {
-    Stats.render();
-    const body = document.getElementById("stats-body");
-    const clear = document.getElementById("stats-clear");
-    if (clear) clear.hidden = !body || body.hidden;
-  }
+  /** v2.0:「对局」弹层头上一行汇总(按难度分行的战绩表退役) */
+  function renderStatsIn() { Stats.render(); }
 
   function place(r, c, fromAi) {
     if (swap2) {
@@ -1759,7 +1717,8 @@
     if (result !== "play") return;
     if (!isLive()) {
       if (!fromAi) {
-        toast(t("place.needLive"));
+        // v2.0(B24):翻看前面的手时点棋盘,意思就是「回到现在」—— 直接回去,不数落
+        goLive();
         return;
       }
       // AI reply landed while the user browses the replay: snap to live and
@@ -1975,6 +1934,7 @@
     // The same 500ms tick advances the think counter; sync() only runs at the
     // start and end of a think, so without this the seconds would never move.
     // 练习时顶栏写的是题目进度,不让思考计时把它盖掉
+    if (aiThinking) syncSeats(); // 想过 3 秒,座位里写秒数
     if (aiThinking && !practiceStatus) {
       const st = document.getElementById("status");
       if (st) st.textContent = thinkingText();
@@ -1998,9 +1958,6 @@
     document.querySelectorAll("#diff-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.diff === S.difficulty);
     });
-    document.querySelectorAll("#think-seg button").forEach((b) => {
-      b.classList.toggle("active", b.dataset.think === S.think);
-    });
     document.querySelectorAll("#color-seg button").forEach((b) => {
       b.classList.toggle("active", b.dataset.human === S.color);
     });
@@ -2015,28 +1972,8 @@
     });
     const aiOnly = S.mode === "ai";
     const diffField = document.getElementById("diff-field");
-    const thinkField = document.getElementById("think-field");
     const colorField = document.getElementById("color-field");
     if (diffField) diffField.hidden = !aiOnly;
-    if (thinkField) {
-      thinkField.hidden = !(aiOnly && (S.difficulty === "hard" || S.difficulty === "extreme"));
-      // Titles track the active difficulty budget (hard ≠ extreme wall times)
-      const titles =
-        S.difficulty === "extreme"
-          ? { fast: t("think.fast.max.title"), normal: t("think.normal.max.title"), deep: t("think.deep.max.title") }
-          : { fast: t("think.fast.hard.title"), normal: t("think.normal.hard.title"), deep: t("think.deep.hard.title") };
-      document.querySelectorAll("#think-seg button[data-think]").forEach((b) => {
-        const t = titles[b.dataset.think];
-        if (t) b.title = t;
-      });
-      const thinkGroup = document.getElementById("think-seg");
-      if (thinkGroup) {
-        thinkGroup.setAttribute(
-          "aria-label",
-          t(S.difficulty === "extreme" ? "aria.thinkMax" : "aria.think")
-        );
-      }
-    }
     // swap2 decides the human's color via the opening protocol, so hide 执子 then
     // swap2 由开局协议定执子 —— 看的是卡片里选的规则
     if (colorField) colorField.hidden = !aiOnly || S.rule === "swap2";
@@ -2072,6 +2009,56 @@
     el.textContent = parts.join(" · ");
   }
 
+  /**
+   * v2.0 对阵条:两个座位代替「黑棋落子 · 你执黑 · 普通」。轮到谁,谁的座位亮;电脑想的时候它的座位里
+   * 三个点在动(想过 3 秒再写秒数);下完了赢的一方写「胜」、输的一方变淡,和棋两边都写「和」。
+   * 还没开局两边都不亮;swap2 开局里执子还没定,座位只写黑 / 白、不亮(说明只在棋盘上的提示条里)。
+   * 状态那句话仍写在 #status 里,只给读屏。
+   */
+  function syncSeats() {
+    const practicing = appEl.classList.contains("practicing");
+    const label = document.getElementById("chrome-label");
+    if (label) { label.hidden = !practicing; label.textContent = practicing ? t("foot.practice") : ""; }
+    const ruleTag = document.getElementById("rule-tag");
+    const rc = ruleChoice();
+    if (ruleTag) { ruleTag.hidden = rc === "free"; ruleTag.textContent = rc === "free" ? "" : t("rule." + rc); }
+    const opening = !!swap2;
+    const started = history.length > 0 || aiThinking;
+    for (const c of ["b", "w"]) {
+      const seat = document.getElementById("seat-" + c);
+      if (!seat) continue;
+      const ai = mode === "ai" && !opening;
+      const isAi = ai && c !== humanColor;
+      const name = ai ? t(isAi ? "seat.ai" : "seat.you") : t(c === "b" ? "side.black" : "side.white");
+      document.getElementById("seat-" + c + "-name").textContent = name;
+      const sub = document.getElementById("seat-" + c + "-sub");
+      const thinking = isAi && aiThinking && result === "play";
+      const level = isAi ? t("diff." + difficulty + ".full") : "";
+      const secs = thinking && thinkStartedAt ? Math.floor((performance.now() - thinkStartedAt) / 1000) : 0;
+      const after = thinking && secs >= 3 ? t("seat.secs", { s: secs }) : "";
+      const sig = level + "|" + thinking + "|" + after;
+      if (sub.dataset.sig !== sig) {
+        sub.dataset.sig = sig;
+        sub.textContent = level;
+        if (thinking) {
+          const dots = document.createElement("span");
+          dots.className = "seat-dots";
+          dots.append(document.createElement("i"), document.createElement("i"), document.createElement("i"));
+          sub.append(" ", dots);
+          if (after) sub.append(" " + after);
+        }
+      }
+      const over = result === "b" || result === "w" || result === "draw";
+      const won = result === c, drew = result === "draw";
+      // 下完了,亮的是赢的一方
+      seat.classList.toggle("on", over ? won : !opening && started && turn === c);
+      seat.classList.toggle("lose", over && !won && !drew);
+      const tag = document.getElementById("seat-" + c + "-tag");
+      tag.hidden = !(won || drew);
+      tag.textContent = won ? t("seat.win") : drew ? t("seat.draw") : "";
+    }
+  }
+
   /** v1.74:一条时间线代替手数列表与三个翻页按钮。悬停 / 读屏报「第 N 手 · H8」。 */
   function syncTimeline() {
     const tl = document.getElementById("timeline");
@@ -2100,6 +2087,7 @@
     // 这一局的规则(设置里亮的是偏好,可能是「下一局起」):给读屏之外的东西(测试、样式)一个稳定的钩子
     appEl0.dataset.rule = ruleChoice();
     syncMatch();
+    syncSeats();
     syncTimeline();
     updateClock();
 
@@ -2109,8 +2097,6 @@
     });
     // v1.73:「新局」只在一局结束后是主按钮
     document.getElementById("btn-new").classList.toggle("primary", result !== "play");
-    document.getElementById("sgf-copy").disabled = history.length === 0;
-    document.getElementById("sgf-download").disabled = history.length === 0;
     const contBtn = document.getElementById("sgf-continue");
     if (contBtn) {
       const showCont = importPaused && result === "play" && history.length > 0;
@@ -2132,8 +2118,6 @@
     }
 
 
-    const thinkDot = document.getElementById("think-dot");
-    if (thinkDot) thinkDot.hidden = !(aiThinking && result === "play");
 
     // Crosshair only when a click can place; otherwise default (AI/replay/end)
     const placePhase = !!(swap2 && (swap2.phase === "place" || swap2.phase === "place2"));
@@ -2177,20 +2161,12 @@
     const undoTop = document.getElementById("undo");
     if (undoTop) undoTop.hidden = reviewing;
     Review.renderSide();
-    // 重下线上第 ply 手之后的着法不在原局里:从那里「重下」或「练这一手」都会落到原局
-    // 同号的另一手上(v1.63.1)。只留推演。
+    // 重下线上第 ply 手之后的着法不在原局里:从那里「重下」会落到原局同号的另一手上(v1.63.1)。只留推演。
     const offOriginal = !!retry && viewIndex > retry.ply;
-    for (const id of ["review-side-retry", "review-side-practice"]) {
-      const b = document.getElementById(id);
-      if (b) b.hidden = offOriginal;
-    }
-    // v1.71:「练这一手」只在题库真能出这道题时出现(此前按「可证明的失着」显示,点下去常是「没有可练的题」)
-    const practiceSide = document.getElementById("review-side-practice");
-    const sideOpen = !document.getElementById("review-side").hidden;
-    if (practiceSide && !practiceSide.hidden && sideOpen) {
-      let ok = false;
-      try { ok = !!lastArchiveId && Practice.hasPuzzleFor(lastArchiveId, viewIndex); } catch (_) { ok = false; }
-      practiceSide.hidden = !ok;
+    const sideRetry = document.getElementById("review-side-retry");
+    if (sideRetry) {
+      sideRetry.hidden = offOriginal;
+      sideRetry.textContent = t("endcard.retry", { n: viewIndex });
     }
     // v1.71:没有可复盘的(不足两手)就不显示「复盘」,不再是一个只会说「先下几手」的按钮
     const reviewBtn = document.getElementById("sgf-review");
@@ -2245,8 +2221,6 @@
     });
   }
   wireMenus();
-  document.getElementById("sgf-copy").onclick = () => { copySgf(); };
-  document.getElementById("sgf-download").onclick = () => { downloadSgf(); };
   const contEl = document.getElementById("sgf-continue");
   if (contEl) contEl.onclick = () => { continueFromImport(); };
   // v1.70:这四个住在存档弹层里。导入 / 粘贴会换掉当前对局,先关弹层,让人看见换上来的棋
@@ -2309,16 +2283,6 @@
   Practice.wire();
   const practiceEl = document.getElementById("open-practice");
   if (practiceEl) practiceEl.onclick = () => { Practice.open(); };
-  const statsClearEl = document.getElementById("stats-clear");
-  if (statsClearEl) {
-    statsClearEl.onclick = async () => {
-      if (!(await confirmNative(t("stats.clearConfirm"), t("stats.clearTitle"), { ok: t("stats.clear"), cancel: t("dlg.cancel") }))) return;
-      Stats.clear();
-      renderStatsIn();
-      toast(t("stats.cleared"));
-    };
-  }
-
   const reviewEl = document.getElementById("sgf-review");
   if (reviewEl) reviewEl.onclick = () => { openReview(); };
   wireReviewSide();
@@ -2374,7 +2338,6 @@
     saveSettings();
     syncSettingsUI();
     if (soundOn) playMoveSound("b");
-    toast(t(soundOn ? "toast.soundOn" : "toast.soundOff"));
   };
   const coordsBtn = document.getElementById("opt-coords");
   if (coordsBtn) {
@@ -2383,7 +2346,6 @@
       saveSettings();
       syncSettingsUI();
       draw();
-      toast(t(showCoords ? "toast.coordsOn" : "toast.coordsOff"));
     };
   }
   const swap2Btns = document.getElementById("swap2-btns");
@@ -2398,7 +2360,7 @@
   const confirmModal = document.getElementById("confirm-modal");
   // --- v1.74: 「新局」卡片与「⋯」菜单 ---
   function sheetChoice() {
-    return sheet || { mode: mode, difficulty: difficulty, think: thinkLevel, color: Session.colorChoice(prefs), rule: prefs.rule };
+    return sheet || { mode: mode, difficulty: difficulty, color: Session.colorChoice(prefs), rule: prefs.rule };
   }
   function placePopover(el, anchor) {
     const r = anchor.getBoundingClientRect();
@@ -2408,7 +2370,7 @@
   function openSheet() {
     closeMenu();
     // 执子偏好里有「auto」(低档执黑、高档轮流),三格里没有它 —— 没点过执子就不改偏好
-    sheet = { mode: mode, difficulty: prefs.difficulty || difficulty, think: thinkLevel, color: Session.colorChoice(prefs), colorTouched: false, rule: prefs.rule };
+    sheet = { mode: mode, difficulty: prefs.difficulty || difficulty, color: Session.colorChoice(prefs), colorTouched: false, rule: prefs.rule };
     // 上一局是库里的旧局 / 重下时,这一局的模式可能不是偏好;新局从偏好开
     sheet.mode = prefs.mode || mode;
     const anchor = document.getElementById("btn-new");
@@ -2437,17 +2399,11 @@
     }
     applyMode(S.mode);
     difficulty = prefs.difficulty = S.difficulty;
-    thinkLevel = S.think;
     if (S.colorTouched) prefs.humanColor = S.color;
-    const ruleChanged = S.rule !== ruleChoice();
     prefs.rule = S.rule;
     saveSettings();
     reset({ keepSettings: true });
-    // 换了规则,开局时说一句这个规则是什么(swap2 人机还要说清你执白)
-    if (ruleChanged) toast(t(
-      S.rule === "renju" ? "toast.ruleRenju"
-        : S.rule === "swap2" ? (mode === "ai" ? "toast.ruleSwap2Ai" : "toast.ruleSwap2")
-          : "toast.ruleFree"));
+    // v2.0:换了规则不再弹一句;座位后面挂着规则标签,swap2 的说明在棋盘上的提示条里
   }
   function openMenu() {
     closeSheet();
@@ -2493,7 +2449,6 @@
     };
     pick("mode-seg", "data-mode", (v) => { sheet.mode = v; });
     pick("diff-seg", "data-diff", (v) => { sheet.difficulty = v; });
-    pick("think-seg", "data-think", (v) => { sheet.think = v; });
     pick("color-seg", "data-human", (v) => { sheet.color = v; sheet.colorTouched = true; });
     pick("rule-seg", "data-rule", (v) => { if (v === "free" || v === "swap2" || v === "renju") sheet.rule = v; });
     document.getElementById("new-start").onclick = () => { startFromSheet(); };
@@ -2608,34 +2563,12 @@
     if (ev.key === "End") { ev.preventDefault(); setViewIndex(history.length); return; }
     if ((ev.metaKey || ev.ctrlKey) && k === "z") { ev.preventDefault(); undo(); }
     else if ((ev.metaKey || ev.ctrlKey) && k === "n") { ev.preventDefault(); requestNewGame(); }
-    else if ((ev.metaKey || ev.ctrlKey) && k === "1") {
-      ev.preventDefault();
-      if (mode === "pvp") return;
-      (async () => {
-        if (history.length && !(await confirmNative(t("confirm.switchToPvp"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
-        applyMode("pvp");
-        saveSettings();
-        reset({ keepSettings: true });
-        toast(t("toast.modePvp"));
-      })();
-    } else if ((ev.metaKey || ev.ctrlKey) && k === "2") {
-      ev.preventDefault();
-      if (mode === "ai") return;
-      (async () => {
-        if (history.length && !(await confirmNative(t("confirm.switchToAi"), t("confirm.switchModeTitle"), { ok: t("confirm.switchOk"), cancel: t("dlg.cancel") }))) return;
-        applyMode("ai");
-        saveSettings();
-        reset({ keepSettings: true });
-        toast(t("toast.modeAi"));
-      })();
-    } else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
+    // v2.0:⌘1 / ⌘2 退役 —— 换模式只在「新局」卡片里
+    else if (k === "z" && !ev.metaKey && !ev.ctrlKey) undo();
     else if (k === "n" && !ev.metaKey && !ev.ctrlKey) requestNewGame();
     else if (k === "h" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
       ev.preventDefault();
       requestHint();
-    }
-    else if (k === "f" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
-      toggleFullscreen();
     }
   });
 
@@ -2655,12 +2588,10 @@
     if (!id) return;
     if (id === "goban.new") requestNewGame();
     else if (id === "goban.undo") undo();
-    else if (id === "goban.sgf-copy") copySgf();
     else if (id === "goban.sgf-export") downloadSgf();
     else if (id === "goban.sgf-paste") pasteSgfFromClipboard();
     else if (id === "goban.sgf-continue") continueFromImport();
     else if (id === "goban.hint") requestHint();
-    else if (id === "goban.fullscreen") toggleFullscreen(); // system FS hint toast
   }
 
   if (hasZero() && typeof window.zero.on === "function") {
@@ -2691,7 +2622,6 @@
   if (resumed) {
     gameGen += 1;
     if (result !== "play" && lastStatsEndedAt) statsRecordedGen = gameGen;
-    toast(t("game.restored"));
   } else {
     startedAt = Date.now();
     originalStartedAt = startedAt;
@@ -2734,17 +2664,17 @@
     try {
       const files = await Host.openFileDialog({ title: t("backup.import"), allowMultiple: false });
       const paths = Host.normalizePaths(files);
-      if (!paths.length) { toast(t("file.cancelled")); return; }
+      if (!paths.length) return; // 取消了,不用说
       text = await readTextFile(paths[0]);
     } catch (_) {
-      toast(t("file.openFail"));
+      toast(t("file.readFail"));
       return;
     }
     // Validate BEFORE asking: no point warning about an irreversible
     // overwrite that the file cannot perform anyway.
     const chk = Backup.inspect(text);
     if (!chk.ok) {
-      toast(t(chk.error === "version" ? "backup.badVersion" : chk.error === "empty" ? "backup.empty" : "backup.badFile"));
+      toast(t(chk.error === "version" ? "backup.badVersion" : "backup.badFile"));
       return;
     }
     const go = await confirmNative(t("backup.confirm"), t("backup.confirmTitle"),

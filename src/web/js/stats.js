@@ -203,82 +203,20 @@
     };
   }
 
-  function fmtDuration(ms) {
-    const m = Math.floor(ms / 60000);
-    if (m < 60) return t("stats.minutes", { n: m });
-    return t("stats.hours", { n: (m / 60).toFixed(1) });
-  }
-
-  /** 每日挑战 line from practice.js (loaded before us; render runs on click). */
-  function dailyLine() {
-    const P = global.GobanPractice;
-    const d = P && P.dailySummary ? P.dailySummary() : null;
-    if (!d) return "";
-    return "<div class='stats-line'>" + t("stats.dailyLine", {
-      days: d.daysDone, streak: d.streak, best: d.bestStreak,
-      today: d.todayDone ? t("stats.dailyToday") : "",
-    }) + "</div>";
-  }
-
-  /** 战术练习 progress line (per-puzzle memory added in v1.27). */
-  function practiceLine() {
-    const P = global.GobanPractice;
-    const s = P && P.practiceSummary ? P.practiceSummary() : null;
-    if (!s || !s.seen) return "";
-    return "<div class='stats-line'>" + t("stats.practiceLine", {
-      seen: s.seen, total: s.total, mastered: s.mastered,
-      wrong: (s.wrong ? t("stats.practiceWrong", { n: s.wrong }) : "") +
-        (s.due ? t("stats.practiceDue", { n: s.due }) : ""),
-    }) + "</div>";
-  }
-
-  /** Fill #stats-body with the aggregate tables. */
+  /**
+   * v2.0:「对局」弹层头上的一行汇总 —— 「12 局 · 胜 7 · 负 4 · 平 1 · 连胜 3」。
+   * 胜负平按人机算(双人局只计入局数);按难度分行的表、每日 / 练习两行退役:
+   * 每日打卡在做完当天五题时说,练习进度在练习里看。
+   */
   function render() {
     const body = document.getElementById("stats-body");
-    const empty = document.getElementById("stats-empty");
     if (!body) return;
     const a = aggregate();
-    const daily = dailyLine() + practiceLine();
-    const hasAny = a.games > 0 || !!daily;
-    if (empty) empty.hidden = hasAny;
-    body.hidden = !hasAny;
-    // 「清空」清的是**对局统计**,所以它的可用状态要跟对局数走 —— 不是跟 hasAny。
-    // v1.39 修掉了「零对局时照样可点」,判据却写成 hasAny(= 有对局 或 有每日打卡),
-    // 于是「做过每日挑战、一局没下完」这个很常见的状态下按钮又活了过来:实测点下去、
-    // 确认,正文一个字都不变 —— clear() 根本不碰每日打卡。
-    const clearBtn = document.getElementById("stats-clear");
-    if (clearBtn) clearBtn.disabled = a.games === 0;
-    if (!hasAny) { body.innerHTML = ""; return; }
-    if (a.games === 0) { body.innerHTML = daily; return; }
-    const names = {
-      easy: t("diff.easy.full"), normal: t("diff.normal.full"),
-      hard: t("diff.hard.full"), extreme: t("diff.extreme.full"),
-    };
-    let rows = "";
-    for (const d of ["easy", "normal", "hard", "extreme"]) {
-      const b = a.ai[d];
-      if (!b || b.w + b.l + b.d === 0) continue;
-      const total = b.w + b.l + b.d;
-      const rate = Math.round((b.w / total) * 100);
-      rows +=
-        "<tr><td>" + names[d] + "</td><td class='num'>" + b.w + "</td><td class='num'>" +
-        b.l + "</td><td class='num'>" + b.d + "</td><td class='num'>" + rate + "%</td></tr>";
-    }
-    const aiTable = rows
-      ? "<table class='stats-table'>" + t("stats.aiTable") + rows + "</table>"
-      : "";
-    const pvpLine = a.pvp.games
-      ? "<div class='stats-line'>" +
-        t("stats.pvpLine", { games: a.pvp.games, b: a.pvp.b, w: a.pvp.w, d: a.pvp.d }) + "</div>"
-      : "";
-    body.innerHTML =
-      aiTable + pvpLine +
-      "<div class='stats-line'>" +
-        t("stats.streakLine", { cur: a.curStreak, best: a.bestStreak }) + "</div>" +
-      daily +
-      "<div class='stats-line muted2'>" + t("stats.totalLine", {
-        games: a.games, moves: a.totalMoves, time: fmtDuration(a.totalMs),
-      }) + "</div>";
+    if (!a.games) { body.textContent = ""; body.hidden = true; return; }
+    let w = 0, l = 0, d = 0;
+    for (const k of Object.keys(a.ai)) { w += a.ai[k].w; l += a.ai[k].l; d += a.ai[k].d; }
+    body.hidden = false;
+    body.textContent = t("stats.summary", { games: a.games, w: w, l: l, d: d, cur: a.curStreak });
   }
 
   global.GobanStats = { record, unrecordByEndedAt, clear, aggregate, render };

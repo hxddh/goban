@@ -175,7 +175,8 @@ async function answerRound(expectAllCorrect) {
   await page.click("#more-btn"); await page.click("#open-practice"); // v1.74:入口在「⋯」里
   await page.waitForTimeout(150);
   const freeTitle = await modalText("practice-title");
-  await page.click('#practice-skill [data-skill="daily"]');
+  // v2.0:题型是卡片头上的一个下拉
+  await page.evaluate(() => { const s = document.getElementById("practice-skill"); s.value = "daily"; s.dispatchEvent(new Event("change", { bubbles: true })); });
   await page.waitForTimeout(150);
   const task = await modalText("practice-task");
   const fb = await modalText("practice-feedback");
@@ -201,16 +202,14 @@ async function answerRound(expectAllCorrect) {
   await page.waitForTimeout(80);
 }
 
-// ---- Test 5: stats panel shows the daily line (no finished games yet) ----
+// ---- Test 5 (v2.0): 「对局」头上只有对局汇总 —— 每日打卡不再写在这里(做完当天五题时说,见 Test 3) ----
 {
-  await page.click("#more-btn"); await page.click("#sgf-slots"); // v1.74:入口在「⋯」里 // v1.71:战绩并进「记录」
+  await page.click("#more-btn"); await page.click("#sgf-slots");
   await page.waitForTimeout(120);
-  const body = await modalText("stats-body");
-  const emptyHidden = await page.evaluate(
-    () => document.getElementById("stats-empty").hidden);
-  report("5 stats shows daily check-in line",
-    /每日挑战 打卡 1 天/.test(body) && /今日已完成/.test(body) && emptyHidden,
-    JSON.stringify({ body: body.slice(0, 60), emptyHidden }));
+  const r = await page.evaluate(() => { const b = document.getElementById("stats-body"); return { text: b.textContent, hidden: b.hidden }; });
+  report("5 「对局」里不再有每日打卡那一行;还没下完一局时汇总不显示",
+    !/每日挑战|打卡/.test(r.text) && r.hidden,
+    JSON.stringify(r));
   await page.click("#slots-close");
   await page.waitForTimeout(80);
 }
@@ -242,7 +241,7 @@ async function answerRound(expectAllCorrect) {
   await clickMini(0, 0);
   await page.waitForTimeout(200);
   const afterWrong = await page.evaluate(() => ({
-    btn: document.getElementById("practice-wrong").textContent,
+    btn: document.querySelector('#practice-skill option[value="wrong"]').textContent, // v2.0:错题本是下拉里的一项
     stored: JSON.parse(localStorage.getItem("goban.v12.practice") || "null"),
   }));
   const collected = !!afterWrong.stored &&
@@ -250,7 +249,7 @@ async function answerRound(expectAllCorrect) {
     /错题本 1/.test(afterWrong.btn);
 
   // enter 错题本: exactly that one puzzle
-  await page.click("#practice-wrong");
+  await page.evaluate(() => { const s = document.getElementById("practice-skill"); s.value = "wrong"; s.dispatchEvent(new Event("change", { bubbles: true })); });
   await page.waitForTimeout(400);
   const inBook = await page.evaluate(() => ({
     title: document.getElementById("practice-title").textContent,
@@ -266,7 +265,7 @@ async function answerRound(expectAllCorrect) {
   });
   if (sol) { await clickMini(sol.r, sol.c); await page.waitForTimeout(250); }
   const afterRight = await page.evaluate(() => ({
-    btn: document.getElementById("practice-wrong").textContent,
+    btn: document.querySelector('#practice-skill option[value="wrong"]').textContent,
     left: window.GobanPractice.progress.unmastered(
       window.GobanPractice.puzzles.buildCandidates(),
       JSON.parse(localStorage.getItem("goban.v12.practice") || "{}")).length,
