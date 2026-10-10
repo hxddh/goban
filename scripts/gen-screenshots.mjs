@@ -85,7 +85,7 @@ const state = (p) =>
   p.evaluate(() => ({
     status: document.getElementById("status").textContent.trim(),
     moves: document.getElementById("replay-pos").textContent.trim(),
-    thinking: !document.getElementById("think-dot").hidden,
+    thinking: !!document.querySelector("#seats .seat-dots"), // v2.0:思考时电脑座位里三个点
   }));
 
 /** 人手落一子，然后等电脑应手（手数 +2）或终局。 */

@@ -24,9 +24,16 @@
 
   <div id="app">
     <header class="chrome">
-      <span class="status-pill" id="status" role="status" aria-live="polite" data-i18n="status.blackTurn">黑棋落子</span>
-      <!-- v1.74:侧栏顶上的对阵行并进顶栏 —— 你执哪色、对哪一档,一句话 -->
-      <span class="meta-chip" id="match"></span>
+      <!-- v2.0:顶栏左边是两个座位 —— 轮到谁,谁的座位亮;电脑想的时候,它的座位里三个点在动;
+           下完了,赢的一方写「胜」。状态那句话与「你执黑 · 普通」不再显示,只留给读屏(下面两个 sr-only) -->
+      <div class="seats" id="seats" aria-hidden="true">
+        <span class="seat" id="seat-b"><span class="seat-stone b"></span><span class="seat-name" id="seat-b-name"></span><span class="seat-sub" id="seat-b-sub"></span><span class="seat-tag" id="seat-b-tag" hidden></span></span>
+        <span class="seat" id="seat-w"><span class="seat-stone w"></span><span class="seat-name" id="seat-w-name"></span><span class="seat-sub" id="seat-w-sub"></span><span class="seat-tag" id="seat-w-tag" hidden></span></span>
+        <span class="rule-tag" id="rule-tag" hidden></span>
+      </div>
+      <span class="chrome-label" id="chrome-label" hidden></span>
+      <span class="sr-only" id="status" role="status" aria-live="polite" data-i18n="status.blackTurn">黑棋落子</span>
+      <span class="sr-only" id="match"></span>
       <span class="meta-chip num" id="clock">00:00</span>
       <span class="spacer"></span>
       <div class="chrome-actions">
@@ -48,7 +55,6 @@
         <div class="sr-only" id="board-announce" role="status" aria-live="polite"></div>
         <!-- v1.75:练习时题目画在这里,与对局棋盘同一个位置、同样大 -->
         <canvas id="practice-board" class="practice-board" hidden title="点击落子作答" data-i18n-title="practice.board.title"></canvas>
-        <div class="think-dot" id="think-dot" hidden aria-hidden="true"></div>
         <div class="swap2-bar" id="swap2-bar" hidden role="group" aria-label="平衡开局选择" data-i18n-aria="aria.swap2">
           <span class="swap2-msg" id="swap2-msg" role="status" aria-live="polite"></span>
           <div class="swap2-btns" id="swap2-btns"></div>
@@ -79,7 +85,7 @@
           <button type="button" class="tool-btn primary" id="end-card-retry" hidden data-i18n="endcard.retryBtn">重下</button>
           <button type="button" class="tool-btn" id="end-card-back" hidden data-i18n="retry.backBtn">回到原局</button>
           <button type="button" class="tool-btn" id="end-card-review" data-i18n="endcard.review">看复盘</button>
-          <button type="button" class="tool-btn" id="end-card-again" hidden data-i18n="endcard.retryAgain">再试一次</button>
+          <button type="button" class="tool-btn" id="end-card-again" hidden></button>
         </div>
       </section>
       <div class="retry-bar" id="retry-bar" hidden role="status">
@@ -100,8 +106,8 @@
         <div class="review-chips" id="review-side-chips"></div>
         <div class="review-explain" id="review-side-explain"></div>
         <div class="review-side-actions" id="review-side-actions" hidden>
-          <button type="button" class="tool-btn primary" id="review-side-retry" data-i18n="review.side.retry">重下这一手</button>
-          <button type="button" class="tool-btn" id="review-side-practice" data-i18n="review.side.practice">练这一手</button>
+          <!-- v2.0:「重下」只有一个名字 —— 终局卡、复盘卡、重下线下完,一律「从第 N 手重下」;「练这一手」退役 -->
+          <button type="button" class="tool-btn primary" id="review-side-retry"></button>
           <button type="button" class="tool-btn" id="review-side-pv" title="从这一手起，引擎推演后续着法（虚影）" data-i18n="review.side.pv" data-i18n-title="review.pv.title">推演</button>
         </div>
       </section>
@@ -110,17 +116,20 @@
            题型、题目、反馈、提示 · 看答案 · 下一题在这张卡片里;「回到对局」回到刚才那一局。
            id 与 .show 沿用弹层时的,题目逻辑一行不动。 -->
       <section class="practice-card" id="practice-modal" aria-label="战术练习" data-i18n-aria="practice.title">
+        <!-- v2.0:一排六个题型按钮与「错题本」并成一个「题型」下拉,放在卡片头右边;左边是进度 -->
         <div class="practice-card-head">
-          <h3 id="practice-title" data-i18n="practice.title">战术练习</h3>
-          <span id="practice-progress" class="muted practice-progress"></span>
-        </div>
-        <div class="pill practice-skill" id="practice-skill" role="group" aria-label="题型" data-i18n-aria="practice.skill.aria">
-          <button type="button" data-skill="daily" data-i18n="practice.skill.daily">今日</button>
-          <button type="button" data-skill="all" class="active" data-i18n="practice.skill.all">全部</button>
-          <button type="button" data-skill="win1" data-i18n="practice.skill.win1">成五</button>
-          <button type="button" data-skill="defend" data-i18n="practice.skill.defend">防守</button>
-          <button type="button" data-skill="vcf" data-i18n="practice.skill.vcf">VCF</button>
-          <button type="button" data-skill="forbid" data-i18n="practice.skill.forbid">禁手</button>
+          <h3 id="practice-title" class="sr-only" data-i18n="practice.title">战术练习</h3>
+          <span id="practice-progress" class="practice-progress"></span>
+          <span class="spacer"></span>
+          <select id="practice-skill" class="skill-select" aria-label="题型" data-i18n-aria="practice.skill.aria">
+            <option value="daily" data-i18n="practice.skill.daily">今日</option>
+            <option value="all" data-i18n="practice.skill.all">全部</option>
+            <option value="win1" data-i18n="practice.skill.win1">成五</option>
+            <option value="defend" data-i18n="practice.skill.defend">防守</option>
+            <option value="vcf" data-i18n="practice.skill.vcf">VCF</option>
+            <option value="forbid" data-i18n="practice.skill.forbid">禁手</option>
+            <option value="wrong" data-i18n="practice.wrongBook">错题本</option>
+          </select>
         </div>
         <div id="practice-task" class="practice-task"></div>
         <div class="practice-source-row">
@@ -135,7 +144,6 @@
           <button type="button" class="tool-btn primary" id="practice-next" hidden data-i18n="practice.next">下一题</button>
         </div>
         <div class="practice-foot-row">
-          <button type="button" class="text-link" id="practice-wrong" title="只做做错过、还没做对的题" data-i18n="practice.wrongBook" data-i18n-title="practice.wrongBook.title">错题本</button>
           <span class="spacer"></span>
           <button type="button" class="text-link" id="practice-close" data-i18n="practice.back">回到对局</button>
         </div>
@@ -161,14 +169,6 @@
             <button type="button" data-diff="normal" class="active" title="普通：必挡直接威胁，会算连续冲四，也会用棋型组织进攻；每手约 0.4 秒" data-i18n="diff.normal" data-i18n-title="diff.normal.title">普</button>
             <button type="button" data-diff="hard" title="困难：看得懂四三、双三的棋型引擎，会做杀、会防杀，每手约 2 秒" data-i18n="diff.hard" data-i18n-title="diff.hard.title">难</button>
             <button type="button" data-diff="extreme" title="极限：与困难同一套搜索，多给两倍半的时间——实测明显强于困难；难局最多算 5–8 秒" data-i18n="diff.extreme" data-i18n-title="diff.extreme.title">极</button>
-          </div>
-        </div>
-        <div class="setting-row" id="think-field" hidden>
-          <span class="setting-k" data-i18n="set.think">思考</span>
-          <div class="pill" id="think-seg" role="group" aria-label="困难思考时间" data-i18n-aria="aria.think">
-            <button type="button" data-think="fast" title="约 0.8 秒" data-i18n="think.fast" data-i18n-title="think.fast.hard.title">快</button>
-            <button type="button" data-think="normal" class="active" title="约 2 秒" data-i18n="think.normal" data-i18n-title="think.normal.hard.title">标</button>
-            <button type="button" data-think="deep" title="约 3.5 秒" data-i18n="think.deep" data-i18n-title="think.deep.hard.title">深</button>
           </div>
         </div>
         <div class="setting-row" id="color-field">
@@ -254,6 +254,14 @@
                 <span class="switch-knob"></span>
               </button>
             </div>
+            <!-- v2.0:备份 / 恢复从「对局」挪到这里 —— 设置管外观、声音和数据 -->
+            <div class="setting-row">
+              <span class="setting-k" data-i18n="backup.label">数据</span>
+              <span class="data-links">
+                <button type="button" class="text-link" id="backup-export" title="把存档、统计、每日打卡与练习进度导出为一个文件" data-i18n="backup.export" data-i18n-title="backup.export.title">备份</button>
+                <button type="button" class="text-link" id="backup-import" title="用备份文件覆盖当前全部数据" data-i18n="backup.import" data-i18n-title="backup.import.title">恢复</button>
+              </span>
+            </div>
         </div>
         <!-- v1.74:快捷键挪进「⋯」(按 ? 仍直接打开) -->
         <div class="close-row" style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
@@ -271,11 +279,7 @@
           <tr><td data-i18n="help.kb">棋盘聚焦 · 方向键</td><td data-i18n="help.kb.d">方向键移动交叉点，Enter 落子，Esc 离开；播报坐标与禁手</td></tr>
           <tr><td data-i18n="help.undo">Z / ⌘Z</td><td data-i18n="help.undo.d">悔棋（以本应用为准）</td></tr>
           <tr><td data-i18n="help.new">N / ⌘N</td><td data-i18n="help.new.d">新局</td></tr>
-          <tr><td data-i18n="help.modes">⌘1 / ⌘2</td><td data-i18n="help.modes.d">双人 / 人机（确认后新局）</td></tr>
-          <tr><td data-i18n="help.sgf">棋谱</td><td data-i18n="help.sgf.d">「记录」里复制 / 导出 / 导入 / 粘贴 SGF；也可把 .sgf 直接拖进窗口；导入后可「续下」</td></tr>
-          <tr><td data-i18n="help.fullscreen">⌘⌃F</td><td data-i18n="help.fullscreen.d">系统全屏 / 窗口 Zoom / 提示入口</td></tr>
-          <tr><td data-i18n="help.question">?</td><td data-i18n="help.question.d">打开本说明</td></tr>
-          <tr><td data-i18n="help.esc">Esc</td><td data-i18n="help.esc.d">关闭弹层 · 收起侧栏</td></tr>
+          <tr><td data-i18n="help.esc">Esc · ?</td><td data-i18n="help.esc.d">Esc 关闭弹层、离开复盘与练习；? 打开本说明</td></tr>
         </table>
         <div class="close-row">
           <span class="muted app-version"><span data-i18n="help.version">版本</span> <span id="app-version">—</span></span>
@@ -284,38 +288,18 @@
       </div>
     </div>
 
-    <div class="modal-bg" id="slots-modal" role="dialog" aria-modal="true" aria-label="对局记录" data-i18n-aria="slots.title">
+    <div class="modal-bg" id="slots-modal" role="dialog" aria-modal="true" aria-label="对局" data-i18n-aria="slots.title">
       <div class="modal">
-        <h3 data-i18n="slots.title">对局记录</h3>
-        <!-- v1.71:战绩从单独的「统计」弹层并进来 —— 它与存档都是「看过去的对局」,一处就够 -->
-        <div class="games-head">
-          <span class="side-h" data-i18n="stats.title">战绩</span>
-          <span class="spacer"></span>
-          <button type="button" class="text-link danger" id="stats-clear" hidden data-i18n="stats.clear">清空</button>
-        </div>
-        <div id="stats-empty" class="muted" hidden data-i18n="stats.empty">还没有完成的对局</div>
-        <div id="stats-body" hidden></div>
-        <!-- v1.70:棋谱文件从侧栏挪到这里 —— 它们是「文件」,和存档、备份住在一起;侧栏只留下棋要用的 -->
-        <div class="backup-row sgf-row">
-          <span class="muted" data-i18n="sgf.label">棋谱文件</span>
-          <button type="button" class="text-link" id="sgf-copy" data-i18n="sgf.copy">复制</button>
-          <button type="button" class="text-link" id="sgf-download" data-i18n="sgf.export">导出</button>
-          <button type="button" class="text-link" id="sgf-import" data-i18n="sgf.import">导入</button>
-          <button type="button" class="text-link" id="sgf-paste" title="从剪贴板粘贴 SGF" data-i18n="sgf.paste" data-i18n-title="sgf.paste.title">粘贴</button>
-        </div>
-        <!-- v1.63:对局库。每一局下完自动留存,不用手动存档;这里列最近 20 局,
-             点「复盘」以纯复盘态打开并停在终局。 -->
-        <div class="games-head">
-          <span class="side-h" data-i18n="games.title">最近对局</span>
-          <span class="muted" id="games-empty" hidden data-i18n="games.empty">下完一局会自动留在这里</span>
-        </div>
+        <!-- v2.0:「记录」改成「对局」—— 打开就是你下过的棋:一行汇总,下面一局一行,点一下以复盘打开。
+             按难度分行的战绩表退役;棋谱导入留在底部,导出在复盘卡片上;备份 / 恢复挪到设置 -->
+        <h3 data-i18n="slots.title">对局</h3>
+        <div class="games-summary muted" id="stats-body"></div>
+        <span class="muted" id="games-empty" hidden data-i18n="games.empty">下完一局会自动留在这里</span>
         <div class="slots-list games-list" id="games-list"></div>
-        <div class="backup-row">
-          <span class="muted" data-i18n="backup.label">全部数据</span>
-          <button type="button" class="text-link" id="backup-export" title="把存档、统计、每日打卡与练习进度导出为一个文件" data-i18n="backup.export" data-i18n-title="backup.export.title">备份</button>
-          <button type="button" class="text-link" id="backup-import" title="用备份文件覆盖当前全部数据" data-i18n="backup.import" data-i18n-title="backup.import.title">恢复</button>
-        </div>
-        <div class="close-row">
+        <div class="close-row games-foot">
+          <button type="button" class="text-link" id="sgf-import" data-i18n="sgf.import">导入棋谱…</button>
+          <button type="button" class="text-link" id="sgf-paste" title="从剪贴板粘贴 SGF" data-i18n="sgf.paste" data-i18n-title="sgf.paste.title">粘贴</button>
+          <span class="spacer"></span>
           <button type="button" class="tool-btn" id="slots-close" data-i18n="dlg.close">关闭</button>
         </div>
       </div>

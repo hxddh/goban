@@ -285,6 +285,48 @@
       padding: 4px 8px; border-radius: 999px;
       background: transparent;
     }
+    /* ── v2.0 对阵条:两个座位。轮到谁,谁亮;电脑想时它的座位里三个点;终局时赢的一方写「胜」 ── */
+    .seats { display: flex; align-items: center; gap: 4px; min-width: 0; pointer-events: auto; }
+    .seat {
+      display: inline-flex; align-items: center; gap: 7px;
+      height: calc(var(--ctl-h) - 2px); padding: 0 11px 0 8px; border-radius: 999px;
+      font-size: var(--fs-ui); color: var(--muted); white-space: nowrap;
+      border: 1px solid transparent;
+      transition: color var(--dur-ui) var(--ease), background var(--dur-ui) var(--ease), border-color var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease);
+    }
+    .seat-stone { width: 13px; height: 13px; border-radius: 50%; flex: none; }
+    .seat-stone.b { background: radial-gradient(circle at 35% 30%, #5a5a5a, #111 70%); box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+    .seat-stone.w { background: radial-gradient(circle at 35% 30%, #fff, #d9d4ca 75%); box-shadow: 0 0 0 1px rgba(0,0,0,.28); }
+    .seat-name { font-weight: 500; color: inherit; }
+    .seat-sub { font-size: var(--fs-micro); color: var(--muted); font-variant-numeric: tabular-nums; }
+    .seat-sub:empty { display: none; }
+    .seat.on {
+      color: var(--text);
+      background: var(--btn-ghost);
+      border-color: var(--card-border);
+      border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    }
+    .seat.lose { opacity: .55; }
+    .seat-tag {
+      font-size: var(--fs-micro); font-weight: 600; color: var(--win);
+      padding: 1px 7px; border-radius: 999px;
+      border: 1px solid var(--card-border);
+      border: 1px solid color-mix(in srgb, var(--win) 45%, transparent);
+    }
+    .seat-tag[hidden], .rule-tag[hidden], .chrome-label[hidden], .seats[hidden] { display: none; }
+    .rule-tag {
+      font-size: var(--fs-micro); color: var(--muted);
+      padding: 2px 8px; border-radius: 999px; border: 1px solid var(--card-border);
+    }
+    .chrome-label { font-size: var(--fs-ui); font-weight: 500; color: var(--text); padding: 0 6px; }
+    .seat-dots { display: inline-flex; gap: 3px; align-items: center; }
+    .seat-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); opacity: .35; animation: seat-dot 1.2s var(--ease-loop) infinite; }
+    .seat-dots i:nth-child(2) { animation-delay: .15s; }
+    .seat-dots i:nth-child(3) { animation-delay: .3s; }
+    @keyframes seat-dot { 0%, 100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+    #app.practicing .seats, #app.practicing #clock { display: none !important; }
+    #app.is-empty #clock { visibility: hidden; }
+    @media (max-width: 560px) { .seat-sub { display: none; } }
     .spacer { flex: 1; min-width: 4px; }
     .chrome-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
     .icon-btn, .tool-btn {
@@ -606,9 +648,8 @@
 
     /* v1.72:命名存档退役,这个类只剩「最近对局」在用(高度由 .games-list 定) */
     .slots-list {
-      display: flex; flex-direction: column; gap: 8px;
+      display: flex; flex-direction: column;
       overflow-y: auto;
-      margin-bottom: 12px;
     }
     .slot-row {
       display: grid;
@@ -720,16 +761,19 @@
       display: flex; flex-direction: column; gap: 8px;
     }
     .practice-card:not(.show) { display: none; }
-    /* 题集与进度只在顶栏说一次(「每日挑战 · 第 1 / 5 题」);卡片里那一行留给读屏与 app.js 取字 */
-    .practice-card-head { display: none; }
+    /* v2.0:顶栏不再写题集与进度(左边只写「练习」),它们回到卡片头这一行 */
+    .practice-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .practice-card-head h3 { margin: 0; font-size: var(--fs-body); font-weight: 600; white-space: nowrap; }
     .practice-task { font-size: var(--fs-body); font-weight: 600; color: var(--fg); }
-    .practice-progress { white-space: nowrap; }
+    .practice-progress { white-space: nowrap; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .practice-source { display: block; }
     .practice-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .practice-actions:not(:has(> :not([hidden]))) { display: none; }
     .practice-actions .tool-btn { flex: 1 1 auto; }
     .practice-foot-row { display: flex; align-items: center; gap: 4px; }
     .practice-foot-row .spacer { flex: 1; }
+    /* 卡片底是一层半透明,强调色的文字链在「练习本」上只有 4.03:1(AJ 量到的,v1.75 起卡片里就是这样)——卡片里的文字链用正文色 */
+    .practice-card .text-link { color: var(--text); }
     /* 练习时:对局那一套(棋盘、时间线、悔棋 · 提示 · 新局、对局的卡片)让位 */
     #app.practicing .timeline { visibility: hidden; } /* 占位不收:题盘与对局棋盘同一个位置、同样大 */
     #app.practicing #board,
@@ -737,7 +781,7 @@
     #app.practicing #match, #app.practicing #clock,
     #app.practicing #welcome-bar, #app.practicing #end-card, #app.practicing #retry-bar,
     #app.practicing #review-side, #app.practicing #sgf-continue,
-    #app.practicing #swap2-bar, #app.practicing #think-dot { display: none !important; }
+    #app.practicing #swap2-bar { display: none !important; }
     .practice-feedback { font-size: var(--fs-body); font-weight: 600; line-height: 1.4; }
     .practice-feedback.good { color: #2f9e5e; }
     /* 同一处错借:答错的反馈用「胜」色。--bad 在四套主题对 --panel 实测 5.1–7.2:1,
@@ -851,10 +895,11 @@
     .seg { display: contents; }
     .pill, .theme-row { /* segment hosts also matched as #mode-seg etc */ }
     .toast {
-      position: absolute; left: 50%; bottom: 24px;
+      /* v2.0:toast 只剩「做了但看不见结果」的那几句,放到顶栏下方 —— 不再压住棋盘底边、时间线和 swap2 提示条(B22) */
+      position: absolute; left: 50%; top: calc(var(--chrome-h) + 6px);
       /* Above every modal (confirm is 60) so saves/errors remain readable */
       z-index: 70;
-      transform: translateX(-50%) translateY(10px);
+      transform: translateX(-50%) translateY(-6px);
       background: var(--panel);
       background: color-mix(in srgb, var(--panel) 94%, #000);
       color: var(--text);
@@ -867,8 +912,6 @@
       text-align: center;
     }
     .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-    /* Lift above the swap2 choice bar so the two bottom-center surfaces don't collide */
-    #app.swap2-on .toast { bottom: 96px; }
 
     .modal-bg {
       display: none; position: absolute; inset: 0; z-index: 50;
@@ -945,21 +988,6 @@
   50% { opacity: 0.72; }
 }
 /* subtle on-board indicator while the AI computes */
-.think-dot {
-  position: absolute;
-  right: calc(var(--wood-pad) + 8px);
-  bottom: calc(var(--wood-pad) + 8px);
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--accent, #4a90d9);
-  opacity: 0.65;
-  animation: think-dot-pulse var(--dur-pulse) var(--ease-loop) infinite;
-  pointer-events: none;
-}
-@keyframes think-dot-pulse {
-  0%, 100% { transform: scale(0.7); opacity: 0.35; }
-  50% { transform: scale(1.15); opacity: 0.85; }
-}
 /* v1.33: this block used to cover exactly one element (.think-dot) while 57
    others kept animating — the preference was declared, not implemented.
    Transitions are collapsed rather than removed: 0.01ms still fires
@@ -972,7 +1000,7 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-  .think-dot { animation: none; }
+  .seat-dots i { animation: none; opacity: .8; }
 }
 
 .board-frame-win #board-wrap {
@@ -1026,9 +1054,10 @@
       margin: 6px 0 2px; padding: 6px 10px;
       border-radius: var(--radius-sm);
       background: var(--btn-ghost);
-      background: color-mix(in srgb, #c9911e 14%, transparent);
+      /* v2.0(B25):此前写死金色 #c9911e,四套主题一个样;改走主题的强调色 */
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
       border: 1px solid var(--card-border);
-      border: 1px solid color-mix(in srgb, #c9911e 45%, var(--card-border));
+      border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--card-border));
       font-size: var(--fs-ui); color: var(--text);
     }
     .retry-bar[hidden] { display: none; }
@@ -1086,16 +1115,44 @@
     .games-head { display: flex; align-items: baseline; gap: 8px; margin: 12px 0 8px; }
     .games-head .side-h { margin: 0; }
     .games-head .muted { font-size: var(--fs-ui); }
-    .games-list { max-height: 30vh; }
+    /* v2.0「对局」:一行汇总 + 一局一行。整行是一个按钮(以复盘打开),删除收在行尾、悬停 / 聚焦才显出来 */
+    .games-summary { font-size: var(--fs-ui); margin: -4px 0 12px; }
+    .games-summary[hidden] { display: none; }
+    .games-list { max-height: 46vh; gap: 2px; margin-bottom: 4px; }
     .games-list:empty { display: none; }
-    .game-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .game-name { font-size: var(--fs-ui); color: var(--text); min-width: 0; }
+    .game-row {
+      display: flex; align-items: center; gap: 4px;
+      padding: 0; border: 0; background: transparent; border-radius: var(--radius-sm);
+    }
+    .game-row:hover, .game-row:focus-within { background: var(--btn-ghost); }
+    .game-open {
+      flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px;
+      padding: 9px 10px; border: 0; background: transparent; color: var(--text);
+      font: inherit; font-size: var(--fs-ui); text-align: left; cursor: pointer; border-radius: var(--radius-sm);
+    }
+    .game-res { min-width: 2.6em; font-weight: 600; color: var(--muted); }
+    /* 赢的那局用正文色 + 粗体(「胜」色在日间主题上对浅底只有 4.37:1,不到 AA) */
+    .game-res.won { color: var(--text); }
+    .game-when { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .game-meta { font-size: var(--fs-micro); white-space: nowrap; }
+    .game-del { opacity: 0; padding: 0 10px; font-size: var(--fs-micro); }
+    .game-row:hover .game-del, .game-row:focus-within .game-del { opacity: 1; }
+    .games-foot { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+    .data-links { display: inline-flex; gap: 14px; }
 
     /* —— 练习:题型筛选、提示、来源 —— */
     /* 六个题型在 280 宽的卡片里排成两行三列 */
-    .practice-skill { width: 100%; grid-auto-flow: row; grid-template-columns: repeat(3, 1fr); height: auto; }
-    .practice-skill button { min-height: calc(var(--ctl-h) - 6px); }
-    .practice-skill[hidden] { display: none; }
+    /* v2.0:「题型」是一个下拉 —— 一个控件代替一排六个按钮和「错题本」 */
+    .skill-select {
+      -webkit-appearance: none; appearance: none;
+      height: calc(var(--ctl-h) - 6px); padding: 0 26px 0 10px;
+      font: inherit; font-size: var(--fs-ui); color: var(--text);
+      background: var(--btn-ghost) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center;
+      border: 1px solid var(--card-border); border-radius: var(--radius-sm);
+      cursor: pointer;
+    }
+    .skill-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .skill-select option { color: #111; }
     .practice-source-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
     .practice-source-row .text-link { padding: 2px 6px; }
-    .practice-feedback.hint { color: #c9911e; color: color-mix(in srgb, #c9911e 85%, var(--fg)); }
+    .practice-feedback.hint { color: var(--accent-text); }

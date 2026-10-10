@@ -1353,9 +1353,12 @@
     if (src) {
       let text = "";
       if (cur) {
-        text = t(isFromGame(cur.source) ? "practice.src.fromGame" : "practice.src.fromBank");
-        if (cur && cur.renju) text += t("practice.src.renju");
-        if (cur && isFromGame(cur.source) && cur.ply) text += t("practice.src.ply", { n: cur.ply });
+        // v2.0:只在题目来自你自己的对局时写来源;「内置题」对用户没有意义,不再写
+        if (isFromGame(cur.source)) {
+          text = t("practice.src.fromGame");
+          if (cur.renju) text += t("practice.src.renju");
+          if (cur.ply) text += t("practice.src.ply", { n: cur.ply });
+        }
       }
       src.textContent = text;
     }
@@ -1707,23 +1710,27 @@
     showPuzzle();
   }
 
-  /** Label the 错题本 entry with its live count (and hide it when empty). */
+  /**
+   * v2.0:「题型」下拉 —— 今日 · 全部 · 成五 · 防守 · VCF · 禁手 · 错题本。
+   * 错题本那一项带上还没做对的题数;一题都没有时不可选(正在做错题本时除外)。
+   */
   function syncWrongButton() {
-    const btn = document.getElementById("practice-wrong");
-    if (!btn) return;
-    const n = unmastered(buildCandidates(), loadProgress()).length;
-    btn.textContent = n ? t("practice.book.count", { n: n }) : t("practice.wrongBook");
-    btn.disabled = runMode === "wrong" && !n;
+    const sel = document.getElementById("practice-skill");
+    if (!sel) return;
+    const opt = sel.querySelector('option[value="wrong"]');
+    if (opt) {
+      const n = unmastered(buildCandidates(), loadProgress()).length;
+      opt.textContent = n ? t("practice.book.count", { n: n }) : t("practice.wrongBook");
+      opt.disabled = !n && runMode !== "wrong";
+    }
+    syncSkillButtons();
   }
 
   function syncSkillButtons() {
-    const seg = document.getElementById("practice-skill");
-    if (!seg) return;
-    // v1.70:「今日」是这排里的第一格 —— 每日与自由练习在同一个弹层里切换(错题本时整排收起)
-    seg.hidden = runMode === "wrong";
-    seg.querySelectorAll("button[data-skill]").forEach((b) => {
-      b.classList.toggle("active", runMode === "daily" ? b.dataset.skill === "daily" : b.dataset.skill === skill);
-    });
+    const sel = document.getElementById("practice-skill");
+    if (!sel) return;
+    const v = runMode === "daily" ? "daily" : runMode === "wrong" ? "wrong" : skill;
+    if (sel.value !== v) sel.value = v;
   }
 
   /** Practice progress for the stats panel; null before anything was answered. */
@@ -1876,29 +1883,21 @@
         deps.openSource(id, ply);
       }
     });
-    const skillSeg = document.getElementById("practice-skill");
-    if (skillSeg) skillSeg.addEventListener("click", (ev) => {
-      const b = ev.target.closest("button[data-skill]");
-      if (!b) return;
-      const wrongBtn = document.getElementById("practice-wrong");
-      if (b.dataset.skill === "daily") {
+    const skillSel = document.getElementById("practice-skill");
+    if (skillSel) skillSel.addEventListener("change", () => {
+      const v = skillSel.value;
+      if (v === "daily") {
         if (runMode === "daily") return;
         setTitle("daily.title"); setModalLabel(t("daily.title"));
-        if (wrongBtn) wrongBtn.hidden = true;
         startDaily();
-        return;
+      } else if (v === "wrong") {
+        if (runMode !== "wrong") startWrong();
+      } else {
+        if (runMode === "free" && v === skill) return;
+        skill = v;
+        setTitle("practice.title"); setModalLabel(t("practice.title"));
+        start();
       }
-      if (runMode === "free" && b.dataset.skill === skill) return;
-      skill = b.dataset.skill;
-      setTitle("practice.title"); setModalLabel(t("practice.title"));
-      if (wrongBtn) wrongBtn.hidden = false;
-      start();
-      syncWrongButton();
-    });
-    const wrongBtn = document.getElementById("practice-wrong");
-    if (wrongBtn) wrongBtn.addEventListener("click", () => {
-      if (runMode === "wrong") { setTitle("practice.title"); setModalLabel(t("practice.title")); start(); }
-      else startWrong();
       syncWrongButton();
     });
   }

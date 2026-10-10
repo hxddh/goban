@@ -446,28 +446,24 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
     levelOnce: /普通/.test((document.getElementById("match") || {}).textContent || "") &&
       !(document.getElementById("diff-seg") || { offsetParent: null }).offsetParent,
   }));
+  // v2.0:棋谱导入 / 粘贴在「对局」弹层底部,导出在复盘卡片上
   await page.evaluate(() => document.getElementById("sgf-slots").click());
   await page.waitForTimeout(150);
-  const inSlots = await page.evaluate(() => ["sgf-copy", "sgf-download", "sgf-import", "sgf-paste"]
-    .every((id) => { const e = document.getElementById(id); return !!e && !!e.closest("#slots-modal") && e.offsetParent !== null; }));
-  let copied = "";
-  if (inSlots) {   // 旧布局里它们不在弹层里:判失败,而不是让点击超时把整套测试带崩
-    await page.click("#sgf-copy");
-    await page.waitForTimeout(150);
-    copied = await page.evaluate(() => navigator.clipboard.readText());
-  }
+  const inSlots = await page.evaluate(() => ["sgf-import", "sgf-paste"]
+    .every((id) => { const e = document.getElementById(id); return !!e && !!e.closest("#slots-modal") && e.offsetParent !== null; }) &&
+    !!document.querySelector("#review-side #review-export"));
   await page.evaluate(() => document.getElementById("slots-close").click());
   await page.evaluate(() => document.getElementById("open-practice").click());
   await page.waitForTimeout(200);
   const pTitle = await page.evaluate(() => document.getElementById("practice-title").textContent.trim());
-  const dailyChip = await page.evaluate(() => { const b = document.querySelector('#practice-skill [data-skill="daily"]'); return !!b && b.offsetParent !== null && b.classList.contains("active"); });
-  await page.evaluate(() => document.querySelector('#practice-skill [data-skill="all"]').click());
+  const dailyChip = await page.evaluate(() => { const s = document.getElementById("practice-skill"); return !!s && s.offsetParent !== null && s.value === "daily"; });
+  await page.evaluate(() => { const s = document.getElementById("practice-skill"); s.value = "all"; s.dispatchEvent(new Event("change", { bubbles: true })); });
   await page.waitForTimeout(150);
   const freeTitle = await page.evaluate(() => document.getElementById("practice-title").textContent.trim());
   const ok = first <= 21 && mid <= 19 && !dup.movesChip && !dup.saved && dup.levelOnce &&
-    inSlots && /^\(;/.test(copied) && pTitle === "每日挑战" && dailyChip && freeTitle === "战术练习";
+    inSlots && pTitle === "每日挑战" && dailyChip && freeTitle === "战术练习";
   report("S11 侧栏只留下棋要用的:控件 ≤ 21 / ≤ 19;文件操作在存档里、每日在练习里;信息不重复", ok,
-    JSON.stringify({ first, mid, dup, inSlots, copied: copied.slice(0, 12), pTitle, dailyChip, freeTitle, errs: page.__errors }));
+    JSON.stringify({ first, mid, dup, inSlots, pTitle, dailyChip, freeTitle, errs: page.__errors }));
   await page.close();
 }
 
@@ -619,7 +615,7 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
   const mig = await page.evaluate(() => ({ key: localStorage.getItem("goban.v12.slots"),
     top: (JSON.parse(localStorage.getItem("goban.v12.games") || "[]")[0] || {}) }));
   await page.evaluate(() => document.getElementById("sgf-slots").click()); await page.waitForTimeout(250);
-  const rowText = await page.evaluate(() => (document.querySelector("#games-list .game-name") || {}).textContent || "");
+  const rowText = await page.evaluate(() => (document.querySelector("#games-list .game-open") || {}).textContent || "");
   await page.evaluate(() => { const b = document.querySelector("#games-list .game-open"); if (b) b.click(); });
   await page.waitForTimeout(300);
   if (await page.evaluate(() => document.getElementById("confirm-modal").classList.contains("show"))) await page.click("#confirm-ok");
@@ -628,8 +624,8 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
   // v1.74:「新局」打开对局卡片(对手 / 难度 / 执子),空棋盘上也有用 —— 撤回 v1.72 的「空盘不显示」
   const ok = first <= 15 && newOnEmpty && newAfterMove && reviewOpen && !reviewBtnWhileOpen &&
     !rec.clearSave && !rec.slotsList && rec.primary === 0 && rec.focus === "slots-close" &&
-    !set.analysis && set.close === "完成" && set.rows === 4 &&
-    mig.key === null && (mig.top.history || []).length === 3 && /进行中/.test(rowText) && opened === "3 / 3";
+    !set.analysis && set.close === "完成" && set.rows === 5 &&
+    mig.key === null && (mig.top.history || []).length === 3 && /未完/.test(rowText) && opened === "3 / 3";
   report("S13 继续减:首开 ≤ 15、复盘开着不显示复盘、记录里无清除存档 / 命名存档 / 主按钮、设置无复盘分析且写「完成」、旧存档并进最近对局", ok,
     JSON.stringify({ first, newOnEmpty, newAfterMove, reviewOpen, reviewBtnWhileOpen, rec, set,
       mig: { key: mig.key, n: (mig.top.history || []).length }, rowText, opened, errs: page.__errors }));
@@ -685,7 +681,9 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
   await page.evaluate(() => document.getElementById("sgf-slots").click()); await page.waitForTimeout(250);
   await page.evaluate(() => document.querySelector("#games-list .game-open").click()); await page.waitForTimeout(400);
   const reviewOnOpen = await page.evaluate(() => !document.getElementById("review-side").hidden);
-  const resumedToast = toasts.some((x) => /接着下/.test(x));
+  // v2.0:打开没下完的局不再弹「接着下」—— 座位亮着、停在最后一手,就是接着下
+  const resumedToast = await page.evaluate(() => !!document.querySelector("#seats .seat.on") &&
+    /^(\d+) \/ \1$/.test(document.getElementById("replay-pos").textContent));
   for (const [r, c] of [[7, 10], [0, 3], [7, 11]]) { await click(r, c); await page.waitForTimeout(300); }
   const lib = await page.evaluate(() => JSON.parse(localStorage.getItem("goban.v12.games") || "[]").map((g) => ({ id: g.id, result: g.result, n: g.history.length })));
   const ok = mid <= 13 && liveHidden && oldShown && samePos && !newPrimaryMid && over && endCount <= 15 && !hintAtEnd &&
@@ -731,7 +729,8 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
     return { mode: vis("mode-seg"), diff: vis("diff-seg"), color: vis("color-seg"), start: vis("new-start") };
   });
   await page.evaluate(() => { const b = document.querySelector('#diff-seg [data-diff="hard"]'); if (b) b.click(); });
-  const thinkShown = await shown("#think-seg");
+  // v2.0:「思考」一行退役 —— 选困难也不再出现,而且 DOM 里就没有它
+  const thinkShown = !(await shown("#think-seg")) && !(await page.evaluate(() => !!document.getElementById("think-seg")));
   await page.evaluate(() => { const b = document.querySelector('#mode-seg [data-mode="pvp"]'); if (b) b.click(); });
   await clickId("new-start"); await page.waitForTimeout(300);
   if (await page.evaluate(() => document.getElementById("confirm-modal").classList.contains("show"))) await page.click("#confirm-ok");
@@ -834,13 +833,15 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
       inWrap: !!(pb && pb.closest("#board-wrap")),
       game: ["undo", "btn-hint", "btn-new", "timeline"].filter((id) => vis(document.getElementById(id))),
       controls: [...document.querySelectorAll("button, [role=button], input, select")].filter(vis).length,
-      skills: [...document.querySelectorAll("#practice-skill button")].filter(vis).length,
+      // v2.0:题型是一个下拉 —— 今日 · 全部 · 四个题型 · 错题本,7 项
+      skills: vis(document.getElementById("practice-skill")) ? document.querySelectorAll("#practice-skill option").length : 0,
       status: document.getElementById("status").textContent,
       modalBg: !!document.querySelector("#practice-modal.modal-bg, .modal-bg#practice-modal"),
     };
   });
-  await page.evaluate(() => document.querySelector('#practice-skill [data-skill="all"]').click()); await page.waitForTimeout(300);
-  const free = await page.evaluate(() => ["practice-hint", "practice-reveal", "practice-wrong", "practice-close"].filter((id) => { const e = document.getElementById(id); return e && e.offsetParent !== null; }));
+  await page.evaluate(() => { const s = document.getElementById("practice-skill"); s.value = "all"; s.dispatchEvent(new Event("change", { bubbles: true })); }); await page.waitForTimeout(300);
+  const free = await page.evaluate(() => ["practice-hint", "practice-reveal", "practice-close"].filter((id) => { const e = document.getElementById(id); return e && e.offsetParent !== null; })
+    .concat(document.querySelector('#practice-skill option[value="wrong"]') ? ["wrong"] : []));
   await page.evaluate(() => document.getElementById("practice-close").click()); await page.waitForTimeout(600);
   const after = await page.evaluate(() => ({ pos: document.getElementById("replay-pos").textContent,
     practicing: document.getElementById("app").classList.contains("practicing"),
@@ -857,7 +858,7 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
   const b14 = { before: n0, after: await page.evaluate(() => document.getElementById("replay-pos").textContent) };
   const ok = Object.values(sizes).every((v) => v.ok) &&
     pr.boards.length === 1 && pr.boards[0] === "practice-board" && pr.inWrap && JSON.stringify(pr.rect) === JSON.stringify(before.rect) &&
-    pr.game.length === 0 && pr.controls <= 11 && pr.skills === 6 && /每日|练习/.test(pr.status) && !pr.modalBg &&
+    pr.game.length === 0 && pr.controls <= 11 && pr.skills === 7 && /每日|练习/.test(pr.status) && !pr.modalBg &&
     free.length === 4 && after.pos === before.pos && !after.practicing && after.boardShown &&
     b13.open && b13.picked === "pvp" && b13.pos === before.pos.replace(/^\d+/, (m) => m) &&
     b14.before === b14.after;
@@ -954,6 +955,118 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
     !/✗|That move|That point/.test(revealEn) && !/✗|这一手|这一点/.test(revealZh) && /答案/.test(revealZh);
   report("S17 复盘进得去出得来(Esc / 关闭 → 最后一手 + 终局卡)、终局 ↔ 复盘棋盘不动、复盘无悔棋、翻看不写复盘、规则在新局卡片、B16–B19", ok,
     JSON.stringify({ browsing, still, inReview, afterZ, afterEsc, afterClose, rule, clock: [c0, c1], px: [p0, p1], en, revealEn, revealZh, errs: page.__errors }));
+  await page.close();
+}
+
+// ---- S18. v2.0 一眼看懂 ----
+// 对阵条:两个座位,轮到谁谁亮;空棋盘谁都不亮、顶栏不写「落子」;电脑思考时它的座位里三个点;终局赢的一方亮且写「胜」。
+// 一句话只在一处说:一局普通对局走一遍 toast 0 条;toast 种类 ≤ 20;swap2 的说明只在提示条里。
+// 「重下」只有一个名字;练习看得见的控件 ≤ 6;「对局」弹层只剩导入 / 粘贴 / 关闭 + 每局一行;快捷键 6 行;
+// B22 B23 B24 B25 B26。
+{
+  const page = await newPage();
+  const click = clicker(page);
+  const toasts = [];
+  await page.exposeFunction("__toast18", (x) => toasts.push(x));
+  await page.evaluate(() => { const el = document.getElementById("toast");
+    new MutationObserver(() => { if (el.classList.contains("show") && el.textContent) window.__toast18(el.textContent); })
+      .observe(el, { attributes: true, childList: true, characterData: true, subtree: true }); });
+  const seats = () => page.evaluate(() => {
+    const q = (c) => { const e = document.getElementById("seat-" + c); return { on: e.classList.contains("on"), lose: e.classList.contains("lose"),
+      name: document.getElementById("seat-" + c + "-name").textContent, tag: document.getElementById("seat-" + c + "-tag").hidden ? "" : document.getElementById("seat-" + c + "-tag").textContent,
+      dots: !!e.querySelector(".seat-dots") }; };
+    // 看得见的字:跳过只给读屏的 sr-only
+    const chromeText = [...document.querySelectorAll("header.chrome *")].filter((e) => !e.closest(".sr-only") && e.children.length === 0 &&
+      e.offsetParent !== null && e.getBoundingClientRect().width > 2).map((e) => e.textContent).join(" ");
+    return { b: q("b"), w: q("w"), chromeText, statusShown: document.getElementById("status").getBoundingClientRect().width > 2, thinkDot: !!document.getElementById("think-dot") };
+  });
+  const empty = await seats();
+  await page.evaluate(() => { document.getElementById("btn-new").click(); document.querySelector('#diff-seg [data-diff="hard"]').click(); document.getElementById("new-start").click(); });
+  await page.waitForTimeout(300);
+  await click(7, 7); await page.waitForTimeout(120);
+  const thinking = await seats();
+  await page.waitForTimeout(3500);
+  const yourTurn = await seats();
+  // 翻看前面的手时点棋盘 → 回到最新一手(B24),不弹 toast
+  await page.keyboard.press("ArrowLeft"); await page.waitForTimeout(100);
+  await click(3, 3); await page.waitForTimeout(250);
+  const b24 = await page.evaluate(() => document.getElementById("replay-pos").textContent);
+  await page.evaluate(() => document.getElementById("btn-hint").click()); await page.waitForTimeout(2500);
+  // 普通难度下到终局
+  await setup(page, { diff: "normal" });
+  for (let i = 0; i < 40; i++) { if (await page.evaluate(() => !document.getElementById("end-card").hidden)) break; await click(1 + (i % 13), 1 + ((i * 5) % 13)); await page.waitForTimeout(450); }
+  await page.waitForTimeout(500);
+  const end = await seats();
+  const labels = {};
+  labels.end = await page.evaluate(() => document.getElementById("end-card-retry").textContent.trim());
+  await page.evaluate(() => document.getElementById("end-card-review").click()); await page.waitForTimeout(900);
+  labels.review = await page.evaluate(() => document.getElementById("review-side-retry").textContent.trim());
+  const practiceBtn = await page.evaluate(() => !!document.getElementById("review-side-practice"));
+  await page.keyboard.press("Escape"); await page.waitForTimeout(300);
+  await page.evaluate(() => document.getElementById("end-card-retry").click()); await page.waitForTimeout(900);
+  const retryBg = {};
+  retryBg.wood = await page.evaluate(() => getComputedStyle(document.getElementById("retry-bar")).backgroundColor);
+  await page.evaluate(() => { document.getElementById("settings-btn").click(); document.querySelector('#settings-modal [data-theme="notebook"]').click(); document.getElementById("settings-close").click(); });
+  await page.waitForTimeout(200);
+  retryBg.notebook = await page.evaluate(() => getComputedStyle(document.getElementById("retry-bar")).backgroundColor);
+  await page.evaluate(() => { document.getElementById("settings-btn").click(); document.querySelector('#settings-modal [data-theme="wood"]').click(); document.getElementById("settings-close").click(); });
+  await page.evaluate(() => document.getElementById("retry-back").click()); await page.waitForTimeout(700);
+  await page.keyboard.press("Escape"); await page.waitForTimeout(200);
+  await page.evaluate(() => { document.getElementById("btn-new").click(); document.getElementById("new-start").click(); }); await page.waitForTimeout(400);
+  const sessionToasts = toasts.slice();
+  // swap2(人机):说明只在提示条里一处,不弹 toast,不和提示条重叠(B22)
+  await page.evaluate(() => { document.getElementById("btn-new").click(); document.querySelector('#rule-seg [data-rule="swap2"]').click(); document.getElementById("new-start").click(); });
+  await page.waitForTimeout(400);
+  const swap2 = await page.evaluate(() => {
+    const vis = (e) => e.offsetParent !== null && e.getBoundingClientRect().width > 2 && getComputedStyle(e).visibility !== "hidden";
+    const said = [...document.querySelectorAll("#app *")].filter((e) => vis(e) && e.children.length === 0 && /请落第|执子待定|挑边/.test(e.textContent)).length;
+    return { said, toast: document.getElementById("toast").classList.contains("show"), bar: !document.getElementById("swap2-bar").hidden,
+      aiWhite: /执白/.test(document.getElementById("swap2-msg").textContent) };
+  });
+  await page.evaluate(() => { document.getElementById("btn-new").click(); document.querySelector('#rule-seg [data-rule="free"]').click(); document.getElementById("new-start").click(); });
+  await page.waitForTimeout(300);
+  // 练习:看得见的控件
+  await page.evaluate(() => document.getElementById("open-practice").click()); await page.waitForTimeout(600);
+  const practice = await page.evaluate(() => {
+    const vis = (e) => !!e && e.offsetParent !== null && e.getBoundingClientRect().width > 0 && getComputedStyle(e).visibility !== "hidden";
+    return { controls: [...document.querySelectorAll("button, [role=button], input, select")].filter(vis).map((e) => e.id || e.className),
+      label: document.getElementById("chrome-label").textContent, source: document.getElementById("practice-source").textContent };
+  });
+  await page.evaluate(() => document.getElementById("practice-close").click()); await page.waitForTimeout(300);
+  // 「对局」弹层与设置
+  await page.evaluate(() => document.getElementById("sgf-slots").click()); await page.waitForTimeout(250);
+  const games = await page.evaluate(() => {
+    const m = document.getElementById("slots-modal");
+    const vis = (e) => e.offsetParent !== null && e.getBoundingClientRect().width > 0;
+    return { buttons: [...m.querySelectorAll("button")].filter((e) => vis(e) && !e.closest(".game-row")).map((e) => e.id),
+      gone: ["sgf-copy", "sgf-download", "stats-clear", "backup-export"].filter((id) => document.getElementById(id) && document.getElementById(id).closest("#slots-modal")),
+      title: m.querySelector("h3").textContent, summary: document.getElementById("stats-body").textContent };
+  });
+  await page.evaluate(() => document.getElementById("slots-close").click());
+  const misc = await page.evaluate(() => ({
+    backupInSettings: !!document.querySelector("#settings-modal #backup-export") && !!document.querySelector("#settings-modal #backup-import"),
+    helpRows: document.querySelectorAll("#help-modal tr").length,
+  }));
+  // toast 种类(静态):toast(t("…")) 里出现的键,禁手原因一族算一种
+  const src = ["app.js", "sgfio.js", "engine.js", "practice.js"].map((f) => fs.readFileSync(path.join(webRoot, "js", f), "utf8")).join("\n");
+  const kinds = new Set();
+  for (const m of src.matchAll(/toast\((?:t|tr)\(([^;]*?)\)\s*\)?;/g)) for (const k of m[1].matchAll(/"([a-z][\w]*\.[\w.]*)"/g)) kinds.add(k[1].replace(/^renju\.blocked\..*/, "renju.blocked"));
+  for (const m of src.matchAll(/toast\([a-z.]*error \|\| t\("([\w.]+)"\)/g)) kinds.add(m[1]);
+  const ok =
+    !empty.b.on && !empty.w.on && !/落子/.test(empty.chromeText) && !empty.statusShown && !empty.thinkDot &&
+    thinking.w.on && thinking.w.dots && !thinking.b.on && thinking.b.name === "你" && thinking.w.name === "电脑" &&
+    yourTurn.b.on && !yourTurn.w.on &&
+    /^(\d+) \/ \1$/.test(b24) &&
+    end.w.on && end.w.tag === "胜" && end.b.lose &&
+    sessionToasts.length === 0 && kinds.size <= 20 &&
+    swap2.said === 1 && !swap2.toast && swap2.bar && swap2.aiWhite &&
+    /^从第 \d+ 手重下$/.test(labels.end) && /^从第 \d+ 手重下$/.test(labels.review) && !practiceBtn &&
+    practice.controls.length <= 6 && practice.label === "练习" && practice.source === "" &&
+    games.title === "对局" && games.gone.length === 0 && JSON.stringify(games.buttons) === JSON.stringify(["sgf-import", "sgf-paste", "slots-close"]) &&
+    misc.backupInSettings && misc.helpRows === 6 &&
+    retryBg.wood !== retryBg.notebook;
+  report("S18 v2.0 一眼看懂:座位 · 一局 0 条 toast · toast ≤ 20 种 · swap2 一处 · 重下一个名字 · 练习 ≤ 6 控件 · 对局列表 · 快捷键 6 行 · B22–B26", ok,
+    JSON.stringify({ empty, thinking, yourTurn, b24, end, labels, practiceBtn, retryBg, sessionToasts, kinds: [...kinds], swap2, practice, games, misc, errs: page.__errors }));
   await page.close();
 }
 

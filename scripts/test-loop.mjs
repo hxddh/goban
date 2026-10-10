@@ -332,7 +332,7 @@ const GAME = [[7, 7], [8, 7], [7, 8], [8, 8], [7, 9], [8, 9], [7, 10], [8, 10], 
   await page.evaluate(() => document.getElementById("sgf-slots").click());
   await page.waitForTimeout(200);
   const rowsN = await page.evaluate(() => document.querySelectorAll("#games-list .game-row").length);
-  const rowText = await page.evaluate(() => (document.querySelector("#games-list .game-name") || {}).textContent || "");
+  const rowText = await page.evaluate(() => (document.querySelector("#games-list .game-open") || {}).textContent || "");
   await page.evaluate(() => { const b = document.querySelector("#games-list .game-open"); if (b) b.click(); });
   await page.waitForTimeout(500);
   await dismissConfirm(page);

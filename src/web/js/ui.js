@@ -117,7 +117,7 @@
   }
 
   /** `swap2` is the live phase object (or null); `placed` = stones laid so far. */
-  function renderSwap2Bar(appEl, swap2, placed) {
+  function renderSwap2Bar(appEl, swap2, placed, vsAi) {
     const bar = document.getElementById("swap2-bar");
     const msg = document.getElementById("swap2-msg");
     const btns = document.getElementById("swap2-btns");
@@ -131,7 +131,9 @@
     if (swap2.phase === "place" || swap2.phase === "place2") {
       const target = swap2.phase === "place" ? 3 : 5;
       btns.innerHTML = "";
-      msg.textContent = t("swap2.place", { n: placed + 1, total: target });
+      // v2.0:swap2 的说明只在这里说一次(此前顶栏、对阵行、toast 各说一遍,toast 还压着这条);
+      // 人机下要说清电脑几乎总选黑、你执白 —— 这句话原来在 toast 里
+      msg.textContent = t(vsAi && swap2.phase === "place" ? "swap2.placeAi" : "swap2.place", { n: placed + 1, total: target });
       bar.hidden = false;
       return;
     }

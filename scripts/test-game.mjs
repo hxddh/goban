@@ -972,8 +972,9 @@ const Practice = ctx.GobanPractice;
       "反证:判据反过来就不满足「几乎总选黑」(得到 " + flipped + "/" + n + ")");
     // 两种语言都得把这件事说出来 —— 只改中文等于只对一半用户诚实
     const i18nSrc = fs.readFileSync(path.join(root, "src/web/js/i18n.js"), "utf8");
-    assert(/toast\.ruleSwap2Ai[\s\S]{0,200}执白/.test(i18nSrc), "中文提示说了「你执白」");
-    assert(/toast\.ruleSwap2Ai[\s\S]{0,240}play white/.test(i18nSrc), "英文提示说了 play white");
+    // v2.0:这句话从 toast 挪进了棋盘上的 swap2 提示条(swap2.placeAi)
+    assert(/swap2\.placeAi[\s\S]{0,200}执白/.test(i18nSrc), "中文提示说了「你执白」");
+    assert(/swap2\.placeAi[\s\S]{0,240}play white/.test(i18nSrc), "英文提示说了 play white");
   }
 
   // ⑫ 失着圆点不再借用「胜」色(v1.56)。
@@ -1128,20 +1129,10 @@ const Practice = ctx.GobanPractice;
   ctx.GobanHost.storageRemove("goban.v12.stats");
   ctx.GobanHost.storageRemove("goban.v12.totals");
 
-  // ---- 「清空」的可用状态要跟对局数走 ----
-  // v1.39 修掉了「零对局时照样可点」,判据却写成 hasAny(= 有对局 **或** 有每日打卡)。
-  // 于是「做过每日挑战、一局没下完」这个很常见的状态下按钮又活了:实测点下去、确认,
-  // 正文一个字不变 —— clear() 根本不碰每日打卡。
-  const statsSrc = fs.readFileSync(path.join(root, "src/web/js/stats.js"), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-  assert(/clearBtn\.disabled\s*=\s*a\.games\s*===\s*0/.test(statsSrc),
-    "「清空」按不按得动只看对局数");
-  assert(!/clearBtn\.disabled\s*=\s*!hasAny/.test(statsSrc),
-    "不再拿 hasAny 当「清空」的判据（它把每日打卡也算了进去）");
+  // ---- v2.0:「清空战绩」退役 —— 「对局」弹层只留一行汇总,不再有那个按钮;它守的判据随之退役 ----
   {
-    const scan = (js) => /clearBtn\.disabled\s*=\s*!hasAny/.test(js);
-    assert(scan("if (clearBtn) clearBtn.disabled = !hasAny;"), "清空闸门认得出 v1.43 那种判据");
-    assert(!scan("if (clearBtn) clearBtn.disabled = a.games === 0;"), "清空闸门放过新判据");
+    const html = fs.readFileSync(path.join(root, "src/web/index.html"), "utf8");
+    assert(!/id="stats-clear"/.test(html), "「对局」弹层里不再有「清空」");
   }
 }
 
@@ -1921,7 +1912,7 @@ const Practice = ctx.GobanPractice;
   // practice.wrong.<type> / practice.hint.<type>.<level> are assembled from the
   // puzzle type (v1.63); the 题型 gate right below asserts every type has all
   // three strings in both dictionaries.
-  const DYNAMIC = /^(diff|think|coach|status|result|practice\.kind|practice\.wrong|practice\.explain|practice\.hint|renju\.blocked)\./;
+  const DYNAMIC = /^(diff|coach|status|result|practice\.kind|practice\.wrong|practice\.explain|practice\.hint|renju\.blocked)\./;
   const deadKeys = dictKeys.filter((k) => !DYNAMIC.test(k) && !uses.includes('"' + k + '"'));
   const KNOWN_ORPHANS = ["slots.saved", "practice.src.game", "practice.src.builtin"];
   const fresh = deadKeys.filter((k) => !KNOWN_ORPHANS.includes(k));
@@ -1953,13 +1944,14 @@ const Practice = ctx.GobanPractice;
       return c.GobanI18n;
     };
     const win = on("Win32"), mac = on("MacIntel");
-    const keys = ["help.undo", "help.new", "help.modes", "help.fullscreen", "help.fullscreen.d", "fs.tip"];
+    // v2.0:⌘1/⌘2 与全屏那两行退役,剩下带修饰键的是悔棋与新局
+    const keys = ["help.undo", "help.new"];
     const winBad = keys.filter((k) => /⌘|⌃|Zoom|View →/.test(win.t(k)));
     win.setLang("en");
     const winBadEn = keys.filter((k) => /⌘|⌃|Zoom|View →/.test(win.t(k)));
     assert(winBad.length === 0 && winBadEn.length === 0 && /Ctrl\+Z/.test(win.t("help.undo")),
       "Windows 快捷键说明没有 ⌘ / 绿键 / View 菜单 (" + winBad.concat(winBadEn).join(", ") + ")");
-    assert(/⌘Z/.test(mac.t("help.undo")) && /⌘⌃F/.test(mac.t("fs.tip")), "反证:macOS 上仍是 ⌘ 与原来的全屏说明");
+    assert(/⌘Z/.test(mac.t("help.undo")) && /⌘N/.test(mac.t("help.new")), "反证:macOS 上仍是 ⌘");
   }
 
   // ---- Engine-floor gates -------------------------------------------------

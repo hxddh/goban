@@ -1067,11 +1067,11 @@ async function enableSwap2Pvp(page) {
       await page.waitForTimeout(600);
       const r = await page.evaluate(() => {
         const acts = document.querySelector(".chrome-actions").getBoundingClientRect();
-        const left = [...document.querySelectorAll("#status, #match, #clock")].filter((e) => e.offsetParent !== null)
+        const left = [...document.querySelectorAll("#seats, #chrome-label, #clock")].filter((e) => e.offsetParent !== null)
           .map((e) => e.getBoundingClientRect());
         return { actsOut: acts.right > innerWidth + 0.5 || acts.left < 0,
           overlap: left.some((b) => b.right > acts.left + 0.5),
-          match: document.getElementById("match").textContent };
+          match: document.getElementById("seats").textContent };
       });
       const tag = lang + "@" + w;
       if (r.actsOut) bad.push(tag + ":按钮出了窗口");
@@ -1171,7 +1171,7 @@ async function enableSwap2Pvp(page) {
         const H = innerHeight, W = innerWidth;
         const inView = (b) => b.width > 0 && b.height > 0 && b.top >= 0 && b.bottom <= H + 0.5 && b.left >= 0 && b.right <= W + 0.5;
         const acts = document.querySelector(".chrome-actions").getBoundingClientRect();
-        const left = [...document.querySelectorAll("#status, #match, #clock")].filter((e) => e.offsetParent !== null).map((e) => e.getBoundingClientRect());
+        const left = [...document.querySelectorAll("#seats, #chrome-label, #clock")].filter((e) => e.offsetParent !== null).map((e) => e.getBoundingClientRect());
         return {
           menuOut: [...document.querySelectorAll("#more-menu .menu-item")].filter((e) => !e.hidden && !inView(e.getBoundingClientRect())).map((e) => e.textContent.trim()),
           actsOut: !inView(acts),
@@ -1200,7 +1200,7 @@ async function enableSwap2Pvp(page) {
   await cdp.send("DOM.enable");
   await cdp.send("CSS.enable");
   const { root } = await cdp.send("DOM.getDocument");
-  const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: ".status-pill" }); // v1.71:顶栏不再写「五子棋」
+  const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: ".seat-name" }); // v2.0:顶栏的文字是座位上的名字(状态胶囊退役)
   const { fonts } = await cdp.send("CSS.getPlatformFontsForNode", { nodeId });
   const used = fonts.map((f) => f.familyName).sort();
   // 已知的量测字体。换了就必须改这里，顺便重新审一遍受影响的数字。
@@ -1434,7 +1434,7 @@ async function enableSwap2Pvp(page) {
   });
   await page.waitForTimeout(400);
   // v1.70:今天的题没做时「练习」先给每日(每日不记错题本);这条测答题声音,切到「全部」
-  await page.evaluate(() => { const a = document.querySelector('#practice-skill [data-skill="all"]'); if (a) a.click(); });
+  await page.evaluate(() => { const s = document.getElementById("practice-skill"); if (s) { s.value = "all"; s.dispatchEvent(new Event("change", { bubbles: true })); } });
   await page.waitForTimeout(500);
   const r = await page.evaluate(async () => {
     const cv = document.getElementById("practice-board");
@@ -1517,15 +1517,9 @@ async function enableSwap2Pvp(page) {
       }
     }
     const mixed = [...byEl.entries()].filter(([, v]) => v.size > 1).map(([k]) => k);
-    // 两个思考指示器同时在屏上（显示条件都是 aiThinking && result === "play"），
-    // 周期不同就永远错拍：1.2s 与 1.1s 的最小公倍数是 13.2 秒。
-    const pill = document.getElementById("status"), dot = document.getElementById("think-dot");
-    pill.classList.add("thinking"); dot.hidden = false;
-    const pulse = {
-      pill: { d: getComputedStyle(pill).animationDuration, f: getComputedStyle(pill).animationTimingFunction },
-      dot: { d: getComputedStyle(dot).animationDuration, f: getComputedStyle(dot).animationTimingFunction },
-    };
-    pill.classList.remove("thinking"); dot.hidden = true;
+    // v2.0:思考指示器只剩一个(电脑座位里的三个点),棋盘角上的圆点与状态胶囊的脉动一起退役 ——
+    // 原来那条「两个脉动必须同拍」的检查改成「只有一个」
+    const pulse = { dot: !!document.getElementById("think-dot"), seatDots: !!document.querySelector("#seats") };
     return { total, durs, eases, mixed, pulse };
   });
   const easeKeys = Object.keys(r.eases);
@@ -1537,12 +1531,7 @@ async function enableSwap2Pvp(page) {
   }
   if (durKeys.length > 3) bad.push("过渡时长超过三档：" + JSON.stringify(r.durs));
   if (r.mixed.length) bad.push("同一元素混用多条曲线：" + r.mixed.slice(0, 4).join(", "));
-  if (r.pulse.pill.d !== r.pulse.dot.d) {
-    bad.push("两个思考脉动周期不同：" + r.pulse.pill.d + " vs " + r.pulse.dot.d);
-  }
-  if (r.pulse.pill.f !== r.pulse.dot.f) {
-    bad.push("两个思考脉动曲线不同：" + r.pulse.pill.f + " vs " + r.pulse.dot.f);
-  }
+  if (r.pulse.dot || !r.pulse.seatDots) bad.push("思考指示器不止一个(或座位不在):" + JSON.stringify(r.pulse));
   if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
   report("AC 运动语言只有一套（过渡一条曲线 · 三档时长 · 脉动同周期）",
@@ -1772,7 +1761,8 @@ async function enableSwap2Pvp(page) {
 // 也住在弹层里，于是连 `.modal td:first-child { width: 42% }`（按键列的宽）、强调色、
 // 等宽 12px 一起继承了过来。已按来源收窄成 `.keys-table`。
 //
-// 这条闸门断言的是最终那件事：**表头文字的右缘与该列数字的右缘重合**，中英都要。
+// v2.0:按难度分行的战绩表退役(「对局」弹层头上只留一行汇总),它守的「表头压在数字上」随之退役。
+// 改守那一行汇总:有对局就在、中英都跟语言走、数字与存储里的一致。
 {
   const bad = [];
   const seen = {};
@@ -1780,75 +1770,25 @@ async function enableSwap2Pvp(page) {
   await page.evaluate(() => {
     const S = window.GobanStats;
     let t = 1700000000000;
-    for (const d of ["easy", "normal", "hard", "extreme"]) {
-      for (let i = 0; i < 5; i++) {
-        S.record({ mode: "ai", difficulty: d, humanColor: "b",
-          result: i % 3 === 0 ? "b" : (i % 3 === 1 ? "w" : "draw"),
-          moves: 40, durationMs: 123456, endedAt: t++ });
-      }
-    }
+    for (let i = 0; i < 6; i++) S.record({ mode: "ai", difficulty: "normal", humanColor: "b", result: i % 3 === 0 ? "b" : (i % 3 === 1 ? "w" : "draw"), moves: 40, durationMs: 1000, endedAt: t++ });
   });
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(300);
   for (const lang of ["zh", "en"]) {
-    if (lang === "en") {
-      await setLang(page, "en");
-    }
-    await page.evaluate(() => { const x = document.getElementById("sgf-slots"); if (x) x.click(); }); // v1.71:战绩在「记录」里
-    await page.waitForTimeout(500);
-    const r = await page.evaluate(() => {
-      const tb = document.querySelector(".stats-table");
-      if (!tb) return { err: "没有 .stats-table" };
-      const rows = [...tb.querySelectorAll("tr")];
-      const head = rows[0] ? [...rows[0].querySelectorAll("th")] : [];
-      const dataRow = rows.find((x) => x.querySelector("td"));
-      const cells = dataRow ? [...dataRow.querySelectorAll("td")] : [];
-      // 量「墨迹」而不是单元格盒子:盒子相同而内边距不同,正是上一版看不见的那 8px
-      const ink = (el) => { const rg = document.createRange(); rg.selectNodeContents(el); return rg.getBoundingClientRect(); };
-      const cols = head.map((h, i) => {
-        const c = cells[i];
-        if (!c) return { i, 表头: h.textContent.trim(), 缺: true };
-        return {
-          i, 表头: h.textContent.trim(), 值: c.textContent.trim(),
-          数字列: h.classList.contains("num"),
-          右缘差: Math.round((ink(c).right - ink(h).right) * 10) / 10,
-          左缘差: Math.round((ink(c).left - ink(h).left) * 10) / 10,
-        };
-      });
-      return {
-        cols,
-        表头行高: Math.round(rows[0].getBoundingClientRect().height * 10) / 10,
-        数据行高: Math.round(dataRow.getBoundingClientRect().height * 10) / 10,
-        th内边距: head[0] ? getComputedStyle(head[0]).padding : null,
-        td内边距: cells[0] ? getComputedStyle(cells[0]).padding : null,
-      };
-    });
-    seen[lang] = r;
-    if (r.err) { bad.push(lang + ": " + r.err); continue; }
-    const nums = r.cols.filter((c) => c.数字列);
-    if (nums.length < 3) bad.push(lang + ": 只找到 " + nums.length + " 个数字列表头（class=num 掉了？）");
-    for (const c of nums) {
-      if (c.缺) { bad.push(lang + ": 第 " + c.i + " 列没有对应的数据格"); continue; }
-      if (Math.abs(c.右缘差) > 1) {
-        bad.push(lang + ": 表头「" + c.表头 + "」的右缘与它标注的「" + c.值 + "」差 " + c.右缘差 + "px");
-      }
-    }
-    // 内边距一致 —— 上一版 th 是 4px 8px、td 被 .modal td 改成 8px 0
-    if (r.th内边距 !== r.td内边距) {
-      bad.push(lang + ": th/td 内边距不一致 " + r.th内边距 + " vs " + r.td内边距);
-    }
-    if (Math.abs(r.表头行高 - r.数据行高) > 2) {
-      bad.push(lang + ": 表头行 " + r.表头行高 + " 与数据行 " + r.数据行高 + " 高度差太大");
-    }
-    await page.evaluate(() => {
-      const c = [...document.querySelectorAll(".modal-bg button")].find((x) => /close|关闭/i.test(x.textContent) || x.id === "stats-close");
-      if (c) c.click();
-    });
+    if (lang === "en") await setLang(page, "en");
+    await page.evaluate(() => { const x = document.getElementById("sgf-slots"); if (x) x.click(); });
     await page.waitForTimeout(300);
+    const r = await page.evaluate(() => ({ table: !!document.querySelector(".stats-table"),
+      line: document.getElementById("stats-body").textContent, shown: document.getElementById("stats-body").offsetParent !== null }));
+    seen[lang] = r;
+    if (r.table) bad.push(lang + ": 战绩表还在");
+    if (!r.shown) bad.push(lang + ": 汇总一行没显示");
+    const want = lang === "zh" ? /6 局 · 胜 2 · 负 2 · 平 2/ : /6 games · 2 won · 2 lost · 2 drawn/;
+    if (!want.test(r.line)) bad.push(lang + ": 汇总不对:" + r.line);
+    await page.evaluate(() => { const x = document.getElementById("slots-close"); if (x) x.click(); });
   }
-  if (page.__errors.length) bad.push("errs " + page.__errors.join("|"));
   await page.close();
-  report("AG 统计表的数字表头压在它标注的那列数字上", bad.length === 0, JSON.stringify({ bad, seen }));
+  report("AG 「对局」头上一行汇总:有对局就在、跟语言、数字对(战绩表退役)", bad.length === 0, JSON.stringify({ bad, seen }));
 }
 
 // ---- Test AH: 存档行的两个按钮跟随语言 ----
@@ -1898,7 +1838,8 @@ async function enableSwap2Pvp(page) {
       }
       return {
         行数: rows.length,
-        按钮: rows.map((x) => [...x.querySelectorAll(".slot-ops button")].map((y) => y.textContent.trim())),
+        // v2.0:一行是「整行打开」+「删除」两个按钮
+        按钮: rows.map((x) => [...x.querySelectorAll(":scope > button")].map((y) => y.textContent.trim())),
         弹层里可见的中文: [...new Set(cjk)],
       };
     });
@@ -2041,19 +1982,7 @@ async function enableSwap2Pvp(page) {
     await page.close();
   }
   // ⑦(v1.74 退役)[ ] 开合侧栏 —— 侧栏退役,这两个键随之从说明里删掉
-  // ⑧ ⌘1 / ⌘2 模式
-  {
-    const page = await newPage();
-    const mode = () => page.evaluate(() => {
-      const b = document.querySelector("button[data-mode].active"); return b ? b.dataset.mode : null;
-    });
-    await press(page, "Control+1", 300); await okConfirm(page); const m1 = await mode();
-    await press(page, "Control+2", 300); await okConfirm(page); const m2 = await mode();
-    seen["⑧模式"] = { "⌘1": m1, "⌘2": m2 };
-    if (m1 !== "pvp") bad.push("⌘1 没切到双人（得到 " + m1 + "）");
-    if (m2 !== "ai") bad.push("⌘2 没切到人机（得到 " + m2 + "）");
-    await page.close();
-  }
+  // ⑧(v2.0 退役)⌘1 / ⌘2 —— 换模式只在「新局」卡片里,这两个键从说明里删掉
   // ⑪⑬ ? 打开说明 · Esc 关弹层 / 收侧栏
   {
     const page = await newPage();
@@ -2108,7 +2037,8 @@ async function enableSwap2Pvp(page) {
     // v1.72 拆掉命名存档与「复盘分析」后,弹层里的文字少了一截,覆盖数落到 80 上下、随对局走向时过时不过。
     // 往对局库里放三局,让「记录」弹层里「最近对局」那几行(文字 + 按钮)确定地在场 —— 判据不动。
     const games = [];
-    for (let i = 0; i < 3; i++) games.push({ id: "aj" + i, history: [{ r: 7, c: 7 }, { r: 6, c: 6 }], ruleSet: "free", mode: "ai",
+    // v2.0:战绩表退役,弹层文字又少了一截 —— 对局放到六局(每行三段文字 + 删除),判据与 80 的线都不动
+    for (let i = 0; i < 6; i++) games.push({ id: "aj" + i, history: [{ r: 7, c: 7 }, { r: 6, c: 6 }], ruleSet: "free", mode: "ai",
       difficulty: "normal", humanColor: "b", result: i ? "w" : "b", startedAt: t, endedAt: t++, durationMs: 60000, lines: [] });
     localStorage.setItem("goban.v12.games", JSON.stringify(games));
   });
@@ -2132,8 +2062,14 @@ async function enableSwap2Pvp(page) {
       const a = m[1].split(",").map((x) => parseFloat(x));
       return { r: a[0], g: a[1], b: a[2], a: a.length > 3 ? a[3] : 1 };
     };
-    const over = (fg, bg) => ({ r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a),
-      b: fg.b * fg.a + bg.b * (1 - fg.a), a: 1 });
+    // 坑五(v2.0 才踩到):两层都半透明时不能把结果当成不透明 —— 练习卡片里的按钮(白 6%)叠在卡片(白 6%)上,
+    // 旧写法算出一块纯白底,于是浅色字报出 1.2:1。按 Porter-Duff「source-over」合成,底层不透明时与旧式等价
+    const over = (fg, bg) => {
+      const a = fg.a + bg.a * (1 - fg.a);
+      if (a <= 0) return { r: 0, g: 0, b: 0, a: 0 };
+      const mix = (f, k) => (f * fg.a + k * bg.a * (1 - fg.a)) / a;
+      return { r: mix(fg.r, bg.r), g: mix(fg.g, bg.g), b: mix(fg.b, bg.b), a: a };
+    };
     const pageBg = parse(getComputedStyle(document.body).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
     // 坑二:祖先链上有渐变就算不出单一底色,交给取像素那一路
     const bgOf = (el) => {
@@ -2254,7 +2190,8 @@ async function enableSwap2Pvp(page) {
     // v1.74:侧栏退役,主界面上的文字只剩顶栏几处;侧栏里那些行住进了「新局」卡片、「⋯」和设置弹层 ——
     // 跟着东西走,三处都开着量(判据与 80 的覆盖线都不动)
     const extra = [];
-    for (const [open, close] of [["btn-new", null], ["more-btn", null], ["settings-btn", "settings-close"]]) {
+    // v2.0:战绩表退役后弹层里的文字少了,把快捷键说明与练习卡片也开着量(判据与 80 的覆盖线不动)
+    for (const [open, close] of [["btn-new", null], ["more-btn", null], ["settings-btn", "settings-close"], ["open-help", "help-close"], ["open-practice", "practice-close"]]) {
       await page.evaluate((o) => document.getElementById(o).click(), open);
       await page.waitForTimeout(300);
       extra.push(await computed());
@@ -2710,7 +2647,7 @@ async function enableSwap2Pvp(page) {
     await page.waitForTimeout(300);
     const at = await readHelp();
     seen[lang + "/说明弹层"] = at;
-    if (at.rows < 10) bad.push(lang + ": 快捷键表只量到 " + at.rows + " 行 —— 覆盖不足"); // v1.71 删了「点击」「Tab」两行;v1.74 删了「[ ]」
+    if (at.rows < 6) bad.push(lang + ": 快捷键表只量到 " + at.rows + " 行 —— 覆盖不足"); // v2.0:10 → 6 行 // v1.71 删了「点击」「Tab」两行;v1.74 删了「[ ]」
     if (at.need > at.avail + 1) {
       bad.push(lang + ": 1280×720 下说明弹层要滚（need " + at.need + " > avail " + at.avail + "）");
     }
