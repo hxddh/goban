@@ -12,8 +12,10 @@ const allowed_origins = [_][]const u8{ "zero://app", "zero://inline", "http://12
 const App = struct {
     env_map: *std.process.Environ.Map,
     io: std.Io,
-    handlers: [2]native_sdk.BridgeHandler = undefined,
-    policies: [2]native_sdk.BridgeCommandPolicy = undefined,
+    /// 第一个事件(lifecycle.start)到来时记下;窗口拖动 / 标题栏几何要用它的平台服务。
+    runtime: ?*native_sdk.Runtime = null,
+    handlers: [4]native_sdk.BridgeHandler = undefined,
+    policies: [4]native_sdk.BridgeCommandPolicy = undefined,
 
     fn app(self: *@This()) native_sdk.App {
         return .{
@@ -44,14 +46,19 @@ const App = struct {
             .context = self,
             .invoke_fn = readTextFile,
         };
-        self.policies[0] = .{
-            .name = "goban.writeTextFile",
-            .origins = &allowed_origins,
+        self.handlers[2] = .{
+            .name = "goban.windowDrag",
+            .context = self,
+            .invoke_fn = windowDrag,
         };
-        self.policies[1] = .{
-            .name = "goban.readTextFile",
-            .origins = &allowed_origins,
+        self.handlers[3] = .{
+            .name = "goban.windowChrome",
+            .context = self,
+            .invoke_fn = windowChrome,
         };
+        for (self.handlers, 0..) |handler, i| {
+            self.policies[i] = .{ .name = handler.name, .origins = &allowed_origins };
+        }
         return .{
             .policy = .{
                 .enabled = true,
@@ -63,7 +70,8 @@ const App = struct {
 };
 
 fn onEvent(context: *anyopaque, runtime: *native_sdk.Runtime, event: native_sdk.Event) anyerror!void {
-    _ = context;
+    const self: *App = @ptrCast(@alignCast(context));
+    self.runtime = runtime;
     switch (event) {
         .command => |cmd| {
             var buf: [256]u8 = undefined;
@@ -172,6 +180,31 @@ fn readTextFile(context: *anyopaque, invocation: native_sdk.bridge.Invocation, o
 
     // JSON string result
     return native_sdk.bridge.writeJsonStringValue(output, encoded);
+}
+
+/// 隐藏标题栏(macOS hidden_inset_tall)下,前端顶栏的空白处就是标题栏:mousedown 时
+/// 网页调这里,平台拿当前这次按下交给 performWindowDragWithEvent —— 真移动了才拖,
+/// 双击照系统偏好缩放。标准标题栏的窗口与 Windows 上调了也只是什么都不做。
+fn windowDrag(context: *anyopaque, invocation: native_sdk.bridge.Invocation, output: []u8) anyerror![]const u8 {
+    const self: *App = @ptrCast(@alignCast(context));
+    const runtime = self.runtime orelse return error.HandlerFailed;
+    runtime.options.platform.services.startWindowDrag(invocation.source.window_id) catch {};
+    return std.fmt.bufPrint(output, "true", .{}) catch "true";
+}
+
+/// 红绿灯与标题栏带在内容上压了多少:顶栏据此加高、左边让位。标准标题栏、全屏、
+/// Windows 一律回 0,网页就按原样排。
+fn windowChrome(context: *anyopaque, invocation: native_sdk.bridge.Invocation, output: []u8) anyerror![]const u8 {
+    const self: *App = @ptrCast(@alignCast(context));
+    const runtime = self.runtime orelse return std.fmt.bufPrint(output, "{{\"top\":0,\"left\":0,\"right\":0}}", .{});
+    const chrome = runtime.options.platform.services.windowChrome(invocation.source.window_id);
+    return std.fmt.bufPrint(output, "{{\"top\":{d},\"left\":{d},\"right\":{d},\"buttonsY\":{d},\"buttonsH\":{d}}}", .{
+        chrome.insets.top,
+        chrome.insets.left,
+        chrome.insets.right,
+        chrome.buttons.y,
+        chrome.buttons.height,
+    });
 }
 
 pub fn main(init: std.process.Init) !void {

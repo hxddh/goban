@@ -199,7 +199,21 @@ fn manifestWindow(comptime window: anytype, comptime index: usize) native_sdk.Wi
         options.min_width = windowFloat(window, "min_width", 0);
         options.min_height = windowFloat(window, "min_height", 0);
     }
+    if (comptime @hasField(native_sdk.WindowOptions, "titlebar")) options.titlebar = windowTitlebar(window);
     return options;
+}
+
+/// app.zon 的 `titlebar` 只在 macOS 生效:标题栏透明、内容铺到红绿灯底下,前端自己的顶栏
+/// 就是标题栏(拖动走 goban.windowDrag,让位走 goban.windowChrome)。Windows 保持系统标题栏 ——
+/// 那边的拖动要走命中测试镜像,网页里没有,不冒这个险。
+fn windowTitlebar(comptime window: anytype) native_sdk.WindowTitlebarStyle {
+    if (comptime !std.mem.eql(u8, build_options.platform, "macos")) return .standard;
+    if (comptime !@hasField(@TypeOf(window), "titlebar")) return .standard;
+    const value = window.titlebar;
+    if (comptime std.mem.eql(u8, value, "standard")) return .standard;
+    if (comptime std.mem.eql(u8, value, "hidden_inset")) return .hidden_inset;
+    if (comptime std.mem.eql(u8, value, "hidden_inset_tall")) return .hidden_inset_tall;
+    @compileError("unknown app.zon window titlebar");
 }
 
 /// SDK 0.10 起,窗口初始位置由 `initial_placement` 决定,默认 `.default` = 居中到主屏;

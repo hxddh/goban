@@ -54,7 +54,7 @@
          plus two ways of writing "pill" (999px and 50%); at these sizes the
          differences are invisible one at a time and read as untidy together. */
       --radius-sm: 6px;   /* controls */
-      --radius-md: 10px;  /* cards, segmented groups */
+      --radius-md: 12px;  /* cards, segmented groups(v2.1:10 → 12,与卡片统一)*/
       --radius-lg: 16px;  /* dialogs and the board frame — a deliberate step up */
       --card: rgba(255,255,255,.04);
       --card-border: rgba(255,255,255,.06);
@@ -112,10 +112,24 @@
                        侧栏原本上下相邻两行同为 .text-link 却一个 12 一个 11。
            --fs-body   正文与强调:统计行、练习题面、弹层正文。
            --fs-icon   图标字形与弹层标题。 */
-      --fs-micro: 11px;
-      --fs-ui: 12px;
-      --fs-body: 13px;
-      --fs-icon: 16px;
+      /* v2.1 —— 整档上移 1px:11/12/13/16 → 12/13/14/17。macOS 系统控件是 13pt、正文 13–14pt,
+         苹方在 12px 下笔画已经挤,再加粗就糊。另加一档 --fs-title 给卡片与浮层的标题。 */
+      --fs-micro: 12px;
+      --fs-ui: 13px;
+      --fs-body: 14px;
+      --fs-title: 15px;
+      --fs-icon: 17px;
+      /* v2.1 —— 细线。Retina 上 1px 是 2 个物理像素,满屏「框框」;mac 原生分隔线是 1 个物理像素。
+         只在 2 倍屏上变 0.5px(见下方 @media),普通屏仍是 1px。 */
+      --hair: 1px;
+      /* v2.1 —— 阴影收成两档(此前 12 种取值):1 = 坞里的卡片,2 = 浮层与弹层。棋盘自己的另算 */
+      --shadow-0: 0 1px 2px rgba(0,0,0,.14);  /* 控件:主按钮、分段的选中格、滑块 */
+      --shadow-1: 0 1px 2px rgba(0,0,0,.16), 0 6px 20px rgba(0,0,0,.22);
+      --shadow-2: 0 2px 8px rgba(0,0,0,.20), 0 20px 50px rgba(0,0,0,.38);
+      /* 主按钮:三处颜色(上 / 下 / 字)按主题给,不再在后面逐个主题覆盖整条规则 */
+      --primary-from: #f0d2a8;
+      --primary-to: #d4a574;
+      --primary-fg: #2a1c10;
       /* v1.51 —— 图标尺寸也是 token。七个图标此前是标点符号,画出来的墨迹
          7 / 7 / 12.33 / 7 / 7.17 / 11.67 / 12,大小由字体决定、我们说了不算。
          现在统一 24 单位 viewBox 画进 18px 的盒子,描边 2 单位(渲染 1.5px)。 */
@@ -134,6 +148,9 @@
       --font-num: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
     }
     [data-theme="night"] {
+      --primary-from: #a3dfc0;
+      --primary-to: #6fbf94;
+      --primary-fg: #0b1a13;
       --bg: #0b1210;
       --panel: #121a18;
       --panel-border: #24332e;
@@ -153,6 +170,11 @@
       --btn-ghost: rgba(255,255,255,.05);
     }
     [data-theme="day"] {
+      --shadow-1: 0 1px 2px rgba(60,45,25,.08), 0 6px 18px rgba(60,45,25,.10);
+      --shadow-2: 0 2px 8px rgba(60,45,25,.10), 0 18px 44px rgba(60,45,25,.18);
+      --primary-from: #8a5a2b;
+      --primary-to: #6b431d;
+      --primary-fg: #fff;
       --bg: #e8e4dc;
       --panel: #f4f0e8;
       --panel-border: #d4cdc0;
@@ -179,6 +201,11 @@
       --btn-ghost: rgba(0,0,0,.04);
     }
     [data-theme="notebook"] {
+      --shadow-1: 0 1px 2px rgba(30,40,60,.08), 0 6px 18px rgba(30,40,60,.10);
+      --shadow-2: 0 2px 8px rgba(30,40,60,.10), 0 18px 44px rgba(30,40,60,.18);
+      --primary-from: #4477a8;
+      --primary-to: #2b5580;
+      --primary-fg: #fff;
       --bg: #e6eaf0;
       --panel: #f7f8fb;
       --panel-border: #c5cdd8;
@@ -199,6 +226,7 @@
       --btn-ghost: rgba(0,0,0,.04);
     }
     * { box-sizing: border-box; }
+    @media (min-resolution: 2dppx) { :root { --hair: .5px; } }
     html, body {
       margin: 0; height: 100%;
       background: var(--bg);
@@ -243,11 +271,19 @@
       pointer-events: none;
     }
     .chrome > * { pointer-events: auto; }
+    /* v2.1 · macOS 隐藏标题栏:顶栏就是标题栏。高度跟系统的标题栏带(约 52pt,红绿灯在其中垂直居中),
+       左边给红绿灯让位;空白处可按下拖窗口(host.js)。全屏时宿主报 0,这一段整个不生效。 */
+    html.mac-inset { --chrome-h: max(44px, var(--inset-top, 0px)); }
+    html.mac-inset .chrome {
+      pointer-events: auto; cursor: default;
+      padding-left: calc(var(--inset-left, 0px) + 4px);
+      -webkit-user-select: none; user-select: none;
+    }
     .status-pill {
       font-size: var(--fs-ui); font-weight: 500; color: var(--text);
       padding: 4px 12px; border-radius: 999px;
       background: var(--btn-ghost);
-      border: 1px solid var(--card-border);
+      border: var(--hair) solid var(--card-border);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
       transition: color var(--dur-ui) var(--ease), border-color var(--dur-ui) var(--ease), background var(--dur-ui) var(--ease);
@@ -291,7 +327,7 @@
       display: inline-flex; align-items: center; gap: 7px;
       height: calc(var(--ctl-h) - 2px); padding: 0 11px 0 8px; border-radius: 999px;
       font-size: var(--fs-ui); color: var(--muted); white-space: nowrap;
-      border: 1px solid transparent;
+      border: var(--hair) solid transparent;
       transition: color var(--dur-ui) var(--ease), background var(--dur-ui) var(--ease), border-color var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease);
     }
     .seat-stone { width: 13px; height: 13px; border-radius: 50%; flex: none; }
@@ -308,15 +344,15 @@
     }
     .seat.lose { opacity: .55; }
     .seat-tag {
-      font-size: var(--fs-micro); font-weight: 600; color: var(--win);
+      font-size: var(--fs-micro); font-weight: 400; color: var(--win);
       padding: 1px 7px; border-radius: 999px;
-      border: 1px solid var(--card-border);
-      border: 1px solid color-mix(in srgb, var(--win) 45%, transparent);
+      border: var(--hair) solid var(--card-border);
+      border: var(--hair) solid color-mix(in srgb, var(--win) 45%, transparent);
     }
     .seat-tag[hidden], .rule-tag[hidden], .chrome-label[hidden], .seats[hidden] { display: none; }
     .rule-tag {
       font-size: var(--fs-micro); color: var(--muted);
-      padding: 2px 8px; border-radius: 999px; border: 1px solid var(--card-border);
+      padding: 2px 8px; border-radius: 999px; border: var(--hair) solid var(--card-border);
     }
     .chrome-label { font-size: var(--fs-ui); font-weight: 500; color: var(--text); padding: 0 6px; }
     .seat-dots { display: inline-flex; gap: 3px; align-items: center; }
@@ -333,7 +369,7 @@
       line-height: var(--lh-tight);
       -webkit-appearance: none; appearance: none; border: 0; border-radius: var(--radius-sm);
       background: var(--btn-ghost); color: var(--text);
-      border: 1px solid var(--card-border);
+      border: var(--hair) solid var(--card-border);
       font: inherit; cursor: pointer;
       transition: background var(--dur-ui) var(--ease), transform var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease);
     }
@@ -346,13 +382,13 @@
       padding: 0;
       font-size: var(--fs-icon); line-height: 1;
     }
-    .tool-btn { height: var(--ctl-h); padding: 0 12px; font-size: var(--fs-ui); font-weight: 500; }
+    .tool-btn { height: var(--ctl-h); padding: 0 12px; font-size: var(--fs-ui); font-weight: 400; }
     .icon-btn:hover, .tool-btn:hover { background: var(--btn-hover); }
     .tool-btn.primary {
-      background: linear-gradient(180deg, #f0d2a8, #d4a574);
-      color: #2a1c10; font-weight: 600;
+      background: linear-gradient(180deg, var(--primary-from), var(--primary-to));
+      color: var(--primary-fg); font-weight: 500;
       border-color: transparent;
-      box-shadow: 0 1px 2px rgba(0,0,0,.12);
+      box-shadow: var(--shadow-0);
     }
     .tool-btn:disabled, .icon-btn:disabled { opacity: .35; cursor: default; transform: none; }
     .tool-btn.busy:not(:disabled) { opacity: .55; }
@@ -407,7 +443,7 @@
       -webkit-appearance: none; appearance: none;
       width: 14px; height: 14px; margin-top: -5px; border-radius: 50%;
       background: var(--fg); border: 0;
-      box-shadow: 0 1px 3px rgba(0,0,0,.35);
+      box-shadow: var(--shadow-0);
     }
     .timeline-pos { font-size: var(--fs-ui); color: var(--muted); min-width: 4.5em; text-align: right; }
 
@@ -435,16 +471,16 @@
       padding: 12px;
       background: var(--panel);
       background: color-mix(in srgb, var(--panel) 96%, transparent);
-      border: 1px solid var(--panel-border);
+      border: var(--hair) solid var(--panel-border);
       border-radius: var(--radius-lg);
-      box-shadow: 0 14px 40px rgba(0,0,0,.32);
+      box-shadow: var(--shadow-2);
       backdrop-filter: blur(18px);
       -webkit-backdrop-filter: blur(18px);
       animation: modal-in var(--dur-ui) var(--ease);
     }
     .popover[hidden] { display: none; }
     #new-sheet { width: 300px; }
-    .popover-h { margin: 0 0 12px; font-size: var(--fs-body); font-weight: 600; color: var(--fg); }
+    .popover-h { margin: 0 0 12px; font-size: var(--fs-title); font-weight: 600; color: var(--fg); }
     .popover-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
     .popover.menu { min-width: 180px; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
     .menu-item {
@@ -467,12 +503,11 @@
       cursor: default; border-radius: calc(var(--radius-sm) - 2px);
     }
 
+    /* v2.1:小标题此前按英文排(全大写 + 拉开 0.12em),中文没有大写,只剩「复 盘」两个字散开 */
     .side-h {
       margin: 0 0 8px;
-      font-size: var(--fs-micro); font-weight: 600;
-      letter-spacing: 0.12em; text-transform: uppercase;
-      color: var(--muted);
-      opacity: 0.9;
+      font-size: var(--fs-ui); font-weight: 600;
+      color: var(--text);
     }
 
     .setting-list { display: flex; flex-direction: column; gap: 8px; }
@@ -503,8 +538,9 @@
     /* author display:flex would otherwise override the [hidden] UA rule,
        leaving 思考/难度/执子 rows visible when they should be hidden */
     .setting-row[hidden] { display: none; }
+    /* v2.1:标签是次要色、常规体 —— 此前 13px / 500 / 正文色,与卡片标题一样重 */
     .setting-k {
-      font-size: var(--fs-body); font-weight: 500; color: var(--text);
+      font-size: var(--fs-ui); font-weight: 400; color: var(--muted);
       flex-shrink: 0;
     }
 
@@ -522,7 +558,7 @@
       padding: 2px;
       border-radius: var(--radius-md);
       background: var(--btn-ghost);
-      border: 1px solid var(--card-border);
+      border: var(--hair) solid var(--card-border);
       gap: 0;
       min-width: 0;
     }
@@ -545,12 +581,12 @@
       background: var(--btn-hover);
       background: color-mix(in srgb, var(--panel) 88%, var(--text));
       color: var(--text);
-      box-shadow: 0 1px 2px rgba(0,0,0,.12);
+      box-shadow: var(--shadow-0);
     }
     [data-theme="day"] .pill button.active,
     [data-theme="notebook"] .pill button.active {
       background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,.1);
+      box-shadow: var(--shadow-0);
     }
 
     /* 主题 is the same "pick one of N" control as 模式/难度/执子/规则/语言, and
@@ -620,7 +656,7 @@
       -webkit-appearance: none; appearance: none; border: 0; padding: 0;
       border-radius: 999px;
       background: var(--btn);
-      border: 1px solid var(--card-border);
+      border: var(--hair) solid var(--card-border);
       cursor: pointer;
       transition: background var(--dur-ui) var(--ease);
       flex-shrink: 0;
@@ -658,7 +694,7 @@
       gap: 2px 8px;
       align-items: center;
       padding: 8px 12px;
-      border: 1px solid var(--card-border);
+      border: var(--hair) solid var(--card-border);
       border-radius: var(--radius-md);
       background: var(--btn-ghost);
     }
@@ -705,21 +741,26 @@
       padding: 12px 16px;
       background: var(--panel);
       background: color-mix(in srgb, var(--panel) 92%, transparent);
-      border: 1px solid var(--card-border);
+      border: var(--hair) solid var(--card-border);
       border-radius: var(--radius-md);
-      box-shadow: 0 6px 24px rgba(0,0,0,0.22);
+      box-shadow: var(--shadow-1);
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);
       z-index: 6;
     }
     /* 初见一句话(第一次启动才有)。v1.68 起住在侧栏的空棋谱区里,不再压着棋盘最下面一行 */
     .welcome-bar {
-      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-      margin: 4px 0 8px;
-      padding: 10px 8px 10px 12px;
-      font-size: var(--fs-ui); color: var(--text); line-height: var(--lh-text);
-      border: 1px solid var(--card-border);
+      display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+      /* v2.1 一种卡片(终局 / 复盘 / 练习 / 初见 / 重下同一种):实底 + 细线 + 第 1 档阴影 */
+      padding: 14px 16px;
+      border: var(--hair) solid var(--card-border);
       border-radius: var(--radius-md);
+      background: var(--panel);
+      background: color-mix(in srgb, var(--panel) 90%, transparent);
+      box-shadow: var(--shadow-1);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      font-size: var(--fs-ui); color: var(--text); line-height: var(--lh-text);
     }
     .welcome-bar > span { flex: 1 1 100%; }
     .welcome-bar .tool-btn { border-radius: 999px; }
@@ -729,8 +770,8 @@
     .swap2-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
     .swap2-btn {
       -webkit-appearance: none; appearance: none;
-      border: 1px solid var(--card-border);
-      border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--card-border));
+      border: var(--hair) solid var(--card-border);
+      border: var(--hair) solid color-mix(in srgb, var(--accent) 40%, var(--card-border));
       background: var(--btn-ghost);
       background: color-mix(in srgb, var(--accent) 12%, transparent);
       color: var(--accent-text);
@@ -753,10 +794,15 @@
       cursor: crosshair;
     }
     .practice-card {
-      padding: 12px;
-      border: 1px solid var(--card-border);
+      /* v2.1 一种卡片(终局 / 复盘 / 练习 / 初见 / 重下同一种):实底 + 细线 + 第 1 档阴影 */
+      padding: 14px 16px;
+      border: var(--hair) solid var(--card-border);
       border-radius: var(--radius-md);
-      background: var(--btn-ghost);
+      background: var(--panel);
+      background: color-mix(in srgb, var(--panel) 90%, transparent);
+      box-shadow: var(--shadow-1);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       font-size: var(--fs-body); line-height: var(--lh-text);
       display: flex; flex-direction: column; gap: 8px;
     }
@@ -764,8 +810,8 @@
     /* v2.0:顶栏不再写题集与进度(左边只写「练习」),它们回到卡片头这一行 */
     .practice-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .practice-card-head h3 { margin: 0; font-size: var(--fs-body); font-weight: 600; white-space: nowrap; }
-    .practice-task { font-size: var(--fs-body); font-weight: 600; color: var(--fg); }
-    .practice-progress { white-space: nowrap; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .practice-task { font-size: var(--fs-body); font-weight: 400; color: var(--fg); }
+    .practice-progress { white-space: nowrap; font-weight: 600; font-size: var(--fs-title); color: var(--text); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .practice-source { display: block; }
     .practice-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .practice-actions:not(:has(> :not([hidden]))) { display: none; }
@@ -782,7 +828,10 @@
     #app.practicing #welcome-bar, #app.practicing #end-card, #app.practicing #retry-bar,
     #app.practicing #review-side, #app.practicing #sgf-continue,
     #app.practicing #swap2-bar { display: none !important; }
-    .practice-feedback { font-size: var(--fs-body); font-weight: 600; line-height: 1.4; }
+    .practice-feedback { font-size: var(--fs-body); font-weight: 400; line-height: var(--lh-text); }
+    /* v2.1:空着的「来源」「反馈」两行不占间距(此前题目与按钮之间平白空出 26px) */
+    .practice-feedback:empty { display: none; }
+    .practice-source-row:not(:has(#practice-source:not(:empty))):not(:has(#practice-source-open:not([hidden]))) { display: none; }
     .practice-feedback.good { color: #2f9e5e; }
     /* 同一处错借:答错的反馈用「胜」色。--bad 在四套主题对 --panel 实测 5.1–7.2:1,
        正文字号 4.5:1 的线上有余,所以那层拿 --fg 兑一点来救对比度的 color-mix 也不必了。 */
@@ -795,7 +844,7 @@
     }
     .stats-table th, .stats-table td {
       padding: 4px 8px; text-align: left;
-      border-bottom: 1px solid var(--card-border);
+      border-bottom: var(--hair) solid var(--card-border);
     }
     .stats-table th { color: var(--muted); font-weight: 600; }
     .stats-table td.num, .stats-table th.num { text-align: right; }
@@ -815,7 +864,7 @@
     .backup-row {
       display: flex; align-items: center; gap: 4px;
       margin-top: 12px; padding-top: 8px;
-      border-top: 1px solid var(--card-border);
+      border-top: var(--hair) solid var(--card-border);
       font-size: var(--fs-ui);
     }
     .backup-row .muted { margin-right: auto; }
@@ -834,8 +883,8 @@
     .text-link.danger:hover { color: var(--bad); }
     .continue-btn {
       -webkit-appearance: none; appearance: none; width: 100%; margin-top: 8px;
-      border: 1px solid var(--card-border);
-      border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--card-border));
+      border: var(--hair) solid var(--card-border);
+      border: var(--hair) solid color-mix(in srgb, var(--accent) 35%, var(--card-border));
       background: var(--btn-ghost);
       background: color-mix(in srgb, var(--accent) 12%, transparent);
       color: var(--accent-text);
@@ -858,28 +907,8 @@
     }
 
 
-    /* v1.65:日间原来与练习本共用这条蓝色 —— 练习本的强调色本来就是墨水蓝,日间却是
-       暖米色,整套主题里只有「新局」一处冷蓝,像从别的应用借来的。换成日间自己的
-       暖棕;白字在最浅处 #8a5a2b 上是 5.9:1,仍过 4.5。 */
-    /* 夜盘的强调色是薄荷绿,主按钮却沿用木盘的杏色 —— 同一个问题的另一处 */
-    [data-theme="night"] .tool-btn.primary {
-      background: linear-gradient(180deg, #a3dfc0, #6fbf94);
-      color: #0b1a13;
-    }
-    [data-theme="day"] .tool-btn.primary {
-      background: linear-gradient(180deg, #8a5a2b, #6b431d);
-      color: #fff;
-    }
-    [data-theme="notebook"] .tool-btn.primary {
-      /* v1.33.2: was #6a9fd4 → #3b6ea5. White 12px/600 is not "large text",
-         so it needs 4.5:1 — and it got 2.79 at the button's top edge, 3.44–4.20
-         across the band the glyphs actually occupy. This lived here since v1.9;
-         every contrast audit before now SKIPPED gradient backgrounds outright,
-         which is exactly why it survived four of them. Same hue, shifted down
-         so the lightest point (the top edge) already clears 4.5. */
-      background: linear-gradient(180deg, #4477a8, #2b5580);
-      color: #fff;
-    }
+    /* v2.1:四套主题的主按钮颜色挪进各自的 token(--primary-from / --primary-to / --primary-fg),
+       取值不变 —— 夜盘薄荷绿、日间暖棕(白字最浅处 5.9:1)、练习本墨水蓝(白字最浅处 ≥ 4.5,v1.33.2 量过)。 */
     .learn-badge { font-variant-numeric: tabular-nums; line-height: 1; }
     .badge {
       font-size: var(--fs-micro); padding: 2px 4px; border-radius: 999px;
@@ -903,9 +932,9 @@
       background: var(--panel);
       background: color-mix(in srgb, var(--panel) 94%, #000);
       color: var(--text);
-      border: 1px solid var(--panel-border);
+      border: var(--hair) solid var(--panel-border);
       padding: 8px 16px; border-radius: 999px; font-size: var(--fs-body); font-weight: 500;
-      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+      box-shadow: var(--shadow-2);
       opacity: 0; pointer-events: none;
       transition: opacity var(--dur-panel) var(--ease), transform var(--dur-panel) var(--ease), bottom var(--dur-panel) var(--ease);
       max-width: min(90vw, 420px);
@@ -933,9 +962,9 @@
       max-height: calc(100vh - 32px);
       overflow-y: auto;
       overscroll-behavior: contain;
-      background: var(--panel); border: 1px solid var(--panel-border);
+      background: var(--panel); border: var(--hair) solid var(--panel-border);
       border-radius: var(--radius-lg); padding: 16px 20px;
-      box-shadow: 0 24px 60px rgba(0,0,0,.4);
+      box-shadow: var(--shadow-2);
       animation: modal-in var(--dur-panel) var(--ease);
     }
     @keyframes modal-in {
@@ -953,7 +982,7 @@
     /* 说明弹层装的是两列表格,走宽的那一档 */
     #help-modal .modal { --modal-w: var(--modal-w-table); }
     .keys-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); }
-    .keys-table td { padding: 8px 0; border-bottom: 1px solid var(--card-border); line-height: var(--lh-text); }
+    .keys-table td { padding: 8px 0; border-bottom: var(--hair) solid var(--card-border); line-height: var(--lh-text); }
     .keys-table td:first-child {
       /* 上面那条注释记着:width:1% 单用会让键自己折行,white-space:nowrap 单用会让
          最长的那个键把整列撑到 175px —— 两条都试过,都更糟,于是 42% 的浪费留着了。
@@ -1031,19 +1060,22 @@
 
     /* —— 终局总结卡:侧栏顶部,棋盘保持可见 —— */
     .end-card {
-      margin: 8px 0 4px; padding: 10px 12px;
-      border: 1px solid var(--card-border);
-      border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--card-border));
+      /* v2.1 一种卡片(终局 / 复盘 / 练习 / 初见 / 重下同一种):实底 + 细线 + 第 1 档阴影 */
+      padding: 14px 16px;
+      border: var(--hair) solid var(--card-border);
       border-radius: var(--radius-md);
-      background: var(--btn-ghost);
-      background: color-mix(in srgb, var(--accent) 8%, transparent);
+      background: var(--panel);
+      background: color-mix(in srgb, var(--panel) 90%, transparent);
+      box-shadow: var(--shadow-1);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       font-size: var(--fs-body); line-height: var(--lh-text);
     }
     .end-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .end-card-head strong { font-size: var(--fs-body); font-weight: 700; color: var(--fg); }
+    .end-card-head strong { font-size: var(--fs-title); font-weight: 600; color: var(--fg); }
     .end-card-x { padding: 2px 8px; font-size: var(--fs-icon); line-height: 1; color: var(--muted); }
     .end-card-body { margin: 6px 0 8px; color: var(--text); }
-    .endcard-key { font-weight: 600; }
+    .endcard-key { font-weight: 400; color: var(--text); }
     .endcard-line, .endcard-more { font-size: var(--fs-ui); margin-top: 2px; }
     .end-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .end-card-actions .tool-btn { flex: 1 1 auto; }
@@ -1051,23 +1083,30 @@
     /* —— 重下关键一手:进行中的横条 —— */
     .retry-bar {
       display: flex; align-items: center; justify-content: space-between; gap: 8px;
-      margin: 6px 0 2px; padding: 6px 10px;
-      border-radius: var(--radius-sm);
-      background: var(--btn-ghost);
-      /* v2.0(B25):此前写死金色 #c9911e,四套主题一个样;改走主题的强调色 */
-      background: color-mix(in srgb, var(--accent) 12%, transparent);
-      border: 1px solid var(--card-border);
-      border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--card-border));
+      /* v2.1 一种卡片(终局 / 复盘 / 练习 / 初见 / 重下同一种):实底 + 细线 + 第 1 档阴影 */
+      padding: 14px 16px;
+      border: var(--hair) solid var(--card-border);
+      border-radius: var(--radius-md);
+      background: var(--panel);
+      background: color-mix(in srgb, var(--panel) 90%, transparent);
+      box-shadow: var(--shadow-1);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       font-size: var(--fs-ui); color: var(--text);
     }
     .retry-bar[hidden] { display: none; }
 
     /* —— 常驻复盘面板 —— */
     .review-side {
-      margin-top: 8px; padding: 8px 10px 10px;
-      border: 1px solid var(--card-border);
+      /* v2.1 一种卡片(终局 / 复盘 / 练习 / 初见 / 重下同一种):实底 + 细线 + 第 1 档阴影 */
+      padding: 14px 16px;
+      border: var(--hair) solid var(--card-border);
       border-radius: var(--radius-md);
-      background: var(--btn-ghost);
+      background: var(--panel);
+      background: color-mix(in srgb, var(--panel) 90%, transparent);
+      box-shadow: var(--shadow-1);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
     }
     .review-side[hidden] { display: none; }
     .review-side-head { display: flex; align-items: center; gap: 4px; }
@@ -1075,36 +1114,37 @@
     .review-side-head .spacer { flex: 1; }
     .review-side-head .text-link { padding: 4px 6px; }
     .review-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 8px; }
+    /* v2.1:失着手数是一枚小胶囊。证据强度仍画在形状上,只是不再「2px 红框 + 红字 + 底色」三层叠着:
+       可证明 = 浅红实底;引擎比较 = 细红线;局势波动 = 虚线次要色;正在看的那一手 = 实心红 */
     .review-chip {
       -webkit-appearance: none; appearance: none; cursor: pointer;
-      min-width: 28px; height: 24px; padding: 0 6px;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--card-border);
-      background: transparent; color: var(--text);
+      min-width: 30px; height: 24px; padding: 0 9px;
+      border-radius: 999px;
+      border: var(--hair) solid transparent;
+      background: transparent; color: var(--bad);
       font: inherit; font-size: var(--fs-ui); font-weight: 600;
       font-variant-numeric: tabular-nums;
     }
-    /* 证据强度也画在形状上:可证明 = 实心边;引擎比较 = 实线;局势波动 = 虚线 */
-    .review-chip.tier-hard { border-color: var(--bad); border-width: 2px; }
-    .review-chip.tier-engine { border-color: var(--bad); }
-    .review-chip.tier-soft { border-style: dashed; color: var(--muted); }
-    /* 折叠着的「局势波动」:不是一手,是一扇门 —— 不画边,字是次要色 */
-    .review-chip.more { border-color: transparent; color: var(--muted); font-weight: 500; }
-    .review-chip.cur {
-      background: var(--btn-hover);
-      background: color-mix(in srgb, var(--accent) 32%, transparent);
+    .review-chip.tier-hard {
+      background: var(--btn-ghost);
+      background: color-mix(in srgb, var(--bad) 18%, transparent);
     }
+    .review-chip.tier-engine { border-color: var(--bad); }
+    .review-chip.tier-soft { border-color: var(--card-border); border-style: dashed; color: var(--muted); }
+    /* 折叠着的「局势波动」:不是一手,是一扇门 —— 不画边,字是次要色 */
+    .review-chip.more { color: var(--muted); font-weight: 500; }
+    .review-chip.cur { background: var(--bad); color: var(--panel); border-color: var(--bad); }
     .review-explain { font-size: var(--fs-ui); line-height: var(--lh-text); color: var(--text); }
     /* v1.73:按词均衡换行,关键一句不再单字掉到下一行 */
     /* v1.74(B10):不再整段均衡换行 —— 中文没有词边界,v1.73 的 balance 把「第 11 手」
        从数字后面切开。改为「第 N 手」内部用不断行空格粘住(app.js / review.js 的 glueMove)。 */
-    .rs-head { font-weight: 600; font-size: var(--fs-body); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+    .rs-head { font-weight: 600; font-size: var(--fs-title); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
     .rs-lines { margin: 6px 0 0; padding-left: 18px; }
     .rs-lines li { margin: 2px 0; }
     .rb-tier {
       font-size: var(--fs-micro); font-weight: 600; color: var(--muted);
       padding: 1px 6px; border-radius: 999px;
-      border: 1px solid var(--card-border);
+      border: var(--hair) solid var(--card-border);
       white-space: nowrap;
     }
     .tier-hard .rb-tier { color: var(--bad); border-color: var(--bad); }
@@ -1148,7 +1188,7 @@
       height: calc(var(--ctl-h) - 6px); padding: 0 26px 0 10px;
       font: inherit; font-size: var(--fs-ui); color: var(--text);
       background: var(--btn-ghost) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center;
-      border: 1px solid var(--card-border); border-radius: var(--radius-sm);
+      border: var(--hair) solid var(--card-border); border-radius: var(--radius-sm);
       cursor: pointer;
     }
     .skill-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
