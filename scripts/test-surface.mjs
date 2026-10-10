@@ -1070,6 +1070,92 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
   await page.close();
 }
 
+// ---- S19. v2.1 界面精修 ----
+// 字:看得见的字不小于 12px、没有 700 粗体;一屏上的「字号 × 字重」组合 ≤ 6;≥500 的字占比 ≤ 50%。
+// 卡片:五种卡片(初见 · 练习 · 终局 · 复盘 · 重下)圆角 / 内边距 / 阴影 / 边框一模一样。
+// 阴影:样式表里的 box-shadow 只有三档 token、描边环与棋盘自己的那一个。Retina 下边框是 0.5px。
+// 细节:练习卡片没有空行;小标题不再拉字距、不大写;中点「·」两边都有空格。
+{
+  const census = (page) => page.evaluate(() => {
+    const out = [];
+    const walk = document.createTreeWalker(document.getElementById("app"), NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const txt = n.textContent.replace(/\s+/g, "");
+      if (!txt || /^[×⋯✕]$/.test(txt)) continue; // 单个符号是图标,不算字
+      const e = n.parentElement;
+      if (!e || e.closest(".sr-only, canvas, svg")) continue;
+      const r = e.getBoundingClientRect();
+      const cs = getComputedStyle(e);
+      if (r.width < 2 || r.height < 2 || cs.visibility === "hidden" || e.offsetParent === null || +cs.opacity === 0) continue;
+      out.push({ t: txt.slice(0, 12), size: parseFloat(cs.fontSize), weight: +cs.fontWeight, n: txt.length });
+    }
+    return out;
+  });
+  const sum = (rows) => {
+    const combos = new Set(rows.map((r) => r.size + "/" + r.weight));
+    const all = rows.reduce((a, r) => a + r.n, 0), heavy = rows.filter((r) => r.weight >= 500).reduce((a, r) => a + r.n, 0);
+    return { combos: [...combos], heavy: all ? Math.round((100 * heavy) / all) : 0,
+      small: rows.filter((r) => r.size < 12).map((r) => r.t + "@" + r.size), bold: rows.filter((r) => r.weight >= 700).map((r) => r.t) };
+  };
+  const card = (page, id) => page.evaluate((id) => { const e = document.getElementById(id); if (!e || e.offsetParent === null) return null;
+    const cs = getComputedStyle(e); return [cs.borderTopLeftRadius, cs.paddingTop + " " + cs.paddingLeft, cs.boxShadow, cs.borderTopWidth].join(" | "); }, id);
+  const page = await newPage();
+  const click = clicker(page);
+  const screens = {}, cards = {};
+  screens.empty = sum(await census(page));
+  cards["welcome-bar"] = await card(page, "welcome-bar");
+  await page.evaluate(() => document.getElementById("open-practice").click()); await page.waitForTimeout(600);
+  screens.practice = sum(await census(page));
+  cards["practice-card"] = await card(page, "practice-modal");
+  // 题目与按钮之间:没有空行占位,间距与卡片里别处一样(≤ 12px)
+  const practiceGap = await page.evaluate(() => {
+    const task = document.getElementById("practice-task").getBoundingClientRect();
+    const btn = [...document.querySelectorAll("#practice-modal .practice-actions button")].find((b) => b.offsetParent !== null);
+    return btn ? Math.round(btn.getBoundingClientRect().top - task.bottom) : -1;
+  });
+  await page.evaluate(() => document.getElementById("practice-close").click()); await page.waitForTimeout(300);
+  await setup(page, { diff: "normal" });
+  for (let i = 0; i < 40; i++) { if (await page.evaluate(() => !document.getElementById("end-card").hidden)) break; await click(1 + (i % 13), 1 + ((i * 5) % 13)); await page.waitForTimeout(450); }
+  await page.waitForTimeout(500);
+  screens.end = sum(await census(page));
+  cards["end-card"] = await card(page, "end-card");
+  await page.evaluate(() => document.getElementById("end-card-review").click()); await page.waitForTimeout(900);
+  screens.review = sum(await census(page));
+  cards["review-side"] = await card(page, "review-side");
+  const sideH = await page.evaluate(() => { const cs = getComputedStyle(document.querySelector(".side-h")); return { ls: cs.letterSpacing, tt: cs.textTransform }; });
+  await page.keyboard.press("Escape"); await page.waitForTimeout(300);
+  await page.evaluate(() => document.getElementById("end-card-retry").click()); await page.waitForTimeout(900);
+  cards["retry-bar"] = await card(page, "retry-bar");
+  const dots = await page.evaluate(() => {
+    const bad = [];
+    for (const lang of ["zh", "en"]) for (const [k, v] of Object.entries(window.GobanI18n.DICT[lang])) if (typeof v === "string" && /[^ ]·|·[^ ]/.test(v)) bad.push(lang + ":" + k);
+    return bad;
+  });
+  await page.close();
+  // Retina:卡片描边是一个物理像素
+  const rctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
+  const rp = await rctx.newPage();
+  await rp.goto(ORIGIN + "/index.html", { waitUntil: "networkidle" }); await rp.evaluate(() => localStorage.clear()); await rp.reload({ waitUntil: "networkidle" });
+  await rp.waitForTimeout(250);
+  // Chromium 把小于 1px 的边框算成 1px(WebKit 照画 0.5px),所以量 token 与它的用法,不量计算后的宽度
+  const hair = await rp.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--hair").trim());
+  await rctx.close();
+  const css = fs.readFileSync(path.join(webRoot, "styles.css"), "utf8");
+  const shadows = [...css.matchAll(/box-shadow:\s*([^;]+);/g)].map((m) => m[1].trim())
+    .filter((v) => !/^(none|var\(--shadow-[012]\)|var\(--board-shadow\)(,.*)?|(inset )?0 0 0 [\d.]+px .*)$/.test(v));
+  // 边框一律走 --hair,不再有写死的 1px 实线;卡片那一块也是
+  const solid1 = [...css.matchAll(/border(?:-(?:top|bottom|left|right))?:\s*1px solid[^;]*;/g)].map((m) => m[0]);
+  const cardHair = /\.retry-bar\s*\{[^}]*border: var\(--hair\) solid var\(--card-border\)/.test(css);
+  const cardStyles = new Set(Object.values(cards));
+  const ok =
+    Object.values(screens).every((x) => x.small.length === 0 && x.bold.length === 0 && x.combos.length <= 6 && x.heavy <= 50) &&
+    Object.values(cards).every(Boolean) && cardStyles.size === 1 &&
+    shadows.length === 0 && /^0?\.5px$/.test(hair) && solid1.length === 0 && cardHair &&
+    practiceGap >= 0 && practiceGap <= 12 && sideH.ls === "normal" && sideH.tt === "none" && dots.length === 0;
+  report("S19 v2.1 界面精修:字 ≥12px · 无 700 · 一屏 ≤6 种字号字重 · 粗字 ≤50% · 五种卡片一个样 · 阴影三档 · Retina 0.5px 描边 · 练习卡片无空行 · 小标题不拉字距 · 中点两边留空", ok,
+    JSON.stringify({ screens, cards, shadows, hair, solid1, cardHair, practiceGap, sideH, dots }));
+}
+
 await browser.close();
 server.close();
 fs.rmSync(WORKER_SRC_DIR, { recursive: true, force: true });

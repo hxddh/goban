@@ -141,6 +141,59 @@
       .filter(Boolean);
   }
 
+  /**
+   * v2.1 · macOS 隐藏标题栏:红绿灯压在我们自己的顶栏上。问宿主压了多少(全屏、标准标题栏、
+   * Windows、浏览器里都是 0),据此给 <html> 挂 .mac-inset 并写 --inset-top / --inset-left;
+   * 顶栏空白处按下就把这次按下交给系统去拖窗口(双击照系统偏好缩放)。
+   */
+  function initTitlebar() {
+    if (!hasZero() || typeof global.zero.invoke !== "function") return;
+    const root = document.documentElement;
+    let pending = 0;
+    let last = "0/0";
+    async function sync() {
+      let c = null;
+      try {
+        c = await global.zero.invoke("goban.windowChrome", {});
+        if (typeof c === "string") c = JSON.parse(c);
+      } catch (_) {
+        c = null;
+      }
+      const top = c && c.top > 0 ? Math.round(c.top) : 0;
+      const left = top > 0 ? Math.round(c.left || 0) : 0;
+      const key = top + "/" + left;
+      if (key === last) return;
+      last = key;
+      root.classList.toggle("mac-inset", top > 0);
+      root.style.setProperty("--inset-top", top + "px");
+      root.style.setProperty("--inset-left", left + "px");
+      // 顶栏高度变了,棋盘与坞要重排(它们只在 resize 时量)
+      global.dispatchEvent(new Event("resize"));
+    }
+    function later() {
+      // 进出全屏有动画,结束时几何才定:立刻量一次,动画后再量一次。
+      clearTimeout(pending);
+      sync();
+      pending = setTimeout(sync, 700);
+    }
+    global.addEventListener("resize", later);
+    sync();
+
+    const chrome = document.querySelector(".chrome");
+    if (!chrome) return;
+    chrome.addEventListener("mousedown", (e) => {
+      if (e.button !== 0 || !root.classList.contains("mac-inset")) return;
+      if (e.target.closest("button, a, input, select, textarea, [role=button]")) return;
+      e.preventDefault();
+      global.zero.invoke("goban.windowDrag", {}).catch(() => {});
+    });
+  }
+
+  if (typeof document !== "undefined") {
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initTitlebar);
+    else initTitlebar();
+  }
+
   global.GobanHost = {
     hasZero,
     bytesToBase64,

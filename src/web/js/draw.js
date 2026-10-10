@@ -539,10 +539,12 @@
       // really only those two settings anyway. One CSS pixel is the classic
       // hairline and stays that at every size; the border keeps its weight so
       // the frame still reads above the grid.
-      const gridW = inkW(dpr);
+      // v2.1:2 倍屏上盘内线只用 1 个物理像素(此前 2 个,比棋子还抢眼)—— mac 原生的分隔线就是这个粗细;
+      // 线细了,墨稍加一点(0.72 → 0.85)免得发虚。1 倍屏不变。
+      const gridW = dpr >= 2 ? 1 : inkW(dpr);
       ctx.lineWidth = gridW;
       // v1.65:盘内线退后一步(不透明度 0.72),外框保持实墨 —— 盘面更「静」,框仍立得住
-      ctx.globalAlpha = 0.72;
+      ctx.globalAlpha = dpr >= 2 ? 0.85 : 0.72;
       ctx.lineCap = "square";
       const a0 = crisp(pad, gridW);
       const a1 = crisp(pad + step * (SIZE - 1), gridW);
@@ -558,7 +560,7 @@
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
-      const edgeW = inkW(dpr * 2);
+      const edgeW = inkW(dpr >= 2 ? 3 : dpr * 2); // 外框 2 倍屏下 4 → 3 物理像素,与变细的盘内线相称
       ctx.lineWidth = edgeW;
       const e0 = crisp(pad - 1, edgeW);
       const e1 = crisp(pad + step * (SIZE - 1) + 1, edgeW);
