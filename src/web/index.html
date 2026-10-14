@@ -34,7 +34,9 @@
       <span class="chrome-label" id="chrome-label" hidden></span>
       <span class="sr-only" id="status" role="status" aria-live="polite" data-i18n="status.blackTurn">黑棋落子</span>
       <span class="sr-only" id="match"></span>
-      <span class="meta-chip num" id="clock">00:00</span>
+      <!-- v3.0:下棋时不显示计时器(这不是计时对局,一直在跳只会分走眼睛);用时写在终局卡上。
+           元素留着、不显示:它仍是本局用时的唯一文本出口(练习暂停计时等闸门读它) -->
+      <span class="num" id="clock" hidden>00:00</span>
       <span class="spacer"></span>
       <div class="chrome-actions">
         <button type="button" class="tool-btn" id="undo" disabled title="悔棋 (Z)" data-i18n="btn.undo" data-i18n-title="btn.undo.title">悔棋</button>
@@ -81,11 +83,14 @@
           <button type="button" class="text-link end-card-x" id="end-card-close" aria-label="收起" data-i18n-aria="endcard.close" title="收起" data-i18n-title="endcard.close">×</button>
         </div>
         <div id="end-card-body" class="end-card-body"></div>
+        <div class="muted end-card-time" id="end-card-time"></div>
+        <!-- v3.0:主按钮「再来一局」(同样的设置一键开局);重下、复盘退为次要 -->
         <div class="end-card-actions">
-          <button type="button" class="tool-btn primary" id="end-card-retry" hidden data-i18n="endcard.retryBtn">重下</button>
+          <button type="button" class="tool-btn primary end-card-main" id="end-card-rematch" data-i18n="endcard.rematch">再来一局</button>
+          <button type="button" class="tool-btn" id="end-card-retry" hidden data-i18n="endcard.retryBtn">重下</button>
           <button type="button" class="tool-btn" id="end-card-back" hidden data-i18n="retry.backBtn">回到原局</button>
           <button type="button" class="tool-btn" id="end-card-review" data-i18n="endcard.review">看复盘</button>
-          <button type="button" class="tool-btn" id="end-card-again" hidden></button>
+          <button type="button" class="tool-btn primary" id="end-card-again" hidden></button>
         </div>
       </section>
       <div class="retry-bar" id="retry-bar" hidden role="status">
@@ -166,16 +171,16 @@
           <span class="setting-k" data-i18n="set.difficulty">难度</span>
           <div class="pill" id="diff-seg" role="group" aria-label="难度" data-i18n-aria="aria.difficulty">
             <button type="button" data-diff="easy" title="入门：会挡住你的冲四，但常常漏掉活三——给你做杀的机会" data-i18n="diff.easy" data-i18n-title="diff.easy.title">简</button>
-            <button type="button" data-diff="normal" class="active" title="普通：必挡直接威胁，会算连续冲四，也会用棋型组织进攻；每手约 0.4 秒" data-i18n="diff.normal" data-i18n-title="diff.normal.title">普</button>
-            <button type="button" data-diff="hard" title="困难：看得懂四三、双三的棋型引擎，会做杀、会防杀，每手约 2 秒" data-i18n="diff.hard" data-i18n-title="diff.hard.title">难</button>
-            <button type="button" data-diff="extreme" title="极限：与困难同一套搜索，多给两倍半的时间——实测明显强于困难；难局最多算 5–8 秒" data-i18n="diff.extreme" data-i18n-title="diff.extreme.title">极</button>
+            <button type="button" data-diff="normal" class="active" title="普通：必挡直接威胁，会算连续冲四，也会用棋型组织进攻" data-i18n="diff.normal" data-i18n-title="diff.normal.title">普</button>
+            <button type="button" data-diff="hard" title="困难：看得懂四三、双三的棋型引擎，会做杀、会防杀；每手至多约 2 秒" data-i18n="diff.hard" data-i18n-title="diff.hard.title">难</button>
+            <button type="button" data-diff="extreme" title="极限：与困难同一套搜索，时间用满——实测明显强于困难；每手至多 5 秒" data-i18n="diff.extreme" data-i18n-title="diff.extreme.title">极</button>
           </div>
         </div>
         <div class="setting-row" id="color-field">
           <span class="setting-k" data-i18n="set.color">执子</span>
           <div class="pill" id="color-seg" role="group" aria-label="执子" data-i18n-aria="aria.color">
             <button type="button" data-human="b" class="active" data-i18n="side.black">黑</button>
-            <button type="button" data-human="w" data-i18n="side.white">白</button>
+            <button type="button" data-human="w" title="执白：电脑先手。自由规则下先手优势很大，执白大约难一档" data-i18n="side.white" data-i18n-title="side.white.title">白</button>
             <button type="button" data-human="alt" title="每一局交换执子：一局你先手，一局电脑先手" data-i18n="color.alt" data-i18n-title="color.alt.title">轮流</button>
           </div>
         </div>

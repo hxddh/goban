@@ -103,7 +103,11 @@
    *  top so mousemove repaints cost one drawImage, not a full repaint. */
   let baseCanvas = null;
   let baseCtx = null;
+  /** 赢的那一刻的总长(ms);app.js 的 winFlashUntil 按它设,终局卡在它之后才进来 */
+  const WIN_MOMENT_MS = 1000;
   let baseSig = "";
+  /** 静态层重画了几次(闸门 S20 量「落子动画不再整盘重画」用) */
+  let basePaints = 0;
 
   function attach(canvas, ctx, modelFn) {
     _canvas = canvas;
@@ -241,14 +245,17 @@
   // Restrained place-in: a small monotonic scale-up (no overshoot/pop) over
   // 120ms, only for the just-placed stone. Honors reduce-motion (no anim), so
   // it never competes with reading the board mid-game.
+  // v3.0:电脑的子落得慢一点(260ms,从 0.82 起),让你看见它下在哪;你自己的子仍是 120ms。
+  function placeDur(a) { return a && a.ai ? 260 : 120; }
   function stoneScale(r, c) {
     const m = getM();
     const placeAnim = m && m.placeAnim;
     if (!placeAnim || placeAnim.r !== r || placeAnim.c !== c) return 1;
     if (prefersReducedMotion()) return 1;
-    const t = Math.min(1, (performance.now() - placeAnim.t0) / 120);
+    const t = Math.min(1, (performance.now() - placeAnim.t0) / placeDur(placeAnim));
     if (t >= 1) return 1;
-    return 0.88 + 0.12 * easeOutCubic(t);
+    const from = placeAnim.ai ? 0.82 : 0.88;
+    return from + (1 - from) * easeOutCubic(t);
   }
 
   /** #rrggbb toward #rrggbb by t (six-digit hex only). Used to mute a stone into its own preview. */
@@ -401,7 +408,7 @@
       let need = false;
       const m = getM();
       if (m && m.placeAnim) {
-        if (performance.now() - m.placeAnim.t0 < 140) need = true;
+        if (performance.now() - m.placeAnim.t0 < placeDur(m.placeAnim) + 20) need = true;
         else if (m.clearPlaceAnim) m.clearPlaceAnim();
       }
       if (m && performance.now() < (m.winFlashUntil || 0)) need = true;
@@ -411,12 +418,12 @@
     rafId = requestAnimationFrame(tick);
   }
 
-  function boardSig(board) {
+  function boardSig(board, skip) {
     let h = 0;
     for (let r = 0; r < SIZE; r++)
       for (let c = 0; c < SIZE; c++) {
         const s = board[r][c];
-        if (s) h = (Math.imul(h, 31) + r * 15 + c + (s === "b" ? 300 : 600)) | 0;
+        if (s && !(skip && skip.r === r && skip.c === c)) h = (Math.imul(h, 31) + r * 15 + c + (s === "b" ? 300 : 600)) | 0;
       }
     return h;
   }
@@ -443,6 +450,26 @@
    *   scaleFor(r, c) -> 1 for a still position; draw() passes stoneScale so the
    *   place animation keeps working.
    */
+  /** 一个点上的一颗子(木 / 夜 / 日是有渐变的子,练习本是铅笔三角与圆)。整盘与动画中的新子共用。 */
+  function paintCellStone(ctx, r, c, s, o) {
+    const th = THEMES[o.themeId] || THEMES.wood;
+    const x = o.pad + c * o.step;
+    const y = o.pad + r * o.step;
+    const sc = o.scale == null ? 1 : o.scale;
+    if (th.style === "pencil") {
+      const lw = Math.max(1.8, o.step * 0.08);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(sc, sc);
+      ctx.translate(-x, -y);
+      if (s === "b") drawOutlineTriangle(ctx, x, y, o.step * 0.78, th.pencilB || th.pencil, lw);
+      else drawOutlineCircle(ctx, x, y, o.step * 0.36, th.pencilW || th.pencil, lw);
+      ctx.restore();
+    } else {
+      paintStone(ctx, x, y, o.step * STONE_R * sc, s, o.themeId, { dpr: o.dpr || 1 });
+    }
+  }
+
   function paintPosition(ctx, opts) {
     const board = opts.board;
     const themeId = opts.themeId;
@@ -452,6 +479,7 @@
     const dpr = opts.dpr || 1;
     const coords = !!opts.coords;
     const scaleFor = opts.scaleFor || function () { return 1; };
+    const skip = opts.skip || null;
     const th = THEMES[themeId] || THEMES.wood;
     ctx.clearRect(0, 0, w, w);
 
@@ -504,24 +532,11 @@
         ctx.lineTo(x - s, y + s);
         ctx.stroke();
       }
-      const markR = step * 0.36;
-      const lw = Math.max(1.8, step * 0.08);
-      const inkB = th.pencilB || th.pencil;
-      const inkW = th.pencilW || th.pencil;
       for (let r = 0; r < SIZE; r++) {
         for (let c = 0; c < SIZE; c++) {
           const s = board[r][c];
-          if (!s) continue;
-          const x = pad + c * step;
-          const y = pad + r * step;
-          const sc = scaleFor(r, c);
-          ctx.save();
-          ctx.translate(x, y);
-          ctx.scale(sc, sc);
-          ctx.translate(-x, -y);
-          if (s === "b") drawOutlineTriangle(ctx, x, y, step * 0.78, inkB, lw);
-          else drawOutlineCircle(ctx, x, y, markR, inkW, lw);
-          ctx.restore();
+          if (!s || (skip && skip.r === r && skip.c === c)) continue;
+          paintCellStone(ctx, r, c, s, { themeId, pad, step, dpr, scale: scaleFor(r, c) });
         }
       }
     } else {
@@ -579,15 +594,11 @@
       // four-in-a-row read as four separate discs. Real stones sit almost
       // edge to edge; 0.46 lets a line read as a line, which on a gomoku
       // board is the one thing the eye is there to do.
-      const radius = step * STONE_R;
       for (let r = 0; r < SIZE; r++) {
         for (let c = 0; c < SIZE; c++) {
           const s = board[r][c];
-          if (!s) continue;
-          paintStone(
-            ctx, pad + c * step, pad + r * step,
-            radius * scaleFor(r, c), s, themeId, { dpr: dpr }
-          );
+          if (!s || (skip && skip.r === r && skip.c === c)) continue;
+          paintCellStone(ctx, r, c, s, { themeId, pad, step, dpr, scale: scaleFor(r, c) });
         }
       }
     }
@@ -634,18 +645,30 @@
     }
     // While the place animation runs the animated stone lives in the base,
     // so keep repainting it; otherwise repaint only on real changes.
-    const animActive = !!m.placeAnim;
-    const sig = themeId + "|" + (m.coords ? 1 : 0) + "|" + boardSig(board);
-    if (animActive || sig !== baseSig) {
+    // v3.0:落子动画只画那一子。此前动画期间每一帧都整盘重画(底色、网格、全部棋子的
+    // 渐变与阴影),只为让新子从 0.88 放大到 1。现在静态层缓存的是「除了新子的整盘」,
+    // 新子单独画在上面。
+    const pa = m.placeAnim;
+    const anim = pa && board[pa.r] && board[pa.r][pa.c] ? pa : null;
+    // 签名不含正在落下的那一子:动画期间的静态层就是落子前的那一盘,本来就缓存着,
+    // 点下去的那一帧不用重画整盘,只画一颗子;动画结束时把它并进静态层,画一次。
+    const sig = themeId + "|" + (m.coords ? 1 : 0) + "|" + boardSig(board, anim);
+    if (sig !== baseSig) {
       paintPosition(baseCtx, {
         board: board, themeId: themeId, w: w, pad: pad, step: step,
-        dpr: _dpr, coords: !!m.coords, scaleFor: stoneScale,
+        dpr: _dpr, coords: !!m.coords, skip: anim,
       });
-      baseSig = animActive ? "" : sig;
+      baseSig = sig;
+      basePaints += 1;
     }
 
     ctx.clearRect(0, 0, w, w);
     ctx.drawImage(baseCanvas, 0, 0);
+    if (anim) {
+      paintCellStone(ctx, anim.r, anim.c, board[anim.r][anim.c], {
+        themeId: themeId, pad: pad, step: step, dpr: _dpr, scale: stoneScale(anim.r, anim.c),
+      });
+    }
 
     // 禁手点(连珠,黑到手时)。落子前就画出来,规则才是能看见的东西,而不是走
     // 下去才弹出来的一句话。
@@ -777,41 +800,44 @@
     }
 
     if (winLine && winLine.length) {
-      // v1.36 起胜局是五颗子各一圈发光环 + 一条 0.55 透明的细线(此前那条线画在子底下、
-      // 实际不透明度只有 0.31–0.34,像一道划痕)。v1.66:改成一笔描出来的线 —— 从第一颗
-      // 画到第五颗,画在子上面、不透明,只描一次(随 winFlashUntil 的 420ms);五颗子各留
-      // 一圈细环、不再发光,让「这五颗」一眼可数,又不像游戏里的特效。尊重减弱动效。
-      // 线画在子上面,黑白两种子上都要看得见:浅金(木盘的 winGlow)在白子上几乎消失。
-      // 用朱砂 —— 像一方印,对白子 ≈ 4.2:1、对黑子 ≈ 5:1;练习本本来就是红笔。
-      const glow = th.style === "pencil" ? (th.winGlow || th.win) : "#c8452c";
+      // v3.0「赢的那一刻」:此前一根朱砂线一笔描过五颗子、五颗子各套一圈,和终局卡、胜负音乐
+      // 挤在同一瞬间,最该看的五颗子反被线和圈压着。现在:
+      //   0–300ms  整块棋盘蒙上一层自己的底色(其余的子退后)
+      //   150ms 起 五颗子一颗接一颗浮出来(每颗隔 90ms),各留一圈细环
+      //   700–1000ms 底色退去,只剩五圈细环;终局卡在这之后才进来(app.js WIN_BEAT_MS)
+      // 输了也是这五颗,环的颜色收敛一半,不庆祝。尊重减弱动效:直接是最后的样子。
+      // 环用朱砂:黑白两种子上都看得见(浅金在白子上几乎消失,v1.66 量过)。
+      const ring = th.style === "pencil" ? (th.winGlow || th.win) : "#c8452c";
       const rr = step * STONE_R;
       const now = performance.now();
-      const until = m.winFlashUntil || 0;
-      const prog = prefersReducedMotion() || now >= until ? 1 : easeOutCubic(Math.max(0, Math.min(1, 1 - (until - now) / 420)));
+      const T = WIN_MOMENT_MS;
+      const start = (m.winFlashUntil || 0) - T;
+      const el = prefersReducedMotion() ? T : Math.max(0, Math.min(T, now - start));
+      const veil = el < 300 ? el / 300 : el < 700 ? 1 : Math.max(0, 1 - (el - 700) / 300);
+      const loss = m.winTone === "loss";
       ctx.save();
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      for (const p of winLine) {
-        ctx.beginPath();
-        ctx.arc(pad + p.c * step, pad + p.r * step, rr + Math.max(1, _dpr), 0, Math.PI * 2);
-        ctx.strokeStyle = glow;
-        ctx.lineWidth = Math.max(1.2, _dpr * 1.1);
-        ctx.stroke();
+      if (veil > 0) {
+        ctx.globalAlpha = 0.5 * easeOutCubic(veil);
+        ctx.fillStyle = th.style === "pencil" ? th.paper : th.boardMid;
+        ctx.fillRect(0, 0, w, w);
+        ctx.globalAlpha = 1;
       }
-      const pts = winLine.map((p) => [pad + p.c * step, pad + p.r * step]);
-      const segs = pts.length - 1;
-      const reach = prog * segs;
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i <= segs; i++) {
-        const k = Math.min(1, reach - (i - 1));
-        if (k <= 0) break;
-        ctx.lineTo(pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * k, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * k);
-      }
-      ctx.strokeStyle = glow;
-      ctx.globalAlpha = 0.92;
-      ctx.lineWidth = Math.max(2, step * 0.075);
-      ctx.stroke();
+      winLine.forEach((p, i) => {
+        const k = Math.max(0, Math.min(1, (el - 150 - i * 90) / 160));
+        const x = pad + p.c * step, y = pad + p.r * step;
+        if (veil > 0 && board[p.r][p.c]) {
+          ctx.globalAlpha = Math.max(k, 1 - veil);
+          paintCellStone(ctx, p.r, p.c, board[p.r][p.c], { themeId: themeId, pad: pad, step: step, dpr: _dpr, scale: 1 });
+        }
+        if (k > 0) {
+          ctx.globalAlpha = easeOutCubic(k) * (loss ? 0.55 : 1);
+          ctx.beginPath();
+          ctx.arc(x, y, rr + Math.max(1, _dpr), 0, Math.PI * 2);
+          ctx.strokeStyle = ring;
+          ctx.lineWidth = Math.max(1.4, _dpr * 1.2);
+          ctx.stroke();
+        }
+      });
       ctx.restore();
     }
   }
@@ -835,5 +861,8 @@
     cellAt: cellAt,
     draw: draw,
     ensureAnimLoop: ensureAnimLoop,
+    /** 静态层累计重画次数(闸门用) */
+    basePaints: () => basePaints,
+    WIN_MOMENT_MS: WIN_MOMENT_MS,
   };
 })(typeof window !== "undefined" ? window : globalThis);

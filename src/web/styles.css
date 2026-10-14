@@ -296,7 +296,6 @@
       min-width: 0;
     }
     @media (max-width: 560px) {
-      .meta-chip { display: none; }
       .status-pill { max-width: min(36vw, 160px); }
     }
     .status-pill.win {
@@ -315,11 +314,6 @@
     }
     .status-pill.replay {
       color: var(--muted);
-    }
-    .meta-chip {
-      font-size: var(--fs-micro); color: var(--muted);
-      padding: 4px 8px; border-radius: 999px;
-      background: transparent;
     }
     /* ── v2.0 对阵条:两个座位。轮到谁,谁亮;电脑想时它的座位里三个点;终局时赢的一方写「胜」 ── */
     .seats { display: flex; align-items: center; gap: 4px; min-width: 0; pointer-events: auto; }
@@ -342,7 +336,10 @@
       border-color: var(--card-border);
       border-color: color-mix(in srgb, var(--accent) 45%, transparent);
     }
-    .seat.lose { opacity: .55; }
+    /* v3.0:输家座位不再整颗降透明度(「你」字对比度只剩约 3.2:1),只把棋子淡下去;字用次要色,仍过 4.5:1 */
+    .seat.lose .seat-stone { opacity: .45; }
+    /* v3.0:新局面板打开时,初见卡片让开(此前面板压在卡片上,卡片右边一截露在外面) */
+    #app.sheet-open #welcome-bar { visibility: hidden; }
     .seat-tag {
       font-size: var(--fs-micro); font-weight: 400; color: var(--win);
       padding: 1px 7px; border-radius: 999px;
@@ -427,6 +424,10 @@
       transition: width var(--dur-panel) var(--ease);
     }
     #app.is-empty .timeline { visibility: hidden; }
+    /* v3.0:下棋时时间线收起(位置保留,棋盘不跳):鼠标移到这一行、键盘焦点在上面、按 ← 翻看、
+       终局与复盘时才出现。翻看前面的手是回头看一眼时才做的事,下棋时它不该一直横在棋盘下面。 */
+    #app.playing .timeline { opacity: 0; transition: opacity var(--dur-ui) var(--ease); }
+    #app.playing .timeline:hover, #app.playing .timeline:focus-within { opacity: 1; }
     .timeline input[type="range"] {
       flex: 1; min-width: 0; margin: 0; height: 24px;
       -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer;
@@ -1079,6 +1080,14 @@
     .endcard-line, .endcard-more { font-size: var(--fs-ui); margin-top: 2px; }
     .end-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .end-card-actions .tool-btn { flex: 1 1 auto; }
+    /* v3.0:「再来一局」独占一行,次要按钮在下面一行 */
+    .end-card-actions .end-card-main { flex: 1 1 100%; }
+    .end-card-time { font-size: var(--fs-ui); margin: -2px 0 10px; }
+    .end-card-time:empty, .end-card-time[hidden] { display: none; }
+    /* 赢的那一刻之后,卡片从旁边滑进来(减弱动效时直接出现) */
+    .end-card:not([hidden]) { animation: card-in 240ms var(--ease) both; }
+    @keyframes card-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .end-card:not([hidden]) { animation: none; } }
 
     /* —— 重下关键一手:进行中的横条 —— */
     .retry-bar {
