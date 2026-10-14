@@ -606,16 +606,19 @@
       inner: easy ? [8, 6, 5] : normal ? [12, 9, 7] : [14, 10, 8],
       // 见 aiMoveCore 3b:开着(根宽 36)时极对难 3/13/8,关掉并收回难档宽度 6/14/4
       denyVct: false,
-      // 见 searchRoot:困难 / 极限按「搜不完的层不开、最佳手稳定就落子」提前结束。
+      // 见 searchRoot:困难按「搜不完的层不开、最佳手稳定就落子」提前结束。
       // 入门 / 普通不用 —— 它们的强弱是按时间校准的(普对简约七成)。
-      timeManaged: !easy && !normal,
+      // v3.0:极限也不用。v1.68 起极限同样「想好就停」,平均每手只花 1.3 秒,按发布时限实测
+      // 对困难只剩 +44(p = 0.23);时间用满后 +137(p = 0.006),平均每手 2.2 秒(REVIEW-v2.1 §7)。
+      timeManaged: !easy && !normal && !extreme,
     };
   }
 
   let lastStage = "";
   let lastInfo = null;
-  /** 入门档漏掉活三的概率(见 aiMoveCore 1b) */
-  const EASY_MISS = 0.3;
+  /** 入门档漏掉活三的概率(见 aiMoveCore 1b)。v3.0:0.3 → 0.5。0.3 时实测四次只漏一次,
+   *  只会挡冲四的新手对它只赢 26%;0.5 时五五开,「常常漏掉活三」也才属实(REVIEW-v2.1 §7)。 */
+  const EASY_MISS = 0.5;
   let easySkipOwnF4 = false;
 
   function toRC(cell) { return { r: (cell / SZ) | 0, c: cell % SZ }; }

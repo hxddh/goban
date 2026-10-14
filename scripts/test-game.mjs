@@ -2715,15 +2715,17 @@ const Practice = ctx.GobanPractice;
   // v1.66:极档 = 难档的搜索,只多给算力。除了预算,两档的每个参数必须一样
   //(v1.65 的极档多一步每手 VCT,同样 ×2.5 时间只有 +29、p = 0.38;去掉之后 +172、p = 0.0017)
   {
-    const strip = (p) => { const o = Object.assign({}, p); delete o.budgetMs; delete o.nodeBudget; return JSON.stringify(o); };
+    // v3.0:极限还把时间用满(不「想好就停」),所以 timeManaged 也不同;其余参数仍必须一样
+    const strip = (p) => { const o = Object.assign({}, p); delete o.budgetMs; delete o.nodeBudget; delete o.timeManaged; return JSON.stringify(o); };
     const pe = C3.profileFor("extreme", {}), ph = C3.profileFor("hard", {});
     assert(strip(pe) === strip(ph) && pe.budgetMs > ph.budgetMs * 2,
-      "C3 极档与难档搜索参数一致,只多给时间 (极 " + pe.budgetMs + "ms / 难 " + ph.budgetMs + "ms)");
+      "C3 极档与难档搜索参数一致,只多给时间、且时间用满 (极 " + pe.budgetMs + "ms / 难 " + ph.budgetMs + "ms)");
   }
-  // v1.68:困难 / 极限按「搜不完的层不开、最佳手稳定就落子」提前结束;入门 / 普通不用(按时间校准)
-  assert(C3.profileFor("hard", {}).timeManaged && C3.profileFor("extreme", {}).timeManaged
+  // v1.68:困难按「搜不完的层不开、最佳手稳定就落子」提前结束;入门 / 普通不用(按时间校准)。
+  // v3.0:极限也不用 —— 它「想好就停」时平均只花 1.3 秒,对困难只剩 +44(p = 0.23);用满后 +137(p = 0.006)
+  assert(C3.profileFor("hard", {}).timeManaged && !C3.profileFor("extreme", {}).timeManaged
     && !C3.profileFor("normal", {}).timeManaged && !C3.profileFor("easy", {}).timeManaged,
-    "C3 时间管理只用于困难 / 极限");
+    "C3 时间管理只用于困难(极限时间用满)");
   // 预算管到 VCF:nodeBudget 2000 的普档在 200 个中盘局面上最多超几个节点(v1.65 评审前 VCF 不查预算,最坏 2622)
   {
     let seed = 7; const rnd2 = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);

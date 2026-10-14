@@ -352,7 +352,8 @@ async function finishGame(page) {
   const click = clicker(page);
   await toPvp(page);
   for (const [r, c] of GAME) { await click(r, c); await page.waitForTimeout(100); }
-  await page.waitForTimeout(600);
+  // v3.0:终局卡在「赢的那一刻」之后(约 0.9 秒)才进来
+  await page.waitForTimeout(1300);
 }
 const CJK = /[\u4e00-\u9fff]/;
 
@@ -452,7 +453,7 @@ const CJK = /[\u4e00-\u9fff]/;
   const click = clicker(page);
   await toPvp(page);
   for (const [r, c] of GAME) { await click(r, c); await page.waitForTimeout(100); }
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(1300); // v3.0:终局卡在赢的那一刻之后才进来
   const st = await page.evaluate(() => {
     const card = document.getElementById("end-card"), board = document.getElementById("board-wrap");
     const a = card.getBoundingClientRect(), b = board.getBoundingClientRect();

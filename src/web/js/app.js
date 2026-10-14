@@ -211,7 +211,7 @@
   }
 
   function triggerWinFlash() {
-    winFlashUntil = performance.now() + 420;
+    winFlashUntil = performance.now() + (Draw.WIN_MOMENT_MS || 1000);
     appEl.classList.add("board-frame-win");
     ensureAnimLoop();
     setTimeout(() => {
@@ -1127,10 +1127,16 @@
 
   // --- v1.63: 终局总结卡 ---
   let endCardOn = false;
-  function showEndCard() {
+  /** v3.0:终局卡在「赢的那一刻」之后才进来(棋盘先是整个画面)。此前连成五 19ms 后它就弹出来了。 */
+  let endRevealAt = 0;
+  let endRevealTimer = 0;
+  function showEndCard(beatMs) {
     endCardOn = true;
     Review.compute();
     startDeepen();
+    clearTimeout(endRevealTimer);
+    endRevealAt = beatMs > 0 ? performance.now() + beatMs : 0;
+    if (endRevealAt) endRevealTimer = setTimeout(() => { endRevealAt = 0; sync(); }, beatMs);
     syncEndCard();
   }
   function hideEndCard() { endCardOn = false; syncEndCard(); }
@@ -1138,7 +1144,7 @@
   function syncEndCard() {
     const card = document.getElementById("end-card");
     if (!card) return;
-    const show = endCardOn && result !== "play" && history.length > 0;
+    const show = endCardOn && result !== "play" && history.length > 0 && !endRevealAt;
     card.hidden = !show;
     if (!show) return;
     const title = document.getElementById("end-card-title");
@@ -1196,6 +1202,16 @@
     }
     if (backBtn) backBtn.hidden = !retry;
     if (reviewBtn) reviewBtn.hidden = !!retry;
+    // v3.0:主按钮是「再来一局」—— 同样的设置一键开局(执子「轮流」时自动换色)。
+    // 此前主按钮是「从第 N 手重下」,下一盘要去顶栏点「新局」再点「开始」,两下。
+    const rematchBtn = document.getElementById("end-card-rematch");
+    if (rematchBtn) rematchBtn.hidden = !!retry;
+    // 用时:下棋时顶栏不再显示计时器(v3.0),这一局用了多久写在这里
+    const timeEl = document.getElementById("end-card-time");
+    if (timeEl) {
+      timeEl.hidden = !!retry;
+      timeEl.textContent = t("endcard.time", { t: formatDuration(nowElapsed()), n: history.length });
+    }
     // v1.71:终局卡只留两个动作(重下关键一手 · 看复盘);「再来一局」就是顶栏高亮的「新局」,
     // 只在重下线上留一个「再试一次」—— 那是练习闭环里的下一步,顶栏没有它
     if (againBtn) {
@@ -1234,6 +1250,8 @@
     };
     const closeBtn = document.getElementById("end-card-close");
     if (closeBtn) closeBtn.onclick = () => { hideEndCard(); };
+    const rematchBtn = document.getElementById("end-card-rematch");
+    if (rematchBtn) rematchBtn.onclick = () => { requestNewGame(); };
   }
 
   // --- v1.63: 侧栏复盘面板 ---
@@ -1419,6 +1437,7 @@
     placeAnim: placeAnim,
     winLine: winLine,
     winFlashUntil: winFlashUntil,
+    winTone: mode === "ai" && result !== "play" && result !== "draw" && result !== humanColor ? "loss" : "win",
     hover: hoverCell,
     hint: hintCell,
     variation: variationCells,
@@ -1438,7 +1457,9 @@
    * 棋盘两侧放得下,棋盘原地不动;放不下,棋盘与坞当成一组居中(棋盘左移,必要时略缩),
    * 但永远不再为坞让出高度。只有竖长窗口才放在下方。
    */
-  const DOCK_W = 280, DOCK_MIN = 240, DOCK_GAP = 24;
+  // v3.0:DOCK_EDGE —— 坞放在棋盘旁边、棋盘不用让位时,离窗口边至少 20px。此前只留 --stage-pad(6px),
+  // 1280×800 下终局卡离窗口右边 6px、1440×900 下 12px,左边却空着近 300px
+  const DOCK_W = 280, DOCK_MIN = 240, DOCK_GAP = 24, DOCK_EDGE = 20;
   let dockAnimUntil = 0;
   let dockAnimActive = false;
   let lastLayout = "";
@@ -1460,7 +1481,9 @@
       board = b0;
       if (!empty) {
         // 两侧空白放得下一张不窄于 240 的卡片,棋盘就原地不动(1280×800 空 250);放不下才让棋盘让位
-        const room = (W - b0) / 2 - pad - DOCK_GAP;
+        // 放得下时离窗口边留 DOCK_EDGE;放不下(小窗口)时边距让给棋盘,仍按 --stage-pad
+        const room = (W - b0) / 2 - DOCK_EDGE - DOCK_GAP;
+        const edge = room < DOCK_MIN ? pad : DOCK_EDGE;
         if (room < DOCK_MIN) {
           board = Math.floor(Math.min(b0, W - 2 * pad - DOCK_GAP - DOCK_W));
           shift = -Math.round((DOCK_GAP + DOCK_W) / 2);
@@ -1468,7 +1491,7 @@
         const top = chrome + pad + Math.max(0, (H - chrome - 2 * pad - board - tl) / 2);
         dock.style.left = Math.round(W / 2 + shift + board / 2 + DOCK_GAP) + "px";
         dock.style.top = Math.round(top) + "px";
-        dock.style.width = Math.round(Math.min(DOCK_W, W - (W / 2 + shift + board / 2 + DOCK_GAP) - pad)) + "px";
+        dock.style.width = Math.round(Math.min(DOCK_W, W - (W / 2 + shift + board / 2 + DOCK_GAP) - edge)) + "px";
         dock.style.maxHeight = Math.round(board + tl) + "px";
       }
     } else {
@@ -1513,6 +1536,8 @@
     return turn === humanColor;
   }
 
+  const AI_MIN_REPLY_MS = 600;
+
   function maybeAiTurn() {
     if (!Session.policy(sessionState()).autoAi || swap2) return;
     if (mode !== "ai" || result !== "play" || isHumanTurn() || aiThinking) return;
@@ -1522,12 +1547,10 @@
     clearHint();
     const gen = gameGen;
     sync();
-    // Perceived pacing: instant forced replies read as "didn't think" and
-    // jolt the rhythm — keep a small floor even when compute is fast.
-    const delay =
-      difficulty === "hard" || difficulty === "extreme"
-        ? 320
-        : difficulty === "normal" ? 240 : 160;
+    // 节奏:电脑最短 600ms 才落子(v3.0)。此前入门 / 普通 200–440ms 就落下,你的手还没
+    // 抬起它的子已经在了,像对面没有人。算法的时间预算不变,只是算完了等一等;困难 / 极限
+    // 本来就常常超过这个时间。
+    const delay = AI_MIN_REPLY_MS;
     const t0 = performance.now();
     aiMoveAsync({
       board: boardAfter(history.length),
@@ -1679,7 +1702,7 @@
       // 重下关键一手的结果不进统计、不进对局库;作为一条分支挂到原局上,
       // 导出带评注 SGF 时写成变着。
       if (retry.gameId) Archive.addLine(retry.gameId, retry.ply, history.slice(retry.ply - 1));
-      showEndCard();
+      showEndCard(endBeatMs());
       return;
     }
     // v1.73(B8):从库里打开的「进行中」一局接着下完,写回原来那一条
@@ -1703,7 +1726,13 @@
       durationMs: nowElapsed(),
       endedAt: lastStatsEndedAt,
     });
-    showEndCard();
+    showEndCard(endBeatMs());
+  }
+
+  /** 连成五:等「赢的那一刻」演完(略早 100ms,卡片滑入与底色退去相接);和棋停半拍。 */
+  function endBeatMs() {
+    if (result === "draw") return 400;
+    return Math.max(0, (Draw.WIN_MOMENT_MS || 1000) - 100);
   }
 
   /** v2.0:「对局」弹层头上一行汇总(按难度分行的战绩表退役) */
@@ -1750,7 +1779,7 @@
     clearHint();
     clearAnalysis();
     clearVariation();
-    placeAnim = { r, c, t0: performance.now() };
+    placeAnim = { r, c, t0: performance.now(), ai: !!fromAi };
     ensureAnimLoop();
     playMoveSound(turn);
     const line = findWin(r, c, turn);
@@ -2084,6 +2113,8 @@
     // v1.68:空棋盘时,翻页、用时都没有意义 —— 不显示(见 styles.css)
     const appEl0 = document.getElementById("app");
     appEl0.classList.toggle("is-empty", history.length === 0);
+    // v3.0:正在下(停在最新一手、还没分出胜负)时,时间线收起(见 styles.css)
+    appEl0.classList.toggle("playing", result === "play" && live && history.length > 0);
     // 这一局的规则(设置里亮的是偏好,可能是「下一局起」):给读屏之外的东西(测试、样式)一个稳定的钩子
     appEl0.dataset.rule = ruleChoice();
     syncMatch();
@@ -2095,8 +2126,6 @@
       // NOT disabled while aiThinking — 悔棋 is the cancel affordance (see abortThinking).
       if (b) b.disabled = history.length <= undoFloor() || hintBusy || !live || !!swap2;
     });
-    // v1.73:「新局」只在一局结束后是主按钮
-    document.getElementById("btn-new").classList.toggle("primary", result !== "play");
     const contBtn = document.getElementById("sgf-continue");
     if (contBtn) {
       const showCont = importPaused && result === "play" && history.length > 0;
@@ -2375,6 +2404,7 @@
     sheet.mode = prefs.mode || mode;
     const anchor = document.getElementById("btn-new");
     sheetEl.hidden = false;
+    appEl.classList.add("sheet-open");
     placePopover(sheetEl, anchor);
     anchor.setAttribute("aria-expanded", "true");
     syncSettingsUI();
@@ -2384,6 +2414,7 @@
   function closeSheet() {
     if (sheetEl.hidden) return;
     sheetEl.hidden = true;
+    appEl.classList.remove("sheet-open");
     sheet = null;
     document.getElementById("btn-new").setAttribute("aria-expanded", "false");
     syncSettingsUI();

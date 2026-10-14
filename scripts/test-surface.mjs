@@ -138,7 +138,7 @@ const active = (page, seg, attr) => page.evaluate(({ seg, attr }) => {
 async function finish(page) {
   const click = clicker(page);
   for (const [r, c] of GAME) { await click(r, c); await page.waitForTimeout(100); }
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(1300); // v3.0:终局卡在「赢的那一刻」之后(约 0.9 秒)才进来
 }
 async function newGame(page) { await setup(page, {}); await page.waitForTimeout(50); }
 
@@ -664,7 +664,9 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
   const over = await page.evaluate(() => !document.getElementById("end-card").hidden);
   const endCount = await count();
   const hintAtEnd = await vis("btn-hint");
-  const newPrimaryEnd = await primary();
+  // v3.0:一局结束后的主按钮是终局卡上的「再来一局」(顶栏「新局」不再同时高亮)
+  const newPrimaryEnd = await page.evaluate(() => { const b = document.getElementById("end-card-rematch");
+    return !!b && !b.hidden && b.classList.contains("primary") && !document.getElementById("btn-new").classList.contains("primary"); });
   const balance = await page.evaluate(() => getComputedStyle(document.querySelector(".end-card-body")).textWrap || "");
   // B8 / B9:库里放一局没下完的双人局(黑三连,黑先),打开接着下完
   const seed = [[7, 7], [0, 0], [7, 8], [0, 1], [7, 9], [0, 2]].map(([r, c]) => ({ r, c }));
@@ -689,7 +691,7 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
   const ok = mid <= 13 && liveHidden && oldShown && samePos && !newPrimaryMid && over && endCount <= 15 && !hintAtEnd &&
     newPrimaryEnd && !reviewOnOpen && resumedToast &&
     lib.length === 1 && lib[0].id === "g-play" && lib[0].result === "b" && lib[0].n === 9;
-  report("S14 对局中 ≤ 13、终局 ≤ 15;翻页原位出现;终局无提示;新局终局后才是主按钮;B8 库里仍一条;B9 接着下不开复盘", ok,
+  report("S14 对局中 ≤ 13、终局 ≤ 15;翻页原位出现;终局无提示;终局后主按钮是「再来一局」(v3.0);B8 库里仍一条;B9 接着下不开复盘", ok,
     JSON.stringify({ mid, liveHidden, oldShown, samePos, posLive, posOld, newPrimaryMid, over, endCount, hintAtEnd, newPrimaryEnd,
       balance, reviewOnOpen, toasts, lib, errs: page.__errors }));
   await page.close();
@@ -1154,6 +1156,128 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
     practiceGap >= 0 && practiceGap <= 12 && sideH.ls === "normal" && sideH.tt === "none" && dots.length === 0;
   report("S19 v2.1 界面精修:字 ≥12px · 无 700 · 一屏 ≤6 种字号字重 · 粗字 ≤50% · 五种卡片一个样 · 阴影三档 · Retina 0.5px 描边 · 练习卡片无空行 · 小标题不拉字距 · 中点两边留空", ok,
     JSON.stringify({ screens, cards, shadows, hair, solid1, cardHair, practiceGap, sideH, dots }));
+}
+
+// ---- S20. v3.0 一来一往 ----
+// 节奏:入门 / 普通电脑最短 600ms 才落子。落子:一次落子整盘只重画一次(此前动画每帧整盘重画)。
+// 赢的那一刻:连成五后终局卡先不出现、约 1 秒内进来;五颗子上没有那根红线。下完一键再来一局。
+// 下棋时没有计时器、时间线收起;坞离窗口边 ≥ 20px;新局面板不压初见卡片;输家座位对比度 ≥ 4.5;
+// 极限的说明里不再有已退役的「5–8 秒」。
+{
+  const out = {};
+  // 1) 节奏
+  out.reply = {};
+  for (const diff of ["easy", "normal"]) {
+    const page = await newPage();
+    await page.evaluate((d) => { document.getElementById("btn-new").click(); document.querySelector(`#diff-seg [data-diff="${d}"]`).click(); document.getElementById("new-start").click(); }, diff);
+    await page.waitForTimeout(200);
+    out.reply[diff] = await page.evaluate(async () => {
+      const cv = document.getElementById("board"); const rect = cv.getBoundingClientRect(); const g = window.GobanDraw.pitchFor(cv.width); const s = rect.width / cv.width;
+      const ts = [];
+      for (const [r, c] of [[7, 7], [4, 10], [10, 4]]) {
+        const n0 = parseInt(document.getElementById("replay-pos").textContent) || 0;
+        const t0 = performance.now();
+        cv.dispatchEvent(new MouseEvent("click", { clientX: rect.left + (g.pad + c * g.step) * s, clientY: rect.top + (g.pad + r * g.step) * s, bubbles: true }));
+        while ((parseInt(document.getElementById("replay-pos").textContent) || 0) < n0 + 2 && performance.now() - t0 < 6000) await new Promise((ok) => setTimeout(ok, 5));
+        ts.push(Math.round(performance.now() - t0));
+        await new Promise((ok) => setTimeout(ok, 150));
+      }
+      return ts;
+    });
+    await page.close();
+  }
+  // 2)–5) 双人局:落子重画、赢的那一刻、红线、再来一局
+  {
+    const page = await newPage();
+    const click = clicker(page);
+    await toPvp(page);
+    await click(7, 3); await page.waitForTimeout(400);
+    out.repaints = await page.evaluate(async () => {
+      // 整盘的底色是一道线性渐变,每画一次整盘建一次;数落一子前后 400ms 里建了几次
+      const proto = CanvasRenderingContext2D.prototype; const orig = proto.createLinearGradient; let n = 0;
+      proto.createLinearGradient = function () { n++; return orig.apply(this, arguments); };
+      const cv = document.getElementById("board"); const rect = cv.getBoundingClientRect(); const g = window.GobanDraw.pitchFor(cv.width); const s = rect.width / cv.width;
+      cv.dispatchEvent(new MouseEvent("click", { clientX: rect.left + (g.pad + 9 * g.step) * s, clientY: rect.top + (g.pad + 4 * g.step) * s, bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 400));
+      proto.createLinearGradient = orig; return n;
+    });
+    for (const [r, c] of [[7, 4], [9, 5], [7, 5], [9, 6], [7, 6], [9, 7]]) { await click(r, c); await page.waitForTimeout(120); }
+    out.beat = await page.evaluate(async () => {
+      const cv = document.getElementById("board"); const rect = cv.getBoundingClientRect(); const g = window.GobanDraw.pitchFor(cv.width); const s = rect.width / cv.width;
+      const t0 = performance.now();
+      cv.dispatchEvent(new MouseEvent("click", { clientX: rect.left + (g.pad + 7 * g.step) * s, clientY: rect.top + (g.pad + 7 * g.step) * s, bubbles: true }));
+      await new Promise((ok) => setTimeout(ok, 300));
+      const at300 = !document.getElementById("end-card").hidden;
+      while (document.getElementById("end-card").hidden && performance.now() - t0 < 3000) await new Promise((ok) => setTimeout(ok, 10));
+      return { at300, shownAt: Math.round(performance.now() - t0) };
+    });
+    await page.waitForTimeout(600);
+    // 五颗里中间那一颗的中心:有红线时是朱砂色,没有时是黑子
+    out.center = await page.evaluate(() => { const cv = document.getElementById("board"); const g = window.GobanDraw.pitchFor(cv.width);
+      return [...cv.getContext("2d").getImageData(Math.round(g.pad + 5 * g.step), Math.round(g.pad + 7 * g.step), 1, 1).data].slice(0, 3); });
+    const main = await page.evaluate(() => { const b = [...document.querySelectorAll("#end-card .tool-btn.primary")].find((e) => !e.hidden); return b ? b.id : null; });
+    if (main) await page.evaluate((id) => document.getElementById(id).click(), main);
+    await page.waitForTimeout(300);
+    out.rematch = await page.evaluate(() => ({ pos: document.getElementById("replay-pos").textContent, card: document.getElementById("end-card").hidden, rule: document.getElementById("app").dataset.rule }));
+    out.rematch.main = main;
+    // 6) 下棋时:计时器、时间线
+    await click(7, 7); await page.waitForTimeout(150); await click(6, 6); await page.waitForTimeout(150);
+    await page.mouse.move(640, 300);
+    out.chrome = await page.evaluate(() => { const c = document.getElementById("clock"); const tl = document.getElementById("timeline-row");
+      return { clock: !!c && c.offsetParent !== null && c.getBoundingClientRect().width > 0, tlOpacity: getComputedStyle(tl).opacity }; });
+    await page.keyboard.press("ArrowLeft"); await page.waitForTimeout(300);
+    out.chrome.tlBrowse = await page.evaluate(() => getComputedStyle(document.getElementById("timeline-row")).opacity);
+    await page.close();
+  }
+  // 7) 坞的边距、8) 新局面板与初见卡片
+  {
+    const page = await newPage();
+    out.edge = {};
+    for (const [w, h] of [[1280, 800], [1440, 900], [1728, 1080]]) {
+      await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(250);
+      out.edge[w + "x" + h] = await page.evaluate(() => Math.round(innerWidth - document.getElementById("welcome-bar").getBoundingClientRect().right));
+    }
+    await page.setViewportSize({ width: 1280, height: 800 }); await page.waitForTimeout(250);
+    await page.evaluate(() => document.getElementById("btn-new").click()); await page.waitForTimeout(250);
+    out.sheet = await page.evaluate(() => { const a = document.getElementById("new-sheet").getBoundingClientRect(); const wb = document.getElementById("welcome-bar");
+      const b = wb.getBoundingClientRect(); const seen = !wb.hidden && getComputedStyle(wb).visibility !== "hidden" && b.width > 0;
+      return { welcomeSeen: seen, overlap: seen && !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom) }; });
+    await page.close();
+  }
+  // 9) 输家座位(人机,人输)
+  {
+    const page = await newPage();
+    await setup(page, { diff: "normal" });
+    const click = clicker(page);
+    for (let i = 0; i < 40; i++) { if (await page.evaluate(() => !document.getElementById("end-card").hidden)) break; await click(1 + (i % 13), 1 + ((i * 5) % 13)); await page.waitForTimeout(450); }
+    await page.waitForTimeout(1200);
+    out.lose = await page.evaluate(() => {
+      const e = document.querySelector(".seat.lose .seat-name"); if (!e) return null;
+      const rgb = (s) => s.match(/[\d.]+/g).map(Number);
+      let op = 1; for (let n = e; n; n = n.parentElement) op *= parseFloat(getComputedStyle(n).opacity || "1");
+      const fg = rgb(getComputedStyle(e).color), bg = rgb(getComputedStyle(document.body).backgroundColor);
+      const mix = fg.slice(0, 3).map((v, i) => v * op * (fg[3] == null ? 1 : fg[3]) + bg[i] * (1 - op * (fg[3] == null ? 1 : fg[3])));
+      const L = (c) => { const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+      const a = L(mix), b = L(bg); return Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100;
+    });
+    out.extremeText = await page.evaluate(() => document.querySelector('#diff-seg [data-diff="extreme"]').title);
+    await page.close();
+  }
+  const center = out.center;
+  const redLine = center[0] > 140 && center[1] < 110;
+  const ok =
+    out.reply.easy.every((t) => t >= 600) && out.reply.normal.every((t) => t >= 600) &&
+    out.repaints <= 1 &&
+    !out.beat.at300 && out.beat.shownAt >= 700 && out.beat.shownAt <= 1300 &&
+    !redLine &&
+    out.rematch.main === "end-card-rematch" && out.rematch.pos === "0 / 0" && out.rematch.card &&
+    !out.chrome.clock && out.chrome.tlOpacity === "0" && out.chrome.tlBrowse === "1" &&
+    Object.values(out.edge).every((v) => v >= 20) &&
+    !out.sheet.overlap &&
+    out.lose != null && out.lose >= 4.5 &&
+    !/5–8/.test(out.extremeText);
+  report("S20 v3.0 一来一往:电脑 ≥ 600ms · 落子整盘只重画一次 · 赢后停一拍再出终局卡 · 无红线 · 一键再来一局 · 下棋时无计时器、时间线收起 · 坞边距 ≥ 20 · 新局面板不压初见卡片 · 输家座位 ≥ 4.5 · 极限说明照实", ok,
+    JSON.stringify(Object.assign(out, { redLine })));
 }
 
 await browser.close();
