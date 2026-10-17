@@ -704,6 +704,7 @@
     const side = me2 === "b" ? 0 : 1;
     const op = 1 - side;
     const prof = profileFor(difficulty, opts || {});
+    if (opts && opts._prof) Object.assign(prof, opts._prof); // 仅供量测脚本试参数
     lastStage = ""; lastInfo = null; easySkipOwnF4 = false;
     renjuB = !!opts.renju;
 
