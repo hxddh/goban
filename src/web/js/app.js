@@ -56,7 +56,7 @@
   function budgetForDiff(diff) {
     if (diff === "extreme") return extremeTimeMs();
     if (diff === "hard") return hardTimeMs();
-    if (diff === "normal") return 400; // v1.65:普档换成 C3,预算 250 → 400ms
+    if (diff === "normal") return 550; // v1.65:普档换成 C3,250 → 400ms;v3.1:→ 550ms,仍在 600ms 落子节奏以内
     return 240; // v1.66:入门换成 C3,240ms 让普对入门约七成半(REVIEW-v1.65 §3 E2)
   }
 

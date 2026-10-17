@@ -660,7 +660,7 @@
     if (typeof opts.nodeBudget === "number" && opts.nodeBudget > 0) budget = 0;
     else if (typeof opts.timeMs === "number") budget = opts.timeMs;
     else if (extreme) budget = opts.think === "fast" ? 2500 : opts.think === "deep" ? 8000 : 5000;
-    else if (normal) budget = 400;
+    else if (normal) budget = 550; // v3.1:400 → 550ms,仍在 600ms 落子节奏以内,不多等
     else if (easy) budget = 240;
     else budget = opts.think === "fast" ? 800 : opts.think === "deep" ? 3500 : 2000;
     return {

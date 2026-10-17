@@ -175,7 +175,7 @@ const C2HARD = { eng: Ai2, difficulty: "hard", nodeBudget: 80000 };
   assert(eDef.n === eDef.total, "入门:挡住每一个冲四/成五威胁 (" + eDef.n + "/" + eDef.total + ")");
   const eVcf = hits(Tier.engineFor("easy"), "easy", 240, "vcf");
   assert(eVcf.n < eVcf.total * 0.7, "入门:并不总能算出连续冲四 —— 否则它不是入门 (" + eVcf.n + "/" + eVcf.total + ")");
-  const nVcf = hits(Tier.engineFor("normal"), "normal", 400, "vcf");
+  const nVcf = hits(Tier.engineFor("normal"), "normal", 550, "vcf");
   assert(nVcf.n >= nVcf.total * 0.9, "普通:会算连续冲四 (" + nVcf.n + "/" + nVcf.total + ")");
   const hVcf = hits(Tier.engineFor("hard"), "hard", 800, "vcf");
   assert(hVcf.n >= hVcf.total * 0.9, "困难:会做杀 (" + hVcf.n + "/" + hVcf.total + ")");
@@ -202,7 +202,7 @@ const C2HARD = { eng: Ai2, difficulty: "hard", nodeBudget: 80000 };
   const eThree = blocksThree(Tier.engineFor("easy"), "easy", 240);
   // 入门是随机化的:40 局面 p≈0.5,±3σ 约 [8, 32]
   assert(eThree >= 6 && eThree <= 34, "入门:常常漏掉活三,但不是从不挡 (" + eThree + "/40)");
-  const nThree = blocksThree(Tier.engineFor("normal"), "normal", 400);
+  const nThree = blocksThree(Tier.engineFor("normal"), "normal", 550);
   assert(nThree >= 38, "普通:必挡直接威胁,活三也挡 (" + nThree + "/40)");
 }
 
