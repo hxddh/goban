@@ -38,7 +38,7 @@ self.onmessage = function (ev) {
         timeMs = think === "fast" ? 2500 : think === "deep" ? 8000 : 5000;
       } else if (difficulty === "hard") {
         timeMs = think === "fast" ? 800 : think === "deep" ? 3500 : 2000;
-      } else if (difficulty === "normal") timeMs = 400;
+      } else if (difficulty === "normal") timeMs = 550;
       else timeMs = 240;
     }
     const engine = self.GobanTier ? self.GobanTier.engineFor(difficulty) : self.GobanAi;

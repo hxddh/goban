@@ -161,6 +161,12 @@
   const score = new Int32Array(2 * N);
   const cnt = new Int32Array(2 * NP4);         // [side*NP4 + p4] 空点计数
   const sum = new Float64Array(2);             // 各方空点分值之和
+  // v3.1 连珠:黑方的禁手点在搜索里一律视为「黑走不了」。forb[cell] = 1 时黑在这一点的组合型
+  // 与分值都记 0(没有五、没有四、不是候选);rb 是棋盘的二维镜像,只给精确判定用。
+  const forb = new Uint8Array(N);
+  let renjuB = false;
+  const rb = [];
+  for (let r = 0; r < SZ; r++) rb.push(new Array(SZ).fill(""));
   let stones = 0;
 
   function lineCode(cell, d, side) {
@@ -187,12 +193,43 @@
       const i = s * N + cell;
       const b = i * 4;
       const a0 = pat[b], a1 = pat[b + 1], a2 = pat[b + 2], a3 = pat[b + 3];
-      const q = P4OF[a0 * 1000 + a1 * 100 + a2 * 10 + a3];
+      let q = P4OF[a0 * 1000 + a1 * 100 + a2 * 10 + a3];
+      let sc = VAL[a0] + VAL[a1] + VAL[a2] + VAL[a3] + COMBO[q];
+      if (s === 0) {
+        forb[cell] = 0;
+        if (renjuB && blackForbidden(cell, a0, a1, a2, a3)) { forb[cell] = 1; q = 0; sc = 0; }
+      }
       p4[i] = q;
-      score[i] = VAL[a0] + VAL[a1] + VAL[a2] + VAL[a3] + COMBO[q];
-      sum[s] += score[i];
+      score[i] = sc;
+      sum[s] += sc;
       cnt[s * NP4 + q]++;
     }
+  }
+  /**
+   * 黑落在这一点是不是禁手,与裁判 Core.renjuForbidden 同一个规则:
+   *   成五优先 —— 某方向恰好五连就不是禁手;否则某方向六连及以上是长连。这两条按连子数直接判,
+   *   不调用裁判。两个方向成四(双四)或两个方向活三(双三)才交给裁判精确判定(每次约 13.5 µs;
+   *   活三的真假要递归看,模式表看不出来)。单独一个活四不是禁手(裁判按方向数四,同线双四也只算一个)。
+   */
+  function blackForbidden(cell, a0, a1, a2, a3) {
+    let five = false, over = false;
+    if (a0 === FIVE || a1 === FIVE || a2 === FIVE || a3 === FIVE) {
+      const r = (cell / SZ) | 0, c = cell % SZ;
+      for (let d = 0; d < 4; d++) {
+        const [dr, dc] = DIRS[d];
+        let n = 1;
+        for (let k = 1, y = r + dr, x = c + dc; y >= 0 && y < SZ && x >= 0 && x < SZ && bd[y * SZ + x] === 1; k++, y += dr, x += dc) n++;
+        for (let k = 1, y = r - dr, x = c - dc; y >= 0 && y < SZ && x >= 0 && x < SZ && bd[y * SZ + x] === 1; k++, y -= dr, x -= dc) n++;
+        if (n === 5) five = true;
+        else if (n > 5) over = true;
+      }
+      if (five) return false;
+      if (over) return true;
+    }
+    const fours = (a0 === B4 || a0 === F4) + (a1 === B4 || a1 === F4) + (a2 === B4 || a2 === F4) + (a3 === B4 || a3 === F4);
+    const threes = (a0 === F3) + (a1 === F3) + (a2 === F3) + (a3 === F3);
+    if (fours < 2 && threes < 2) return false;
+    return !!Core.renjuForbidden(rb, (cell / SZ) | 0, cell % SZ);
   }
   function refreshDir(cell, d) {
     cellOut(cell);
@@ -202,6 +239,9 @@
 
   function resetFrom(board2d) {
     stones = 0;
+    usp = 0; fsp = 0;
+    for (let r = 0; r < SZ; r++) for (let c = 0; c < SZ; c++) rb[r][c] = board2d[r][c] || "";
+    forb.fill(0);
     for (let r = 0; r < SZ; r++) for (let c = 0; c < SZ; c++) {
       const v = board2d[r][c];
       bd[r * SZ + c] = v === "b" ? 1 : v === "w" ? 2 : 0;
@@ -220,32 +260,56 @@
   }
 
   let nodes = 0;
+  // v3.1:落子时把要改的值先存起来,提子时原样还回去,而不是把周围至多 32 个点的棋型重算一遍。
+  // make / unmake 严格后进先出(搜索、VCF、VCT 都是),所以还原出来的就是落子前的状态 ——
+  // 同样的节点数下每一手与重算完全相同(test-game 有闸门)。每条记录 8 个数:
+  // 点、方向(−1 = 落子点本身)、两方在该方向的棋型、两方组合型、两方分值。
+  const UNDO = new Int32Array(1 << 17);
+  const FRAME = new Int32Array(2048);
+  let usp = 0, fsp = 0;
+  function save(c, d) {
+    const u = usp;
+    UNDO[u] = c; UNDO[u + 1] = d;
+    if (d >= 0) { UNDO[u + 2] = pat[c * 4 + d]; UNDO[u + 3] = pat[(N + c) * 4 + d]; }
+    UNDO[u + 4] = p4[c] | (forb[c] << 8); UNDO[u + 5] = p4[N + c];
+    UNDO[u + 6] = score[c]; UNDO[u + 7] = score[N + c];
+    usp = u + 8;
+  }
   function make(cell, color) {
+    FRAME[fsp++] = usp;
+    save(cell, -1);
     cellOut(cell);
     for (let s = 0; s < 2; s++) { p4[s * N + cell] = 0; score[s * N + cell] = 0; }
     bd[cell] = color;
+    if (renjuB) rb[(cell / SZ) | 0][cell % SZ] = color === 1 ? "b" : "w";
     stones++;
     nodes++;
     for (let d = 0; d < 4; d++) {
       const base = (cell * 4 + d) * 8;
       for (let k = 0; k < 8; k++) {
         const nb = NB[base + k];
-        if (nb >= 0 && bd[nb] === 0) refreshDir(nb, d);
+        if (nb >= 0 && bd[nb] === 0) { save(nb, d); refreshDir(nb, d); }
       }
     }
   }
   function unmake(cell) {
     bd[cell] = 0;
+    if (renjuB) rb[(cell / SZ) | 0][cell % SZ] = "";
     stones--;
-    for (let s = 0; s < 2; s++) for (let d = 0; d < 4; d++) pat[(s * N + cell) * 4 + d] = PAT[lineCode(cell, d, s)];
-    cellIn(cell);
-    for (let d = 0; d < 4; d++) {
-      const base = (cell * 4 + d) * 8;
-      for (let k = 0; k < 8; k++) {
-        const nb = NB[base + k];
-        if (nb >= 0 && bd[nb] === 0) refreshDir(nb, d);
+    const start = FRAME[--fsp];
+    for (let u = usp - 8; u >= start; u -= 8) {
+      const c = UNDO[u], d = UNDO[u + 1];
+      // 落子点本身在落子时已经移出计数(cellOut 之后没有 cellIn),不必再减
+      if (d >= 0) {
+        cellOut(c);
+        pat[c * 4 + d] = UNDO[u + 2]; pat[(N + c) * 4 + d] = UNDO[u + 3];
       }
+      p4[c] = UNDO[u + 4] & 255; forb[c] = UNDO[u + 4] >> 8; p4[N + c] = UNDO[u + 5];
+      score[c] = UNDO[u + 6]; score[N + c] = UNDO[u + 7];
+      sum[0] += score[c]; sum[1] += score[N + c];
+      cnt[p4[c]]++; cnt[NP4 + p4[N + c]]++;
     }
+    usp = start;
   }
 
   const has = (s, q) => cnt[s * NP4 + q] > 0;
@@ -338,7 +402,8 @@
       if (count(me, P_FIVE) >= 2 && !has(op, P_FIVE)) win = cell;          // 活四 / 双四
       else if (count(me, P_FIVE) === 1) {
         const block = findCell(me, P_FIVE);
-        if (!has(op, P_FIVE) || block === findCell(op, P_FIVE)) {
+        if (renjuB && op === 0 && forb[block] && !has(op, P_FIVE)) win = cell; // 黑挡不了(挡点是禁手)
+        else if (!has(op, P_FIVE) || block === findCell(op, P_FIVE)) {
           make(block, opColor); hashXor(block, opColor);
           if (vcf(side, depth - 1) >= 0) win = cell;
           unmake(block); hashXor(block, opColor);
@@ -437,15 +502,19 @@
     const out = moveBuf[ply], pr = prioBuf[ply];
     let n = 0;
     if (has(op, P_FIVE)) {
-      out[0] = findCell(op, P_FIVE);
+      const blk = findCell(op, P_FIVE);
+      // 连珠:挡点是黑的禁手 → 黑挡不了,没有合法的应手
+      if (renjuB && me === 0 && forb[blk]) return 0;
+      out[0] = blk;
       return 1;
     }
     const offM = me * N, offO = op * N;
     let mode = 0; // 0 常规 · 1 对手有活四点 · 2 对手有四三点
     if (has(op, P_F4)) mode = 1;
     else if (has(op, P_43)) mode = 2;
+    const noForb = renjuB && me === 0;
     for (let cell = 0; cell < N; cell++) {
-      if (bd[cell]) continue;
+      if (bd[cell] || (noForb && forb[cell])) continue;
       const sm = score[offM + cell], so = score[offO + cell];
       if (mode === 1) {
         // 活三的每个防点,都是对手能走出至少冲四的点;再加上己方的冲四(抢先手)
@@ -458,15 +527,20 @@
       else if (cell === killers[ply * 2] || cell === killers[ply * 2 + 1]) p += 1 << 24;
       out[n] = cell; pr[n] = p; n++;
     }
-    // 插入排序(n 通常 < 60)
-    for (let i = 1; i < n; i++) {
-      const c = out[i], p = pr[i];
-      let j = i - 1;
-      while (j >= 0 && pr[j] < p) { out[j + 1] = out[j]; pr[j + 1] = pr[j]; j--; }
-      out[j + 1] = c; pr[j + 1] = p;
+    // v3.1:只排出要用的前 k 个(常规局面 k = width,通常 8–14,而候选常有 60 个以上;此前全部插入
+    // 排序再截断,占搜索四成多的时间)。每轮取剩下里优先级最高、同分取下标最小的 —— 与原来的稳定
+    // 插入排序给出同一个前 k 序列。
+    const k = mode === 0 && n > width ? width : n;
+    for (let i = 0; i < k; i++) {
+      let bi = i, bp = pr[i];
+      for (let j = i + 1; j < n; j++) if (pr[j] > bp) { bp = pr[j]; bi = j; }
+      if (bi !== i) {
+        const c = out[bi];
+        for (let j = bi; j > i; j--) { out[j] = out[j - 1]; pr[j] = pr[j - 1]; }
+        out[i] = c; pr[i] = bp;
+      }
     }
-    if (mode === 0 && n > width) n = width;
-    return n;
+    return k;
   }
 
   /** 内层宽度按档位给(v1.65):档与档之间的差要落在「看得多宽」上,不只是给多少时间 */
@@ -500,7 +574,7 @@
     if (depth <= 0 && !forced) return evaluate(side);
 
     const n = genMoves(side, ply, widthAt(ply), ttMove);
-    if (n === 0) return evaluate(side);
+    if (n === 0) return forced ? -(WIN - ply - 1) : evaluate(side);
     const moves = moveBuf[ply];
     const color = side + 1;
     const a0 = alpha;
@@ -586,7 +660,7 @@
     if (typeof opts.nodeBudget === "number" && opts.nodeBudget > 0) budget = 0;
     else if (typeof opts.timeMs === "number") budget = opts.timeMs;
     else if (extreme) budget = opts.think === "fast" ? 2500 : opts.think === "deep" ? 8000 : 5000;
-    else if (normal) budget = 400;
+    else if (normal) budget = 550; // v3.1:400 → 550ms,仍在 600ms 落子节奏以内,不多等
     else if (easy) budget = 240;
     else budget = opts.think === "fast" ? 800 : opts.think === "deep" ? 3500 : 2000;
     return {
@@ -631,6 +705,7 @@
     const op = 1 - side;
     const prof = profileFor(difficulty, opts || {});
     lastStage = ""; lastInfo = null; easySkipOwnF4 = false;
+    renjuB = !!opts.renju;
 
     resetFrom(board2d);
     h1 = 0; h2 = 0;
@@ -799,7 +874,7 @@
     lastStage: () => lastStage,
     lastInfo: () => lastInfo,
     profileFor,
-    _debug: { sane, nodes: () => nodes, PAT, P4OF, resetFrom, make, unmake, p4, pat, cnt, vcf, evaluate, bd, codes: { DEAD, B1, F1, B2, F2, B3, F3, B4, F4, FIVE }, combos: { P_NONE, P_F2, P_B3, P_22, P_B3P, P_F3, P_F3P, P_33, P_B4, P_B4P, P_43, P_F4, P_FIVE } },
+    _debug: { sane, nodes: () => nodes, PAT, P4OF, resetFrom, make, unmake, p4, pat, cnt, vcf, evaluate, bd, score, sum, forb, setRenju: (on) => { renjuB = !!on; }, codes: { DEAD, B1, F1, B2, F2, B3, F3, B4, F4, FIVE }, combos: { P_NONE, P_F2, P_B3, P_22, P_B3P, P_F3, P_F3P, P_33, P_B4, P_B4P, P_43, P_F4, P_FIVE } },
   };
 })(typeof window !== "undefined" ? window : globalThis);
 

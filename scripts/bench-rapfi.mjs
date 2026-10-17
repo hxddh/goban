@@ -57,8 +57,8 @@ function engineFor(diff) {
   if (E.GobanTier && E.GobanTier.engineFor) return E.GobanTier.engineFor(diff);
   return diff === "hard" || diff === "extreme" ? E.GobanAi2 : E.GobanAi;
 }
-// 普档发布时限 v1.65 起 400ms(app.js / ai-worker.js);量 v1.64 及更早的 ref 时仍是 250ms
-const NORMAL_MS = process.env.REF ? 250 : 400;
+// 普档发布时限 v1.65 起 400ms、v3.1 起 550ms(app.js / ai-worker.js);量 v1.64 及更早的 ref 时仍是 250ms
+const NORMAL_MS = process.env.REF ? 250 : 550;
 const TIER = {
   easy: { diff: "easy", ms: process.env.REF ? 0 : 240 }, normal: { diff: "normal", ms: NORMAL_MS },
   hard: { diff: "hard", ms: 2000 }, ext: { diff: "extreme", ms: 5000 },
