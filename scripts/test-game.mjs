@@ -2712,6 +2712,43 @@ const Practice = ctx.GobanPractice;
   const f1 = C3._debug.sane(pos1, { r: 7, c: 7 }), f2 = C3._debug.sane(pos1, null);
   assert(f1 && !pos1[f1.r][f1.c] && f2 && !pos1[f2.r][f2.c] && C3._debug.sane(pos1, { r: 7, c: 9 }).c === 9,
     "C3 出口兜底:占用点与空结果都换成空点,合法手原样放行");
+  // v3.1:提子时还原落子前存下的值,不再重算。随机落子 / 提子 300 次后,全部棋型状态必须与
+  // 按这一盘从头重建的完全相同(自由与连珠各一遍)—— 否则搜索会在一个悄悄走样的局面上算下去
+  for (const renju of [false, true]) {
+    const D = C3._debug;
+    const rnd = (() => { let x = 12345; return () => (x = (x * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; })();
+    const b0 = Core.emptyBoard();
+    for (let i = 0; i < 26; i++) { const r = 3 + Math.floor(rnd() * 9), c = 3 + Math.floor(rnd() * 9); if (!b0[r][c]) b0[r][c] = i % 2 ? "w" : "b"; }
+    D.setRenju(renju); D.resetFrom(b0);
+    const snap = () => JSON.stringify([Array.from(D.pat), Array.from(D.p4), Array.from(D.score), Array.from(D.cnt), Array.from(D.forb), Math.round(D.sum[0]), Math.round(D.sum[1])]);
+    const ref = snap();
+    let okAll = true;
+    for (let t = 0; t < 300; t++) {
+      const stack = [];
+      const k = 1 + Math.floor(rnd() * 6);
+      for (let j = 0; j < k; j++) {
+        let cell; do { cell = Math.floor(rnd() * 225); } while (D.bd[cell]);
+        D.make(cell, 1 + ((stack.length + t) % 2)); stack.push(cell);
+      }
+      while (stack.length) D.unmake(stack.pop());
+      if (snap() !== ref) { okAll = false; break; }
+    }
+    D.setRenju(false);
+    assert(okAll, "C3 落子 / 提子 300 次后棋型状态与从头重建完全相同(" + (renju ? "连珠" : "自由") + ")");
+  }
+  // v3.1 连珠:搜索里黑的禁手点一律视为走不了
+  {
+    const B = (bl, wh) => { const b = Core.emptyBoard(); for (const [r, c] of bl) b[r][c] = "b"; for (const [r, c] of wh) b[r][c] = "w"; return b; };
+    // 黑 X X X _ X X:补中间是长连,不是五。v3.0 把它当成「成五」去走,被出口换成一手随机的合法点
+    const a = B([[7, 3], [7, 4], [7, 5], [7, 7], [7, 8], [2, 2]], [[9, 9], [10, 10], [11, 4], [3, 12], [12, 12]]);
+    C3.aiMove({ board: a, side: "b", difficulty: "hard", timeMs: 300, vary: false, renju: true });
+    assert(C3.lastStage() !== "win", "C3 连珠:黑的长连点不算成五 (stage " + C3.lastStage() + ")");
+    // 白冲四的唯一挡点是黑的长连点 → 黑挡不了,白直接冲四取胜。v3.0 反而去「挡」黑的长连点
+    const b2 = B([[3, 2], [3, 3], [3, 4], [3, 6], [3, 7], [8, 5]], [[5, 5], [6, 5], [7, 5], [10, 10], [11, 3]]);
+    const mw = C3.aiMove({ board: b2, side: "w", difficulty: "hard", timeMs: 300, vary: false, renju: true });
+    assert(C3.lastStage() === "vcf" && mw.r === 4 && mw.c === 5,
+      "C3 连珠:白看得出黑挡不了禁手点上的冲四 (" + mw.r + "," + mw.c + " · " + C3.lastStage() + ")");
+  }
   // v1.66:极档 = 难档的搜索,只多给算力。除了预算,两档的每个参数必须一样
   //(v1.65 的极档多一步每手 VCT,同样 ×2.5 时间只有 +29、p = 0.38;去掉之后 +172、p = 0.0017)
   {
