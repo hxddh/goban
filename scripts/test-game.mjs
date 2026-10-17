@@ -2763,6 +2763,11 @@ const Practice = ctx.GobanPractice;
   assert(C3.profileFor("hard", {}).timeManaged && !C3.profileFor("extreme", {}).timeManaged
     && !C3.profileFor("normal", {}).timeManaged && !C3.profileFor("easy", {}).timeManaged,
     "C3 时间管理只用于困难(极限时间用满)");
+  // v3.1:普档 400 → 550ms。电脑本来就至少等 600ms 才落子(v3.0),多想的这 150ms 不多等
+  {
+    const pn = C3.profileFor("normal", {}).budgetMs;
+    assert(pn === 550 && pn < 600, "C3 普档预算 550ms,仍在 600ms 落子节奏以内 (" + pn + "ms)");
+  }
   // 预算管到 VCF:nodeBudget 2000 的普档在 200 个中盘局面上最多超几个节点(v1.65 评审前 VCF 不查预算,最坏 2622)
   {
     let seed = 7; const rnd2 = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
