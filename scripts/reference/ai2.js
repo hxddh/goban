@@ -463,6 +463,8 @@
       out.t1 = now >= deadline ? deadline : now + (deadline - now) * frac;
     }
     if (evals > 0) out.e1 = C1.ticks() + evals;
+    // v3.2:C1 的 VCF 不调评估,e1 管不住它;再给一个按试过的点数算的 VCF 预算
+    if (evals > 0 && C1.vcfTicks) out.v1 = C1.vcfTicks() + evals;
     return out;
   }
 

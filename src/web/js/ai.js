@@ -110,14 +110,16 @@
   }
   /** Global analyzePlace counter — the deterministic budget dimension. */
   let evalTick = 0;
+  let vcfTick = 0;
   /**
-   * ctx: { t1: wall-clock deadline (0=off), e1: evalTick deadline (0=off) }.
+   * ctx: { t1: wall-clock deadline (0=off), e1: evalTick deadline (0=off), v1: vcfTick deadline (0=off) }.
    * Node budgets (e1) make games reproducible regardless of CPU load.
    */
   function timedOut(ctx) {
     if (!ctx) return false;
     if (ctx.t1 > 0 && nowMs() >= ctx.t1) return true;
     if (ctx.e1 > 0 && evalTick >= ctx.e1) return true;
+    if (ctx.v1 > 0 && vcfTick >= ctx.v1) return true;
     return false;
   }
   function near(board, r, c, d) {
@@ -651,9 +653,10 @@
     }
     const attacks = [];
     for (let i = 0; i < cells.length; i++) {
-      // v3.2:每试一个点计一次。此前 VCF 不计数,只按节点数限的调用(e1)在这里没有预算,
-      // 18 层的连续冲四在个别局面里指数爆炸、停不下来(C2 参照引擎在 test-strength 里卡死)
-      evalTick++;
+      // v3.2:每试一个点计一次,单独计数。e1 不管 VCF(VCF 不调评估),只按节点数限的调用在个别局面里
+      // 18 层的连续冲四会指数爆炸、停不下来(C2 参照引擎在 test-strength 里卡死)。要限就传 v1;
+      // 不并进 evalTick:那会改变 C1 自己在 nodeBudget 下的行为
+      vcfTick++;
       if (timedOut(ctx)) break;
       const m = cells[i];
       board[m.r][m.c] = me;
@@ -1333,6 +1336,10 @@
     /** Current analyzePlace tick — lets callers build deterministic sub-budgets. */
     ticks: function () {
       return evalTick;
+    },
+    /** v3.2:VCF 试过的点数 —— 给只按节点数限的调用一个 VCF 预算(ctx.v1)。 */
+    vcfTicks: function () {
+      return vcfTick;
     },
   };
 })(typeof window !== "undefined" ? window : globalThis);
