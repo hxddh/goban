@@ -35,7 +35,7 @@ self.onmessage = function (ev) {
     let timeMs = data.timeMs;
     if (typeof timeMs !== "number") {
       if (difficulty === "extreme") {
-        timeMs = think === "fast" ? 2500 : think === "deep" ? 8000 : 5000;
+        timeMs = think === "fast" ? 1250 : think === "deep" ? 4000 : 2500;
       } else if (difficulty === "hard") {
         timeMs = think === "fast" ? 800 : think === "deep" ? 3500 : 2000;
       } else if (difficulty === "normal") timeMs = 550;

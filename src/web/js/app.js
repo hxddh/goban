@@ -44,14 +44,16 @@
   function wouldWin(r, c, color) { return Core.wouldWin(board, r, c, color); }
   /**
    * v2.0:新局卡片里的「思考」(快 · 标 · 深)退役 —— 它只在困难 / 极限出现,乘上四档难度是 12 种组合,
-   * 而「极限」本来就是「困难给更多时间」。困难、极限固定用「标」:每手约 2 秒 / 5 秒,棋力闸门测的也是这一档。
+   * 而「极限」本来就是「困难给更多时间」。困难、极限固定用「标」:每手约 2 秒 / 2.5 秒(v3.2 起;此前 5 秒),棋力闸门测的也是这一档。
    * 旧设置里存的思考档忽略。
    */
   const thinkLevel = "normal";
 
   function hardTimeMs() { return 2000; }
 
-  function extremeTimeMs() { return 5000; }
+  // v3.2:5 → 2.5 秒。实测 5 秒对 2.5 秒 24 : 22,后一半时间换不来可测的棋力;极限强于困难靠的是
+  // 「时间用满」(困难想好就停),不是那多出来的 2.5 秒(REVIEW-v3.1)
+  function extremeTimeMs() { return 2500; }
 
   function budgetForDiff(diff) {
     if (diff === "extreme") return extremeTimeMs();

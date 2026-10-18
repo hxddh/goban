@@ -2755,8 +2755,9 @@ const Practice = ctx.GobanPractice;
     // v3.0:极限还把时间用满(不「想好就停」),所以 timeManaged 也不同;其余参数仍必须一样
     const strip = (p) => { const o = Object.assign({}, p); delete o.budgetMs; delete o.nodeBudget; delete o.timeManaged; return JSON.stringify(o); };
     const pe = C3.profileFor("extreme", {}), ph = C3.profileFor("hard", {});
-    assert(strip(pe) === strip(ph) && pe.budgetMs > ph.budgetMs * 2,
-      "C3 极档与难档搜索参数一致,只多给时间、且时间用满 (极 " + pe.budgetMs + "ms / 难 " + ph.budgetMs + "ms)");
+    // v3.2:极限 5 → 2.5 秒(实测 5 秒对 2.5 秒 24 : 22);它强于困难靠「时间用满」,困难想好就停
+    assert(strip(pe) === strip(ph) && pe.budgetMs === 2500 && pe.budgetMs > ph.budgetMs,
+      "C3 极档与难档搜索参数一致,极限 2.5 秒且时间用满 (极 " + pe.budgetMs + "ms / 难 " + ph.budgetMs + "ms)");
   }
   // v1.68:困难按「搜不完的层不开、最佳手稳定就落子」提前结束;入门 / 普通不用(按时间校准)。
   // v3.0:极限也不用 —— 它「想好就停」时平均只花 1.3 秒,对困难只剩 +44(p = 0.23);用满后 +137(p = 0.006)

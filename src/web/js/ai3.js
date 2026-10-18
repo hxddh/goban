@@ -110,10 +110,16 @@
     P_33 = 7, P_B4 = 8, P_B4P = 9, P_43 = 10, P_F4 = 11, P_FIVE = 12;
   const NP4 = 13;
 
-  /** 单方向棋型的分值 —— 叶子评估与着法排序共用。 */
-  const VAL = new Int32Array([0, 2, 6, 12, 36, 48, 150, 170, 1600, 20000]);
+  /**
+   * 单方向棋型的分值 —— 叶子评估与着法排序共用。
+   * v3.2:VAL 与 COMBO 由自对弈拟合(REVIEW-v3.1):1100 局困难自对弈、18195 个平静局面,按终局
+   * 胜负做逻辑回归(Texel 式),两轮。此前是手定的 [0, 2, 6, 12, 36, 48, 150, 170, 1600] 与
+   * [0, 0, 0, 60, 50, 0, 200, 900, 0, 150, 1400];拟合后普通对原普通 68 : 26、困难对原困难 33 : 15。
+   * 冲四(8)与五(9)不参与拟合(含冲四的局面算作战术局面,不进样本),保持原值。
+   */
+  const VAL = new Int32Array([0, 20, 8, 20, 29, 108, 169, 534, 1600, 20000]);
   /** 组合型额外加的分:组合是 C2 看不见的那一层,分值要压过单方向之和。 */
-  const COMBO = new Int32Array([0, 0, 0, 60, 50, 0, 200, 900, 0, 150, 1400, 0, 0]);
+  const COMBO = new Int32Array([0, 29, 2, 95, 130, 77, 347, 420, 29, 628, 2004, 0, 0]);
 
   function combine(p0, p1, p2, p3) {
     const n = new Uint8Array(10);
@@ -659,7 +665,7 @@
     let budget;
     if (typeof opts.nodeBudget === "number" && opts.nodeBudget > 0) budget = 0;
     else if (typeof opts.timeMs === "number") budget = opts.timeMs;
-    else if (extreme) budget = opts.think === "fast" ? 2500 : opts.think === "deep" ? 8000 : 5000;
+    else if (extreme) budget = opts.think === "fast" ? 1250 : opts.think === "deep" ? 4000 : 2500; // v3.2:5 → 2.5 秒
     else if (normal) budget = 550; // v3.1:400 → 550ms,仍在 600ms 落子节奏以内,不多等
     else if (easy) budget = 240;
     else budget = opts.think === "fast" ? 800 : opts.think === "deep" ? 3500 : 2000;
