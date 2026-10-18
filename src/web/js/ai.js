@@ -651,6 +651,9 @@
     }
     const attacks = [];
     for (let i = 0; i < cells.length; i++) {
+      // v3.2:每试一个点计一次。此前 VCF 不计数,只按节点数限的调用(e1)在这里没有预算,
+      // 18 层的连续冲四在个别局面里指数爆炸、停不下来(C2 参照引擎在 test-strength 里卡死)
+      evalTick++;
       if (timedOut(ctx)) break;
       const m = cells[i];
       board[m.r][m.c] = me;
