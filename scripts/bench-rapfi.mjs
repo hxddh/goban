@@ -61,7 +61,7 @@ function engineFor(diff) {
 const NORMAL_MS = process.env.REF ? 250 : 550;
 const TIER = {
   easy: { diff: "easy", ms: process.env.REF ? 0 : 240 }, normal: { diff: "normal", ms: NORMAL_MS },
-  hard: { diff: "hard", ms: 2000 }, ext: { diff: "extreme", ms: 5000 },
+  hard: { diff: "hard", ms: 2000 }, ext: { diff: "extreme", ms: 2500 },
 };
 
 // ── Rapfi 进程 ───────────────────────────────────────────────────────────

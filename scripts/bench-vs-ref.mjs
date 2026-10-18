@@ -57,7 +57,7 @@ const SCALE = num("SCALE", 0.25);
 const MS = { easy: 30, normal: 250, hard: 2000, ext: 5000 };
 const DIFF = { easy: "easy", normal: "normal", hard: "hard", ext: "extreme" };
 // 普档发布时限:v1.65 起 400ms(C3),v3.1 起 550ms;旧版仍按它当时的 250ms
-const MS_NEW = { easy: 240, normal: 550, hard: 2000, ext: 5000 };
+const MS_NEW = { easy: 240, normal: 550, hard: 2000, ext: 2500 };
 
 function player(E, spec, msTable) {
   // "hard@8000" = 困难档,但按 8000ms(发布口径)思考;再乘 SCALE
@@ -120,7 +120,7 @@ else {
   const OLD = loadEngines(REF);
   pairs = (process.env.TIERS || "normal,hard,ext").split(",").map((t) => [player(NEW, t, MS_NEW), player(OLD, t, MS), `新${t} vs ${REF} ${t}`]);
 }
-console.log(`开局 ${book.length} 个 × 正反 · 时限 ×${SCALE}(新:普 ${Math.round(550 * SCALE)} / 难 ${Math.round(2000 * SCALE)} / 极 ${Math.round(5000 * SCALE)} ms)`);
+console.log(`开局 ${book.length} 个 × 正反 · 时限 ×${SCALE}(新:普 ${Math.round(550 * SCALE)} / 难 ${Math.round(2000 * SCALE)} / 极 ${Math.round(2500 * SCALE)} ms)`);
 const rows = [];
 for (const [A, B, label] of pairs) {
   let pw = 0, pl = 0, pt = 0, a = 0, b = 0, d = 0, errs = 0, blackWins = 0;
