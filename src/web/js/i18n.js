@@ -226,8 +226,8 @@
       "import.ok": "导入",
       "clip.fail": "无法读取剪贴板",
       "clip.label": "剪贴板",
-      "file.readFail": "读取文件失败",
-      "file.tooBig": "文件太大（上限 640 KB）",
+      "file.readFail": "读取文件失败{why}",
+      "file.why.tooBig": "：文件太大（上限 640 KB）",
       "file.unsupported": "当前环境不支持打开文件",
       "file.dropSgfOnly": "请拖入 .sgf 棋谱文件",
 
@@ -590,8 +590,8 @@
       "import.ok": "Import",
       "clip.fail": "Could not read the clipboard",
       "clip.label": "clipboard",
-      "file.readFail": "Could not read the file",
-      "file.tooBig": "File too large (640 KB max)",
+      "file.readFail": "Could not read the file{why}",
+      "file.why.tooBig": " — it is over the 640 KB limit",
       "file.unsupported": "Opening files is not supported here",
       "file.dropSgfOnly": "Drop a .sgf record",
 

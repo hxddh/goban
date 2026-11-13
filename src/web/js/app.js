@@ -81,6 +81,10 @@
   async function downloadSgf() { return SgfIo.download(); }
 
   async function readTextFile(path) { return Host.readTextFile(path); }
+  /** 「读取文件失败」一种 toast;太大时(v3.2.1:宿主拒绝而不是截断)补一句原因。 */
+  function readFailText(e) {
+    return t("file.readFail", { why: e && Host.isTooLarge(e) ? t("file.why.tooBig") : "" });
+  }
 
   async function importSgfFromText(text, label) {
     const parsed = SgfMod.parseSgf(text);
@@ -180,19 +184,19 @@
 
   async function importSgfFromPath(path) {
     if (!path) {
-      toast(t("file.readFail"));
+      toast(readFailText());
       return;
     }
     try {
       const text = await readTextFile(path);
       if (!text || !String(text).trim()) {
-        toast(t("file.readFail"));
+        toast(readFailText());
         return;
       }
       const base = String(path).split(/[/\\]/).pop() || "sgf";
       await importSgfFromText(text, base);
     } catch (e) {
-      toast(t(Host.isTooLarge(e) ? "file.tooBig" : "file.readFail"));
+      toast(readFailText(e));
     }
   }
 
@@ -210,7 +214,7 @@
       if (!paths.length) return; // 取消了,不用说
       await importSgfFromPath(paths[0]);
     } catch (e) {
-      toast(t("file.readFail"));
+      toast(readFailText());
     }
   }
 
@@ -2719,7 +2723,7 @@
       if (!paths.length) return; // 取消了,不用说
       text = await readTextFile(paths[0]);
     } catch (e) {
-      toast(t(Host.isTooLarge(e) ? "file.tooBig" : "file.readFail"));
+      toast(readFailText(e));
       return;
     }
     // Validate BEFORE asking: no point warning about an irreversible
