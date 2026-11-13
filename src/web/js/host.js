@@ -29,20 +29,32 @@
     });
   }
 
+  /** Host refused because the file is over the 640 KB cap (v3.2.1: refused, never truncated). */
+  function isTooLarge(e) {
+    return /FileTooLarge/.test(String((e && (e.message || e.code)) || e || ""));
+  }
+
   async function readTextFile(path) {
     if (!hasZero()) throw new Error("no bridge");
     const b64 = await global.zero.invoke("goban.readTextFile", { path: path });
     return base64ToString(b64);
   }
 
+  /*
+   * v3.2.1:对话框走我们自己的宿主处理器(goban.saveDialog / openDialog),不再走 SDK 的
+   * zero.dialogs。宿主只允许读写**对话框选过、或拖进窗口**的路径 —— 走 SDK 的对话框,宿主
+   * 看不见用户选了什么,随后的读写就会被拒。
+   */
   async function saveFileDialog(options) {
-    if (!hasZero() || !global.zero.dialogs || !global.zero.dialogs.saveFile) return null;
-    return global.zero.dialogs.saveFile(options || {});
+    if (!hasZero() || typeof global.zero.invoke !== "function") return null;
+    const o = options || {};
+    return global.zero.invoke("goban.saveDialog", { title: o.title || "", defaultName: o.defaultName || "" });
   }
 
   async function openFileDialog(options) {
-    if (!hasZero() || !global.zero.dialogs || !global.zero.dialogs.openFile) return null;
-    return global.zero.dialogs.openFile(options || {});
+    if (!hasZero() || typeof global.zero.invoke !== "function") return null;
+    const o = options || {};
+    return global.zero.invoke("goban.openDialog", { title: o.title || "" });
   }
 
   async function revealPath(path) {
@@ -199,6 +211,7 @@
     bytesToBase64,
     writeTextFile,
     readTextFile,
+    isTooLarge,
     saveFileDialog,
     openFileDialog,
     revealPath,

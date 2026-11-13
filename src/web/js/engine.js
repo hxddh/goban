@@ -104,6 +104,24 @@
     }
   }
 
+  /** Is any pending request still wanted by its caller? */
+  function hasLivePending() {
+    for (const p of aiPending.values()) {
+      if (!p.isStale) continue;
+      try {
+        if (!p.isStale()) return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  /** Budget of the requests already waiting on the worker. */
+  function queuedMs() {
+    let ms = 0;
+    for (const p of aiPending.values()) ms += p.timeMs || 0;
+    return ms;
+  }
+
   function rejectAllPending(reason) {
     const pend = Array.from(aiPending.values());
     aiPending.clear();
@@ -210,6 +228,10 @@
         src = texts.join("\n;\n");
       }
       const blob = new Blob([src], { type: "text/javascript" });
+      // a re-init (after a worker error) must not leak the previous Blob URL
+      if (workerBlobUrl && typeof URL.revokeObjectURL === "function") {
+        try { URL.revokeObjectURL(workerBlobUrl); } catch (_) {}
+      }
       workerBlobUrl = URL.createObjectURL(blob);
       const w = new Worker(workerBlobUrl);
       attachWorkerHandlers(w);
@@ -267,9 +289,16 @@
         ]);
       } catch (_) {}
     }
-    // a busy worker at this point only holds STALE jobs (app flow is serial
-    // per intent) — rebuild so this request starts immediately
-    if (useWorker && workerState === "ready" && workerJobs > 0) restartWorker();
+    // A busy worker used to be assumed to hold only STALE jobs and was rebuilt
+    // on the spot. v3.2.1: that is not true while the review deepens in the
+    // background — a hint (H) killed the review's request, the review's next
+    // request killed the hint, and both came back null. Callers now say when
+    // their request stops mattering (`isStale`); we rebuild only when every
+    // job still pending is stale, otherwise queue behind the live ones (the
+    // worker runs jobs in order; review jobs are 500ms each).
+    // A request without `isStale` counts as stale — the old behaviour.
+    const isStale = opts && typeof opts.isStale === "function" ? opts.isStale : null;
+    if (useWorker && workerState === "ready" && workerJobs > 0 && !hasLivePending()) restartWorker();
     const w = useWorker && workerState === "ready" ? aiWorker : null;
     const cappedMs = Math.min(600, timeMs);
     if (w) {
@@ -282,7 +311,12 @@
           aiPending.delete(id);
           resolve(move);
         };
+        // jobs already queued ahead of this one run first: the safety net
+        // must not fire while we are merely waiting our turn
+        const aheadMs = queuedMs();
         aiPending.set(id, {
+          timeMs: timeMs,
+          isStale: isStale,
           resolve: (move) => finish(move),
           // worker died mid-request: capped main-thread fallback
           reject: () =>
@@ -319,7 +353,7 @@
           );
           restartWorker();
           finish(fallback);
-        }, timeMs + 2000);
+        }, aheadMs + timeMs + 2000);
       });
     }
     // degraded path

@@ -48,6 +48,11 @@ pub const RunOptions = struct {
             info.main_window = windows[0];
             info.windows = windows;
         }
+        // SDK 0.11.1 起 macOS 的 Web Inspector 由这个字段决定、默认关。SDK 自带的 runner 在 Debug
+        // 下打开它;我们用自己的 runner,不补这一行的话 Debug 构建也没有 Inspector。正式包保持关闭。
+        if (comptime @hasField(native_sdk.AppInfo, "webview_inspection")) {
+            info.webview_inspection = build_options.webview_inspection orelse (@import("builtin").mode == .Debug);
+        }
         // SDK 0.10 的内置更新(仅 macOS 系统宿主):app.zon 有 `.updates` 时,宿主在应用菜单里
         // 加「检查更新」,并可在启动时查一次。签名更新源由发布流程生成(见 build-macos.yml)。
         if (comptime @hasField(native_sdk.AppInfo, "update_feed_url")) {

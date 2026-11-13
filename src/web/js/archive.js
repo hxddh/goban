@@ -38,9 +38,27 @@
     }
   }
 
+  /**
+   * v3.2.1:每一手都要是棋盘上的整数坐标、不重叠 —— 与 applySnapshot 同一把尺子。
+   * 此前只看「history 是非空数组」,恢复一份带坏手(越界、null)的备份后,练习从对局库
+   * 派生题目时抛 TypeError,练习打不开。坏条目整条跳过,其余照常。
+   */
+  function validMoves(h) {
+    if (!Array.isArray(h) || h.length === 0 || h.length > 225) return false;
+    const seen = new Set();
+    for (const p of h) {
+      if (!p || typeof p !== "object") return false;
+      const r = p.r, c = p.c;
+      if (!Number.isInteger(r) || !Number.isInteger(c) || r < 0 || r > 14 || c < 0 || c > 14) return false;
+      const k = r * 15 + c;
+      if (seen.has(k)) return false;
+      seen.add(k);
+    }
+    return true;
+  }
+
   function valid(e) {
-    return !!(e && typeof e === "object" && typeof e.id === "string" &&
-      Array.isArray(e.history) && e.history.length > 0);
+    return !!(e && typeof e === "object" && typeof e.id === "string" && validMoves(e.history));
   }
 
   function persist(arr) {
@@ -98,7 +116,7 @@
     const g = arr.find((x) => x.id === id);
     if (!g) return false;
     if (patch.history) g.history = patch.history.map((p) => ({ r: p.r, c: p.c }));
-    for (const k of ["result", "endedAt", "durationMs"]) if (patch[k] !== undefined) g[k] = patch[k];
+    for (const k of ["result", "endedAt", "durationMs", "resumed"]) if (patch[k] !== undefined) g[k] = patch[k];
     return persist(arr);
   }
 
@@ -121,5 +139,5 @@
 
   function clear() { Host.storageRemove(KEY); }
 
-  global.GobanArchive = { KEY, MAX, load, add, get, update, remove, removeByEndedAt, addLine, clear };
+  global.GobanArchive = { KEY, MAX, validMoves, load, add, get, update, remove, removeByEndedAt, addLine, clear };
 })(typeof window !== "undefined" ? window : globalThis);

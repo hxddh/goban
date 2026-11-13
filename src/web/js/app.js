@@ -68,7 +68,6 @@
   }
 
   // Worker lifecycle + degraded fallback live in GobanEngine (v1.28 split).
-  function aiMoveSync(opts) { return Engine.moveSync(opts); }
   function aiMoveSyncSafe(opts) { return Engine.moveSyncSafe(opts); }
   function aiMoveAsync(opts) { return Engine.moveAsync(opts); }
   function restartWorker() { Engine.restartWorker(); }
@@ -78,12 +77,14 @@
   // rewrites the whole session, not just the file.
   function buildSgf() { return SgfIo.buildSgf(); }
   function sgfFileName() { return SgfIo.fileName(); }
-  function bytesToBase64(str) { return Host.bytesToBase64(str); }
   async function exportSgfString(sgf, name) { return SgfIo.exportString(sgf, name); }
   async function downloadSgf() { return SgfIo.download(); }
-  async function copySgfText(sgf) { return SgfIo.copyText(sgf); }
 
   async function readTextFile(path) { return Host.readTextFile(path); }
+  /** 「读取文件失败」一种 toast;太大时(v3.2.1:宿主拒绝而不是截断)补一句原因。 */
+  function readFailText(e) {
+    return t("file.readFail", { why: e && Host.isTooLarge(e) ? t("file.why.tooBig") : "" });
+  }
 
   async function importSgfFromText(text, label) {
     const parsed = SgfMod.parseSgf(text);
@@ -123,6 +124,11 @@
     }
     endRetry(false);
     hideEndCard();
+    // v3.2.1:导入的是一局新棋,与对局库里先前打开的那一局再无关系。不清这三个,
+    // 从库里打开一局没下完的、再导入棋谱续下到终局,会把导入的棋**写回**库里那一条。
+    lastArchiveId = null;
+    statsRecordedGen = -1;
+    lastStatsEndedAt = null;
     history = s.history;
     viewIndex = s.viewIndex;
     board = s.board;
@@ -178,19 +184,19 @@
 
   async function importSgfFromPath(path) {
     if (!path) {
-      toast(t("file.readFail"));
+      toast(readFailText());
       return;
     }
     try {
       const text = await readTextFile(path);
       if (!text || !String(text).trim()) {
-        toast(t("file.readFail"));
+        toast(readFailText());
         return;
       }
       const base = String(path).split(/[/\\]/).pop() || "sgf";
       await importSgfFromText(text, base);
     } catch (e) {
-      toast(t("file.readFail"));
+      toast(readFailText(e));
     }
   }
 
@@ -208,7 +214,7 @@
       if (!paths.length) return; // 取消了,不用说
       await importSgfFromPath(paths[0]);
     } catch (e) {
-      toast(t("file.readFail"));
+      toast(readFailText());
     }
   }
 
@@ -472,16 +478,18 @@
     // extreme hints would take 5s+; hard-level hints are plenty
     const hintDiff2 = hintDiff === "extreme" ? "hard" : hintDiff;
     try {
+      const stillWanted = () =>
+        gen === gameGen &&
+        (live ? histLen === history.length && isLive() : viewIndex === reqView);
       const m = await aiMoveAsync({
         board: liveBoard,
         side: side,
         difficulty: hintDiff2,
         think: thinkLevel,
         timeMs: budgetForDiff(hintDiff2),
+        isStale: () => !stillWanted(),
       });
-      const stillHere =
-        gen === gameGen &&
-        (live ? histLen === history.length && isLive() : viewIndex === reqView);
+      const stillHere = stillWanted();
       if (!stillHere) {
         // discarded late result (new game / stone placed / view moved)
       } else if (!m) {
@@ -1560,6 +1568,7 @@
       difficulty: difficulty,
       think: thinkLevel,
       timeMs: budgetForDiff(difficulty),
+      isStale: () => gen !== gameGen,
     }).then((m) => {
       if (gen !== gameGen) return;
       const spent = performance.now() - t0;
@@ -1709,7 +1718,8 @@
     }
     // v1.73(B8):从库里打开的「进行中」一局接着下完,写回原来那一条
     const prev = lastArchiveId ? Archive.get(lastArchiveId) : null;
-    const done = { history, result, endedAt: lastStatsEndedAt, durationMs: nowElapsed() };
+    // resumed:这一条是「接着下完」写回的,悔棋时退回进行中,而不是整条删掉(v3.2.1)
+    const done = { history, result, endedAt: lastStatsEndedAt, durationMs: nowElapsed(), resumed: true };
     if (prev && prev.result === "play" && Archive.update(prev.id, done)) {
       // lastArchiveId 不变
     } else lastArchiveId = Archive.add({
@@ -1767,6 +1777,9 @@
     // 收口),真走到这里说明那条约束破了 —— 那时宁可拦住,也不让引擎破规则。
     const why = forbiddenReason(board, r, c, turn);
     if (why) {
+      // v3.2.1:引擎的出口兜底只在**黑已无任何合法点**时才交回禁手点(legalizeRenju)。
+      // 此前这里拦下后没人再问引擎,电脑就不走了。黑无处可下,这局只能是和棋。
+      if (fromAi) { endAsDraw(); return; }
       toast(t("renju.blocked." + why));
       return;
     }
@@ -1803,16 +1816,7 @@
       return;
     }
     if (boardFull()) {
-      elapsedBaseMs = nowElapsed();   // 同上:先累加,再置终局
-      startedAt = Date.now();
-      result = "draw";
-      winLine = null;
-      recordGameEnd();
-      // 和局此前是三种结局里唯一无声的一种:棋盘填满,最后一颗子的落子声之后
-      // 什么都没有,你得看状态栏才知道这局已经完了。
-      playEndSound(null);
-      sync();
-      saveGame();
+      endAsDraw();
       return;
     }
     turn = opp(turn);
@@ -1838,6 +1842,20 @@
     thinkStartedAt = 0;
     restartWorker();
     return true;
+  }
+
+  /** 和棋:棋盘填满,或(v3.2.1)禁手规则下黑已无合法点。 */
+  function endAsDraw() {
+    elapsedBaseMs = nowElapsed();   // 先累加,再置终局(v1.45)
+    startedAt = Date.now();
+    result = "draw";
+    winLine = null;
+    recordGameEnd();
+    // 和局此前是三种结局里唯一无声的一种:棋盘填满,最后一颗子的落子声之后
+    // 什么都没有,你得看状态栏才知道这局已经完了。
+    playEndSound(null);
+    sync();
+    saveGame();
   }
 
   function undo() {
@@ -1882,11 +1900,16 @@
     viewIndex = history.length;
     board = boardAfter(history.length);
     if (wasRecorded) {
+      // v3.2.1:从库里打开、接着下完的那一局,终局是写回原条目的。悔棋要把它退回「进行中」
+      // —— 原来的 id、重下分支都留着;v3.2.0 按 endedAt 整条删掉,连分支一起没了。
+      const g = lastArchiveId ? Archive.get(lastArchiveId) : null;
+      const reopen = !!(g && g.resumed && endedAt && g.endedAt === endedAt);
       if (endedAt) {
         Stats.unrecordByEndedAt(endedAt);
-        Archive.removeByEndedAt(endedAt);
+        if (reopen) Archive.update(g.id, { history, result: "play", durationMs: elapsedBaseMs });
+        else Archive.removeByEndedAt(endedAt);
       }
-      lastArchiveId = null;
+      if (!reopen) lastArchiveId = null;
       statsRecordedGen = -1;
       lastStatsEndedAt = null;
     }
@@ -2699,8 +2722,8 @@
       const paths = Host.normalizePaths(files);
       if (!paths.length) return; // 取消了,不用说
       text = await readTextFile(paths[0]);
-    } catch (_) {
-      toast(t("file.readFail"));
+    } catch (e) {
+      toast(readFailText(e));
       return;
     }
     // Validate BEFORE asking: no point warning about an irreversible
@@ -2714,7 +2737,7 @@
       { ok: t("backup.confirmOk"), cancel: t("dlg.cancel") });
     if (!go) return;
     const res = Backup.restore(Host, text);
-    if (!res.ok) { toast(t("backup.badFile")); return; }
+    if (!res.ok) { toast(t(res.error === "write" ? "backup.writeFail" : "backup.badFile")); return; }
     toast(t("backup.restored", { n: res.restored }));
     // Reload rather than re-wire: every module read its key at boot, and
     // rebuilding all of that state in place is far more code — and far more

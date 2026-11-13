@@ -86,9 +86,19 @@
   function restore(store, text) {
     const chk = inspect(text);
     if (!chk.ok) return chk;
-    for (const k of KEYS) {
-      if (chk.keys.indexOf(k) >= 0) store.storageSet(k, chk.obj.data[k]);
-      else store.storageRemove(k);
+    // v3.2.1:写入会失败(配额满)。此前不看返回值,写到一半也回 ok,重载后一半旧一半新。
+    // 先记下原值;先全删(腾出空间)再写;任何一个写不进,原样放回。
+    const before = {};
+    for (const k of KEYS) before[k] = store.storageGet(k);
+    for (const k of KEYS) store.storageRemove(k);
+    let ok = true;
+    for (const k of chk.keys) {
+      if (store.storageSet(k, chk.obj.data[k]) === false) { ok = false; break; }
+    }
+    if (!ok) {
+      for (const k of KEYS) store.storageRemove(k);
+      for (const k of KEYS) if (typeof before[k] === "string") store.storageSet(k, before[k]);
+      return { ok: false, error: "write" };
     }
     return { ok: true, restored: chk.keys.length };
   }

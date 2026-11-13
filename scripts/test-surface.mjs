@@ -1280,6 +1280,51 @@ async function newGame(page) { await setup(page, {}); await page.waitForTimeout(
     JSON.stringify(Object.assign(out, { redLine })));
 }
 
+// ---- S21. v3.2.1 对局库的两处状态错 ----
+// B5:从库里打开一局没下完的、下完再悔棋 —— 退回「进行中」,原条目(连同重下分支)还在;v3.2.0 整条删掉。
+// B4:接着导入一份棋谱续下到终局 —— 写成新的一条,不覆盖库里先前打开的那一局。
+{
+  const page = await newPage();
+  const click = clicker(page);
+  const seed = [[7, 7], [0, 0], [7, 8], [0, 1], [7, 9], [0, 2]].map(([r, c]) => ({ r, c }));
+  await page.evaluate((h) => {
+    localStorage.clear();
+    localStorage.setItem("goban.v12.games", JSON.stringify([{ id: "g-play", history: h, ruleSet: "free", mode: "pvp",
+      difficulty: null, humanColor: null, result: "play", startedAt: 1, endedAt: 2, durationMs: 0,
+      lines: [{ ply: 3, moves: [{ r: 5, c: 5 }], at: 3 }] }]));
+  }, seed);
+  await page.reload({ waitUntil: "networkidle" }); await page.waitForTimeout(300);
+  const lib = () => page.evaluate(() => JSON.parse(localStorage.getItem("goban.v12.games") || "[]")
+    .map((g) => ({ id: g.id, result: g.result, n: g.history.length, lines: (g.lines || []).length })));
+  await page.evaluate(() => document.getElementById("sgf-slots").click()); await page.waitForTimeout(250);
+  await page.evaluate(() => document.querySelector("#games-list .game-open").click()); await page.waitForTimeout(400);
+  for (const [r, c] of [[7, 10], [0, 3], [7, 11]]) { await click(r, c); await page.waitForTimeout(300); }
+  const won = await lib();
+  await page.waitForTimeout(1200); // 终局卡演完
+  await page.evaluate(() => document.getElementById("board").blur());
+  await page.keyboard.press("z"); await page.waitForTimeout(400);
+  const undone = await lib();
+  // B4:库里那一局此刻又是打开着的「进行中」;导入一份只差一手成五的双人棋谱,续下到终局
+  const P = (r, c) => String.fromCharCode(97 + c) + String.fromCharCode(97 + r);
+  const mv = [[3, 3], [10, 0], [3, 4], [10, 1], [3, 5], [10, 2], [3, 6], [10, 3]];
+  const sgf = "(;GM[4]FF[4]SZ[15]" + mv.map(([r, c], i) => ";" + (i % 2 ? "W" : "B") + "[" + P(r, c) + "]").join("") + ")";
+  await page.evaluate(async (x) => { await navigator.clipboard.writeText(x); }, sgf);
+  await page.evaluate(() => document.getElementById("sgf-paste").click());
+  await page.waitForTimeout(500); await dismissConfirm(page); await page.waitForTimeout(300);
+  await page.evaluate(() => { const b = document.getElementById("sgf-continue"); if (b) b.click(); });
+  await page.waitForTimeout(200);
+  await click(3, 7); await page.waitForTimeout(500);
+  const imported = await lib();
+  const orig = imported.find((g) => g.id === "g-play");
+  const ok = won.length === 1 && won[0].result === "b" &&
+    undone.length === 1 && undone[0].id === "g-play" && undone[0].result === "play" && undone[0].lines === 1 &&
+    imported.length === 2 && !!orig && orig.result === "play" && orig.lines === 1 &&
+    imported.some((g) => g.id !== "g-play" && g.result === "b" && g.n === 9) && page.__errors.length === 0;
+  report("S21 v3.2.1 对局库:接着下完再悔棋退回进行中(分支还在);导入棋谱续下不覆盖先前打开的那一局", ok,
+    JSON.stringify({ won, undone, imported, errs: page.__errors }));
+  await page.close();
+}
+
 await browser.close();
 server.close();
 fs.rmSync(WORKER_SRC_DIR, { recursive: true, force: true });

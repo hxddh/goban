@@ -50,6 +50,7 @@ pub fn build(b: *std.Build) void {
     const debug_overlay = b.option(bool, "debug-overlay", "Enable debug overlay output") orelse false;
     const automation_enabled = b.option(bool, "automation", "Enable Native SDK automation artifacts") orelse false;
     const js_bridge_enabled = b.option(bool, "js-bridge", "Enable optional JavaScript bridge stubs") orelse false;
+    const webview_inspect = b.option(bool, "webview-inspect", "macOS Web Inspector (default: on in Debug, off otherwise; Native SDK 0.11.1+)");
     const web_engine_override = b.option(WebEngineOption, "web-engine", "Override app.zon web engine: system, chromium");
     const web_layer_override = b.option(WebLayerOption, "web-layer", "Override app.zon webview_layer: auto, include, exclude");
     const cef_dir_override = b.option([]const u8, "cef-dir", "Override CEF root directory for Chromium builds");
@@ -93,6 +94,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "debug_overlay", debug_overlay);
     options.addOption(bool, "automation", automation_enabled);
     options.addOption(bool, "js_bridge", js_bridge_enabled);
+    options.addOption(?bool, "webview_inspection", webview_inspect);
     options.addOption(bool, "web_layer", web_layer);
     const options_mod = options.createModule();
 
