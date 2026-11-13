@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- v3.2.1:「不联网」从承诺变成机制。只认应用自己的文件(zero:// 是 macOS 宿主的协议,
+       Windows 宿主在 https://*.localhost 上提供,都算 'self');引擎 worker 来自 Blob;
+       元素上的 style="" 还有几处,所以样式放行 inline。connect-src 只有自己:页面发不出任何请求。 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' zero:; script-src 'self' zero:; style-src 'self' zero: 'unsafe-inline'; img-src 'self' zero: data: blob:; font-src 'self' zero: data:; connect-src 'self' zero:; worker-src blob:; child-src blob:; media-src 'self' zero: blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
   <title data-i18n="app.name">五子棋</title>
   <link rel="stylesheet" href="styles.css" />
 </head>

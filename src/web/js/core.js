@@ -118,26 +118,42 @@
    * 本来能走的棋」那条,所以判据换成:补子之后,**过落子点的连子**恰好成五。
    * 落子点在那条五里是构造保证的,不必再验一次。 */
 
-  /** With the stone already down at (r,c): does this axis hold a four through it? */
-  function axisIsFour(board, r, c, dr, dc) {
-    for (const [rr, cc] of axisEmpties(board, r, c, dr, dc)) {
+  /**
+   * With the stone already down at (r,c): the offsets k (along dr,dc) of the
+   * empty points that would turn this axis into exactly five through (r,c).
+   */
+  function axisFivePoints(board, r, c, dr, dc) {
+    const ks = [];
+    for (let k = -4; k <= 4; k++) {
+      if (k === 0) continue;
+      const rr = r + dr * k,
+        cc = c + dc * k;
+      if (!inBounds(rr, cc) || board[rr][cc]) continue;
       board[rr][cc] = "b";
-      const five = lineLen(board, r, c, dr, dc, "b") === WIN;
+      if (lineLen(board, r, c, dr, dc, "b") === WIN) ks.push(k);
       board[rr][cc] = "";
-      if (five) return true;
     }
-    return false;
+    return ks;
+  }
+
+  /* v3.2.1:「有两个成五点」不等于活四。活四(straight four)是 `.BBBB.`:两个成五点
+   * 相隔 5 格、中间四子连成一片。`B.BBB.B` 也有两个成五点,却是同一条线上的**两个四**
+   * (双四禁手),不是活四 —— v3.2.0 及以前把它当活四,于是 `B.B.B.B` 被误判成活三
+   * (合法黑棋被拦),而同线双四又只算一个四(禁手漏判)。 */
+  function isStraightFour(ks) {
+    return ks.length === 2 && Math.abs(ks[1] - ks[0]) === 5;
+  }
+
+  /** How many fours this axis holds through (r,c): 0, 1, or 2 (same-line double four). */
+  function axisFourCount(board, r, c, dr, dc) {
+    const ks = axisFivePoints(board, r, c, dr, dc);
+    if (ks.length === 0) return 0;
+    if (isStraightFour(ks)) return 1;
+    return ks.length;
   }
 
   function axisIsOpenFour(board, r, c, dr, dc) {
-    let n = 0;
-    for (const [rr, cc] of axisEmpties(board, r, c, dr, dc)) {
-      board[rr][cc] = "b";
-      if (lineLen(board, r, c, dr, dc, "b") === WIN) n++;
-      board[rr][cc] = "";
-      if (n >= 2) return true;
-    }
-    return false;
+    return isStraightFour(axisFivePoints(board, r, c, dr, dc));
   }
 
   function axisIsOpenThree(board, r, c, dr, dc, depth) {
@@ -168,7 +184,8 @@
       let fours = 0,
         threes = 0;
       for (const [dr, dc] of DIRS) {
-        if (axisIsFour(board, r, c, dr, dc)) fours++;
+        const f = axisFourCount(board, r, c, dr, dc);
+        if (f) fours += f;
         else if (axisIsOpenThree(board, r, c, dr, dc, depth)) threes++;
       }
       if (fours >= 2) return "double4";

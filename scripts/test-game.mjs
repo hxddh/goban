@@ -729,6 +729,9 @@ const Practice = ctx.GobanPractice;
     ["长连", mk({ b: [[7, 2], [7, 3], [7, 4], [7, 6], [7, 7]] }), 7, 5, "overline"],
     ["双四", mk({ b: [[7, 4], [7, 5], [7, 6], [4, 7], [5, 7], [6, 7]] }), 7, 7, "double4"],
     ["双三", mk({ b: [[7, 5], [7, 6], [5, 7], [6, 7]] }), 7, 7, "double3"],
+    // v3.2.1:同一条线上的两个四(两个成五点不相邻成活四)也是双四 —— v3.2.0 每个方向只数一个四
+    ["同线双四 B.BBB.B", mk({ b: [[7, 3], [7, 5], [7, 7], [7, 9]] }), 7, 6, "double4"],
+    ["同线双四 BB.BB.BB", mk({ b: [[7, 2], [7, 3], [7, 6], [7, 8], [7, 9]] }), 7, 5, "double4"],
   ];
   for (const [name, bd, r, c, why] of forb) {
     assert(Core.renjuForbidden(bd, r, c) === why, "禁手:" + name + " 判为 " + why);
@@ -747,6 +750,9 @@ const Practice = ctx.GobanPractice;
     // 这一条与下面「碰不到就不算」那组,守的是同一件事:**误判会拦掉一手合法棋**。
     ["两条四都够不着", mk({ b: [[7, 0], [7, 1], [7, 2], [7, 3], [0, 7], [1, 7], [2, 7], [3, 7]] }), 7, 7],
     ["两条三都够不着", mk({ b: [[7, 1], [7, 2], [1, 7], [2, 7]] }), 7, 7],
+    // v3.2.1:`B.B.B.B` 不是活三 —— 补哪一点都成不了活四 `.BBBB.`(补中间是同线双四,
+    // 补两边是冲四)。v3.2.0 把「两个成五点」当活四,于是这一手合法棋被判成双三拦掉
+    ["假活三 B.B.B.B + 一条真活三", mk({ b: [[7, 3], [7, 7], [7, 9], [6, 5], [8, 5]] }), 7, 5],
     ["斜向两条四都够不着", mk({ b: [[0, 0], [1, 1], [2, 2], [3, 3], [0, 14], [1, 13], [2, 12], [3, 11]] }), 7, 7],
   ];
   for (const [name, bd, r, c] of okMoves) {
@@ -846,6 +852,20 @@ const Practice = ctx.GobanPractice;
       const rj = C3.aiMove({ board: board, side: "b", difficulty: "hard", timeMs: 300, vary: false, renju: true });
       assert(Core.renjuForbidden(board, rj.r, rj.c) === null && !board[rj.r][rj.c], "C3 禁手档下交出合法一手");
       assert(Ai.renjuFallbacks() === before, "C3 禁手档下不再靠出口兜底(计数器涨了 " + (Ai.renjuFallbacks() - before) + ")");
+    }
+    // v3.2.1:同线双四 `B.BBB.B` —— 自由式里它和活四一样好,C3 要它;禁手档下根上就剔掉,
+    // 不经出口兜底。(搜索内部的快速判断 blackForbidden 同版修正:棋型表把它记作 F4,
+    // 以前一个 F4 方向不交裁判。那条路径没有导出,由这一条与强度闸门间接守。)
+    {
+      const C3 = ctx.GobanAi3;
+      const sl = mkb([[7, 3], [7, 5], [7, 7], [7, 9]], [[0, 0], [0, 14], [14, 0], [14, 14]]);
+      assert(Core.renjuForbidden(sl, 7, 6) === "double4", "构造点 (7,6) 是同线双四");
+      const free = C3.aiMove({ board: sl, side: "b", difficulty: "hard", timeMs: 300, vary: false });
+      assert(free.r === 7 && free.c === 6, "C3 自由式下想要同线双四那一点(选了 " + free.r + "," + free.c + ")");
+      const before = Ai.renjuFallbacks();
+      const rj = C3.aiMove({ board: sl, side: "b", difficulty: "hard", timeMs: 300, vary: false, renju: true });
+      assert(Core.renjuForbidden(sl, rj.r, rj.c) === null && !sl[rj.r][rj.c], "C3 禁手档下不下同线双四(选了 " + rj.r + "," + rj.c + ")");
+      assert(Ai.renjuFallbacks() === before, "C3 同线双四不靠出口兜底(计数器涨了 " + (Ai.renjuFallbacks() - before) + ")");
     }
     // 白方不受约束:同一盘让白走,出口闸必须原样放行
     const wb = mkb([[8, 6], [8, 7], [6, 8], [7, 8], [0, 1]], WS);
@@ -2902,6 +2922,134 @@ const Practice = ctx.GobanPractice;
     && after1.includes('.public_key = "' + pub + '"') && after1.includes("releases/latest/download/update-macos.json")
     && !/\.updates\s*=/.test(repoZon),
     "enable-updates:写一次、不重写、坏公钥拒绝;仓库里的 app.zon 本身不带 .updates");
+}
+
+// ---------------------------------------------------------------------------
+// v3.2.1 · 引擎桥:忙的 worker 只在「在途请求都已过期」时才重建
+// 复盘后台深算与「提示」同时问引擎:v3.2.0 后来者一律重建 worker,两边互相以 null 了结。
+{
+  let made = 0;
+  function FakeWorker() {
+    made++;
+    const self = this, q = [];
+    let dead = false, busy = false;
+    const pump = () => {
+      if (busy || dead || !q.length) return;
+      busy = true;
+      const job = q.shift();
+      setTimeout(() => {
+        busy = false;
+        if (dead) return;
+        self.onmessage && self.onmessage({ data: { id: job.id, move: { r: 1, c: job.id % 15 } } });
+        pump();
+      }, 15);
+    };
+    this.postMessage = (m) => {
+      if (m.ping) { setTimeout(() => !dead && self.onmessage({ data: { pong: true, engines: true } }), 1); return; }
+      q.push(m); pump();
+    };
+    this.terminate = () => { dead = true; };
+  }
+  const ec = {
+    console, Date, performance, setTimeout, clearTimeout, Promise, Map, Array, Object, Math, Error,
+    Worker: FakeWorker, Blob: function () {}, URL: { createObjectURL: () => "blob:x" },
+    location: { search: "" },
+  };
+  ec.globalThis = ec; ec.window = ec; ec.GOBAN_WORKER_SRC = "/* fake */";
+  vm.createContext(ec);
+  vm.runInContext(fs.readFileSync(path.join(root, "src/web/js/engine.js"), "utf8"), ec, { filename: "engine.js" });
+  const E = ec.GobanEngine;
+  E.init({
+    defaults: () => ({ board: Core.emptyBoard(), humanColor: "b", difficulty: "normal", think: 0, renju: false }),
+    budgetFor: () => 20,
+    engineFor: () => ({ aiMove: () => ({ r: 0, c: 0 }) }),
+    toast: () => {},
+  });
+  await E.warmup();
+  assert(E.state() === "ready", "引擎桥:假 worker 起得来(" + E.state() + ")");
+  const req = (isStale) => E.moveAsync(Object.assign({ timeMs: 20 }, isStale ? { isStale } : {}));
+
+  // ① 两路都还要:后来者排队,不重建,两边都拿到一手
+  const m0 = made;
+  const [a, b] = await Promise.all([req(() => false), req(() => false)]);
+  assert(a && b && made === m0, "引擎桥:深算与提示同时在途时都拿到结果、worker 不重建(重建 " + (made - m0) + " 次)");
+  // ② 在途那一路已过期:照旧重建,过期的以 null 了结,新的立刻跑
+  const m1 = made;
+  const [c, d] = await Promise.all([req(() => true), req(() => false)]);
+  assert(c === null && d && made === m1 + 1, "引擎桥:在途请求已过期时重建 worker,过期的回 null");
+  // ③ 反证:不声明 isStale 的请求按旧规矩算过期
+  const m2 = made;
+  const [e, f] = await Promise.all([req(null), req(null)]);
+  assert(e === null && f && made === m2 + 1, "反证:不声明 isStale 的请求照旧被重建清掉");
+}
+
+// ---------------------------------------------------------------------------
+// v3.2.1 · SGF 解析器:真分词,不再用正则扫 B[..]
+{
+  // ① 深嵌套:此前每个 "(" 递归一层,约 6 万层爆栈(粘贴时是未处理的 rejection)
+  let deep = null, threw = false;
+  try { deep = Sgf.parseSgf("(".repeat(60000) + ";B[hh];W[hi]" + ")".repeat(60000)); } catch (_) { threw = true; }
+  assert(!threw && deep && !deep.error && deep.history.length === 2, "SGF:6 万层括号不爆栈,照常读出两手");
+  // ② B/W 前面紧挨着别的属性也是一手(此前要求前面是 ;() 或空白,这一手被悄悄丢掉)
+  const glued = Sgf.parseSgf("(;SZ[15];N[x]B[hh];W[hi])");
+  assert(!glued.error && glued.history.length === 2, "SGF:`;N[x]B[hh]` 的那一手不丢(" + (glued.error || glued.history.length) + ")");
+  const twoInNode = Sgf.parseSgf("(;SZ[15];B[hh]W[hi];B[ij])");
+  assert(!twoInNode.error && twoInNode.history.length === 3, "SGF:同一节点里的 B[..]W[..] 两手都读");
+  // ③ 属性值里的文字不是棋:人名、对局名里的 B[..] / RU[..]
+  const named = Sgf.parseSgf("(;SZ[15]PB[Alice B[aa]]GN[game RU[Renju] note];B[hh];W[hi])");
+  assert(!named.error && named.history.length === 2 && named.history[0].r === 7 && named.ruleSet === null,
+    "SGF:PB / GN 文字里的 B[..]、RU[..] 不算(" + JSON.stringify(named) + ")");
+  // ④ SZ 的矩形写法
+  assert(Sgf.parseSgf("(;SZ[19:19];B[dd])").error, "SGF:SZ[19:19] 按 19 路拒绝");
+  assert(!Sgf.parseSgf("(;SZ[15:15];B[hh])").error, "SGF:SZ[15:15] 照常读");
+  assert(Sgf.parseSgf("(;SZ[15:13];B[hh])").error, "SGF:非正方形拒绝");
+  // ⑤ 反证:老写法照旧 —— FF[3] 小写属性名、转义的 ]、变着只走第一支
+  const ff3 = Sgf.parseSgf("(;SZ[15]AddBlack[aa];Black[hh];White[hi])");
+  assert(!ff3.error && ff3.history.length === 2, "SGF:FF[3] 的 Black[..] / White[..] 读作 B / W,AddBlack 不算一手");
+  const esc = Sgf.parseSgf("(;SZ[15]C[a \\] B[cc] b];B[hh](;W[hi])(;W[aa]))");
+  assert(!esc.error && esc.history.length === 2 && esc.history[1].r === 8 && esc.history[1].c === 7, "SGF:转义的 ] 与变着照旧");
+}
+
+// v3.2.1 · 对局库:每一手都要在盘上、不重叠;坏条目跳过,不让练习崩
+{
+  const Ar = ctx.GobanArchive;
+  const store = {};
+  ctx.GobanHost.storageGet = (k) => (k in store ? store[k] : null);
+  ctx.GobanHost.storageSet = (k, v) => { store[k] = String(v); return true; };
+  ctx.GobanHost.storageRemove = (k) => { delete store[k]; };
+  store[Ar.KEY] = JSON.stringify([
+    { id: "out", history: [{ r: 20, c: 3 }] },
+    { id: "nul", history: [{ r: 7, c: 7 }, null] },
+    { id: "dup", history: [{ r: 7, c: 7 }, { r: 7, c: 7 }] },
+    { id: "flt", history: [{ r: 7.5, c: 7 }] },
+    { id: "str", history: [{ r: "7", c: 7 }] },
+    { id: "ok", history: [{ r: 7, c: 7 }, { r: 7, c: 8 }] },
+  ]);
+  const ids = Ar.load().map((g) => g.id);
+  assert(ids.length === 1 && ids[0] === "ok", "对局库:越界 / null / 重叠 / 非整数的条目都跳过(留下 " + ids.join(",") + ")");
+  Ar.clear();
+}
+
+// v3.2.1 · 备份恢复:写不进去就整个放回原样,不回 ok
+{
+  const Backup = ctx.GobanBackup;
+  const orig = { "goban.v12.stats": '[{"result":"b"}]', "goban.v12.lang": "zh", "goban.v12.save": "{}" };
+  const map = new Map(Object.entries(orig));
+  let writes = 0;
+  const store = {
+    storageGet: (k) => (map.has(k) ? map.get(k) : null),
+    // 第二次写入时「配额满」
+    storageSet: (k, v) => { writes++; if (writes === 2) return false; map.set(k, v); return true; },
+    storageRemove: (k) => { map.delete(k); },
+  };
+  const file = JSON.stringify({ format: "goban-backup", formatVersion: 1, app: "3.2.1",
+    data: { "goban.v12.stats": "[]", "goban.v12.lang": "en", "goban.v12.games": "[]" } });
+  const r = Backup.restore(store, file);
+  assert(!r.ok && r.error === "write", "备份恢复:写到一半失败时回 write,不回 ok(" + JSON.stringify(r) + ")");
+  const after = Object.fromEntries(map);
+  assert(JSON.stringify(after) === JSON.stringify(Object.fromEntries(Object.entries(orig).sort())) ||
+    Object.keys(orig).every((k) => after[k] === orig[k]) && Object.keys(after).length === Object.keys(orig).length,
+    "备份恢复:失败后原来的数据一字不差(" + JSON.stringify(after) + ")");
 }
 
 if (failed) {

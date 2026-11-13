@@ -121,67 +121,69 @@
    * 其他或缺省 → null(调用方保持当前规则)。
    */
   function ruleFromSgf(src) {
-    // 属性名前不能再有字母:否则 GRU[..]、XRU[..] 这类别的属性也会被当成规则
-    const m = src.match(/(?:^|[^A-Za-z])RU\s*\[([^\]]*)\]/i);
-    if (!m) return null;
-    const v = m[1].trim().toLowerCase();
+    for (const nd of mainlineNodes(String(src || ""))) {
+      for (const p of nd) if (p.name === "RU") return ruleFromValue(p.values[0]);
+    }
+    return null;
+  }
+
+  function ruleFromValue(raw) {
+    const v = String(raw || "").trim().toLowerCase();
     if (/^(renju|rif|连珠)/.test(v)) return "renju";
     if (/^(gomoku|free|standard|五子)/.test(v)) return "free";
     return null;
   }
 
   /**
-   * Keep only the first game's main line. Sibling variations and later games
-   * in a collection are dropped so a flat B[]/W[] scan cannot stitch branches.
+   * Main line of the first game as a list of nodes, each a list of
+   * {name, values}. v3.2.1 replaces the old regex scan, which
+   *   - recursed once per "(" (≈60k nested parens blew the stack),
+   *   - read B/W only after `;(` `)` or whitespace (`;N[x]B[ij]` lost its move),
+   *   - read B[..] / RU[..] out of free text (`PB[Alice B[hh]` made up a move).
+   * A real tokenizer, iterative: an SGF sequence's variations only ever come at
+   * its end, so the main line is "every node from the first '(' until the first
+   * ')'", entering each '(' on the way (the first variation) — no stack needed.
    */
-  function extractMainline(src) {
-    let i = 0;
-    while (i < src.length && src[i] !== "(") i++;
-    if (i >= src.length) return src;
-    let out = "";
-    function skipPropValue() {
-      i++; // past '['
-      while (i < src.length) {
-        if (src[i] === "\\") {
-          i += 2;
-          continue;
-        }
-        if (src[i] === "]") {
+  function mainlineNodes(src) {
+    const nodes = [];
+    let i = src.indexOf("(");
+    if (i < 0) i = 0; // bare ";B[..];W[..]" without a tree: read it the same way
+    else i++;
+    let node = null;
+    const n = src.length;
+    while (i < n) {
+      const c = src[i];
+      if (c === ")") break;
+      if (c === "(") { i++; continue; }
+      if (c === ";") { node = []; nodes.push(node); i++; continue; }
+      if (/[A-Za-z]/.test(c)) {
+        let j = i;
+        while (j < n && /[A-Za-z]/.test(src[j])) j++;
+        // FF[1–3] spelled ids with lowercase letters (AddBlack = AB): only capitals count
+        const name = src.slice(i, j).replace(/[a-z]/g, "");
+        i = j;
+        while (i < n && /\s/.test(src[i])) i++;
+        const values = [];
+        while (i < n && src[i] === "[") {
           i++;
-          return;
-        }
-        i++;
-      }
-    }
-    function walkTree(emit) {
-      if (src[i] !== "(") return;
-      if (emit) out += "(";
-      i++;
-      while (i < src.length) {
-        const c = src[i];
-        if (c === ";") {
-          const start = i;
-          i++;
-          while (i < src.length && src[i] !== ";" && src[i] !== "(" && src[i] !== ")") {
-            if (src[i] === "[") skipPropValue();
-            else i++;
+          let v = "";
+          while (i < n && src[i] !== "]") {
+            if (src[i] === "\\" && i + 1 < n) { v += src[i + 1]; i += 2; continue; }
+            v += src[i++];
           }
-          if (emit) out += src.slice(start, i);
-        } else if (c === "(") {
-          walkTree(emit);
-          while (i < src.length && src[i] === "(") walkTree(false);
-        } else if (c === ")") {
-          if (emit) out += ")";
-          i++;
-          return;
-        } else {
-          if (emit) out += c;
-          i++;
+          i++; // past ']' (or past the end on an unterminated value)
+          values.push(v);
+          while (i < n && /\s/.test(src[i])) i++;
         }
+        if (values.length && name) {
+          if (!node) { node = []; nodes.push(node); }
+          node.push({ name: name, values: values });
+        }
+        continue;
       }
+      i++; // whitespace / stray characters between properties
     }
-    walkTree(true);
-    return out || src;
+    return nodes;
   }
 
   /**
@@ -192,53 +194,57 @@
   function parseSgf(text) {
     if (text == null) return { history: [], error: t("sgf.err.noContent") };
     if (typeof text !== "string") return { history: [], error: t("sgf.err.invalid") };
-    let src = text.replace(/\uFEFF/g, "").replace(/\s+/g, " ").trim();
+    const src = text.replace(/﻿/g, "").trim();
     if (!src) return { history: [], error: t("sgf.err.empty") };
     if (src.length > 200000) return { history: [], error: t("sgf.err.tooBig") };
-    // Drop comment-style text properties first — their free text can contain
-    // move lookalikes such as "B[ii]" (escaped \] respected).
-    src = src.replace(/(^|[^A-Za-z])(?:GC|C)\[(?:\\[\s\S]|[^\]\\])*\]/g, "$1 ");
-    src = extractMainline(src);
-    if (!/[;\s]*[BW]\s*\[/i.test(src) && !/\(/.test(src)) {
-      return { history: [], error: t("sgf.err.notSgf") };
+    const nodes = mainlineNodes(src);
+    if (!nodes.some((nd) => nd.some((p) => p.name === "B" || p.name === "W"))) {
+      return { history: [], error: t(nodes.length ? "sgf.err.noMoves" : "sgf.err.notSgf") };
     }
-    const sz = src.match(/SZ\[(\d+)\]/i);
-    if (sz && Number(sz[1]) !== SIZE) {
-      return { history: [], error: t("sgf.err.size", { want: SIZE, got: sz[1] }) };
-    }
-    // 规则随棋谱走。此前导出写 RU[] 而导入不读,一份连珠棋谱在自由档下载入,
-    // 黑的六连会被重算成黑胜 —— 往返不能保留规则。
-    const ruleSet = ruleFromSgf(src);
+    let ruleSet = null;
+    let sizeChecked = false;
     const history = [];
     const occupied = Core.emptyBoard();
-    // Boundary required before B/W so setup props (AB[]/AW[]) and idents
-    // ending in B/W never read as moves.
-    const re = /(?:^|[;()\s])([BW])\s*\[([a-z]{0,2})\]/gi;
-    let m;
     let skipped = 0;
-    while ((m = re.exec(src))) {
-      const color = m[1].toUpperCase() === "B" ? "b" : "w";
-      const coord = m[2];
-      if (!coord) { skipped++; continue; }
-      const p = parseSgfCoord(coord.toLowerCase());
-      if (!p) {
-        return { history: [], error: t("sgf.err.coord", { raw: coord }) };
+    for (const nd of nodes) {
+      for (const p of nd) {
+        if (p.name === "SZ" && !sizeChecked) {
+          sizeChecked = true;
+          // SZ[15] or the rectangular form SZ[15:15]
+          const m = /^\s*(\d+)\s*(?::\s*(\d+)\s*)?$/.exec(p.values[0]);
+          const w = m ? Number(m[1]) : NaN, h = m && m[2] ? Number(m[2]) : w;
+          if (w !== SIZE || h !== SIZE) {
+            return { history: [], error: t("sgf.err.size", { want: SIZE, got: m ? (m[2] ? m[1] + ":" + m[2] : m[1]) : p.values[0] }) };
+          }
+          continue;
+        }
+        // 规则随棋谱走。此前导出写 RU[] 而导入不读,一份连珠棋谱在自由档下载入,
+        // 黑的六连会被重算成黑胜 —— 往返不能保留规则。
+        if (p.name === "RU") { if (ruleSet === null) ruleSet = ruleFromValue(p.values[0]); continue; }
+        if (p.name !== "B" && p.name !== "W") continue;
+        const color = p.name === "B" ? "b" : "w";
+        const coord = String(p.values[0] || "").trim();
+        if (!coord) { skipped++; continue; }
+        const p2 = /^[a-z]{2}$/i.test(coord) ? parseSgfCoord(coord.toLowerCase()) : null;
+        if (!p2) {
+          return { history: [], error: t("sgf.err.coord", { raw: coord.slice(0, 12) }) };
+        }
+        if (occupied[p2.r][p2.c]) {
+          return {
+            history: [],
+            error: t("sgf.err.overlap", { n: history.length + 1, coord: coord }),
+          };
+        }
+        const want = history.length % 2 === 0 ? "b" : "w";
+        if (color !== want) {
+          return {
+            history: [],
+            error: t("sgf.err.color", { n: history.length + 1, color: t(want === "b" ? "side.black" : "side.white") }),
+          };
+        }
+        occupied[p2.r][p2.c] = color;
+        history.push({ r: p2.r, c: p2.c });
       }
-      if (occupied[p.r][p.c]) {
-        return {
-          history: [],
-          error: t("sgf.err.overlap", { n: history.length + 1, coord: coord }),
-        };
-      }
-      const want = history.length % 2 === 0 ? "b" : "w";
-      if (color !== want) {
-        return {
-          history: [],
-          error: t("sgf.err.color", { n: history.length + 1, color: t(want === "b" ? "side.black" : "side.white") }),
-        };
-      }
-      occupied[p.r][p.c] = color;
-      history.push({ r: p.r, c: p.c });
     }
     if (!history.length) {
       return {

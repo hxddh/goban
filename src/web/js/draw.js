@@ -138,6 +138,24 @@
       draw();
     });
     _ro.observe(canvas);
+    watchPixelRatio();
+  }
+
+  /**
+   * v3.2.1:窗口拖到另一块像素比不同、CSS 尺寸相同的屏上时,元素尺寸没变,ResizeObserver
+   * 不响,位图却该换像素比 —— 棋盘一直是糊的。用 resolution 媒体查询盯住当前像素比,
+   * 一变就重量一次,再按新值重新盯。
+   */
+  function watchPixelRatio() {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(resolution: " + (window.devicePixelRatio || 1) + "dppx)");
+    const onChange = function () {
+      if (mq.removeEventListener) mq.removeEventListener("change", onChange);
+      resizeCanvas();
+      draw();
+      watchPixelRatio();
+    };
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
   }
 
   function getM() {

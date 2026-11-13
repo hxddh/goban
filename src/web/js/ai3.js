@@ -215,7 +215,8 @@
    * 黑落在这一点是不是禁手,与裁判 Core.renjuForbidden 同一个规则:
    *   成五优先 —— 某方向恰好五连就不是禁手;否则某方向六连及以上是长连。这两条按连子数直接判,
    *   不调用裁判。两个方向成四(双四)或两个方向活三(双三)才交给裁判精确判定(每次约 13.5 µs;
-   *   活三的真假要递归看,模式表看不出来)。单独一个活四不是禁手(裁判按方向数四,同线双四也只算一个)。
+   *   活三的真假要递归看,模式表看不出来)。PAT 把「同线双四」(`B.BBB.B`)也记作 F4,而它是禁手
+   *   (v3.2.1 起裁判按 RIF 数成两个四),所以只要有一个方向是 F4 也交给裁判:真活四在那里回 null。
    */
   function blackForbidden(cell, a0, a1, a2, a3) {
     let five = false, over = false;
@@ -234,7 +235,8 @@
     }
     const fours = (a0 === B4 || a0 === F4) + (a1 === B4 || a1 === F4) + (a2 === B4 || a2 === F4) + (a3 === B4 || a3 === F4);
     const threes = (a0 === F3) + (a1 === F3) + (a2 === F3) + (a3 === F3);
-    if (fours < 2 && threes < 2) return false;
+    const f4 = a0 === F4 || a1 === F4 || a2 === F4 || a3 === F4;
+    if (fours < 2 && threes < 2 && !f4) return false;
     return !!Core.renjuForbidden(rb, (cell / SZ) | 0, cell % SZ);
   }
   function refreshDir(cell, d) {

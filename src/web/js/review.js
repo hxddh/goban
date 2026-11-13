@@ -176,11 +176,11 @@
         const played = history[b.i - 1];
         let best = null;
         try {
-          best = await deps.aiMoveAsync({ board: pre, side: b.color, difficulty: difficulty, timeMs: DEEPEN_MS });
+          best = await deps.aiMoveAsync({ board: pre, side: b.color, difficulty: difficulty, timeMs: DEEPEN_MS, isStale: () => gen !== deepenGen });
         } catch (_) { best = null; }
         if (gen !== deepenGen) return d;
-        // null 不是「引擎也这么走」:另一路引擎请求(提示、单手分析)会重建 worker,
-        // 把这里悬着的请求以 null 了结。当作没问到,留在原档,下次打开复盘再问。
+        // null 不是「引擎也这么走」:worker 出错或被重建(v3.2.1 起提示不再重建它,
+        // 只排在这条后面)时悬着的请求以 null 了结。当作没问到,留在原档,下次打开复盘再问。
         if (!best) { unresolved++; done++; onProgress(done, soft.length); continue; }
         b.asked = true;
         if (b.tier === "soft") {
@@ -198,7 +198,7 @@
               const after = pre.map((row) => row.slice());
               after[played.r][played.c] = b.color;
               try {
-                const reply = await deps.aiMoveAsync({ board: after, side: b.color === "b" ? "w" : "b", difficulty: difficulty, timeMs: DEEPEN_MS });
+                const reply = await deps.aiMoveAsync({ board: after, side: b.color === "b" ? "w" : "b", difficulty: difficulty, timeMs: DEEPEN_MS, isStale: () => gen !== deepenGen });
                 if (gen !== deepenGen) return d;
                 b.punish = reply || null;
               } catch (_) { b.punish = null; }

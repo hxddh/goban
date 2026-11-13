@@ -1,6 +1,20 @@
-# Goban 路线图 — v3.2.0(本版) · 后续评估
+# Goban 路线图 — v3.2.1(本版) · 后续评估
 
-## v3.2.0 · 本版内容 —— 看得准
+## v3.2.1 · 本版内容 —— 判得对
+
+照 `docs/REVIEW-v3.2.md`。详见 `.github/release-notes/v3.2.1.md`。决定:正确性全做;SDK 不锁版本;安全三项要;Zig 等 SDK 支持 0.17;Node 26 / macos-26 / Windows arm64 暂不做。
+
+| 项 | 本版 | 实测 / 闸门 |
+|---|---|---|
+| 禁手 | 活四只认 `.●●●●.`;同线双四是双四 | `●.●.●.●` 不再误判双三;`●.●●●.●`、`●●.●●.●●` 判双四(test-game,v3.2.0 上失败) |
+| 文件 | 上限 256 KB 截断 → 640 KB 明说;只读写对话框选过 / 拖入的路径 | Zig 测试;smoke 断言 PathNotGranted |
+| 安全 | 正式包不信任开发源;CSP | Zig 测试(ReleaseFast 下没有 5173) |
+| SDK 0.11.1 | `webview_inspection`:Debug 开、正式包关 | 0.11.0 / 0.11.1 都编得过 |
+| 对局库 / 备份 / SGF / 引擎桥 | B3–B9 | test-game 新闸门 + test-surface S21 |
+
+---
+
+## v3.2.0 · 上一版内容 —— 看得准
 
 照 `docs/REVIEW-v3.1.md`。详见 `.github/release-notes/v3.2.0.md`。决定:评估权重改用自对弈拟合值;极限 5 → 2.5 秒。
 

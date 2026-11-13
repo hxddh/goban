@@ -104,19 +104,21 @@ jobs:
           echo "$out" | grep -q '"code":"permission_denied"' \
             || { echo "::error::未登记的命令没有被策略拒绝：$out"; exit 1; }
 
-      # 应用自己的处理器。这一条是全套回归里唯一能碰到它的地方:写一个临时文件、
-      # 读回来、比对内容,三步都过才算桥真的通。
-      - name: 桥往返（goban.writeTextFile → readTextFile）
+      # 应用自己的处理器。v3.2.1 起它们只读写「用户在对话框里选过、或拖进窗口」的路径;
+      # 自动化够不着对话框,所以这里断言反面:网页随手给一个路径,宿主拒绝,文件不出现。
+      # (此前这一步是写 → 读往返,证明的恰恰是「任意路径都能写」。)
+      - name: 桥拒绝没选过的路径（goban.writeTextFile / readTextFile）
         run: |
           TMP="$RUNNER_TEMP/goban-smoke.txt"
+          rm -f "$TMP"
           B64=$(printf 'goban smoke %s' "$GITHUB_SHA" | base64)
-          native automate bridge "{\"id\":\"w\",\"command\":\"goban.writeTextFile\",\"payload\":{\"path\":\"$TMP\",\"b64\":\"$B64\"}}"
-          test -f "$TMP" || { echo "::error::桥没有把文件写出来"; exit 1; }
-          echo "写出的内容: $(cat "$TMP")"
-          grep -q "$GITHUB_SHA" "$TMP" || { echo "::error::写出的内容不对"; exit 1; }
-          out=$(native automate bridge "{\"id\":\"r\",\"command\":\"goban.readTextFile\",\"payload\":{\"path\":\"$TMP\"}}")
-          echo "$out"
-          echo "$out" | grep -q '"ok":true' || { echo "::error::读回失败"; exit 1; }
+          w=$(native automate bridge "{\"id\":\"w\",\"command\":\"goban.writeTextFile\",\"payload\":{\"path\":\"$TMP\",\"b64\":\"$B64\"}}")
+          echo "$w"
+          echo "$w" | grep -q 'PathNotGranted' || { echo "::error::没选过的路径没有被拒：$w"; exit 1; }
+          test ! -e "$TMP" || { echo "::error::被拒的写入仍然写出了文件"; exit 1; }
+          r=$(native automate bridge "{\"id\":\"r\",\"command\":\"goban.readTextFile\",\"payload\":{\"path\":\"/etc/hosts\"}}")
+          echo "$r"
+          echo "$r" | grep -q 'PathNotGranted' || { echo "::error::没选过的路径可以读：$r"; exit 1; }
 
       # 快照里的这两个计数是「有没有悄悄出事」的唯一出口:handler 报错不再让应用
       # 退出,只留在这里。
